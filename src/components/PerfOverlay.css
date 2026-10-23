@@ -1,0 +1,60 @@
+.perf-overlay {
+  position: fixed;
+  left: calc(var(--size-activitybar) + var(--space-2));
+  bottom: calc(var(--size-statusbar) + var(--space-2));
+  z-index: 15;
+  max-height: 70vh;
+  overflow: auto;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--color-widget-border);
+  border-radius: var(--radius-control);
+  background: var(--color-widget-background);
+  box-shadow: 0 4px 16px rgb(0 0 0 / 0.25);
+  font-family: var(--font-mono);
+  font-size: var(--font-size-ui-small);
+  user-select: text;
+}
+
+.perf-overlay__header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: var(--space-1);
+  font-family: var(--font-ui);
+  font-weight: 600;
+}
+
+.perf-overlay__close {
+  border: none;
+  background: none;
+  color: var(--color-text-muted);
+  font-size: 16px;
+  cursor: pointer;
+}
+
+.perf-overlay__table {
+  border-collapse: collapse;
+}
+
+.perf-overlay__table th {
+  padding: var(--space-2) var(--space-2) 2px 0;
+  color: var(--color-text-muted);
+  font-weight: 600;
+  text-align: right;
+}
+
+.perf-overlay__table th:first-child,
+.perf-overlay__table td:first-child {
+  text-align: left;
+}
+
+.perf-overlay__table td {
+  padding: 1px var(--space-2) 1px 0;
+  text-align: right;
+  white-space: nowrap;
+}
+
+.perf-overlay__memory {
+  margin: var(--space-2) 0 0;
+  color: var(--color-text-muted);
+}

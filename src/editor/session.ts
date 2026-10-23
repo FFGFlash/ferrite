@@ -4,26 +4,44 @@
  *
  * At most one request is in flight. Operations issued meanwhile are queued
  * and sent together as one batch, so fast typing costs few round trips and
- * never reorders. Every response carries the latest viewport's lines, so a
- * scroll during an edit needs no extra request.
+ * never reorders. Each request says which lines the session already holds,
+ * so the backend sends only the lines it is missing (see `lineCache.ts`).
  */
-import type { ClipboardAction, EditorOp, EditorView, SearchQuery, Viewport } from "../ipc/editor";
+import type {
+  ClipboardAction,
+  EditorOp,
+  EditorView,
+  KnownLines,
+  SearchQuery,
+  Viewport,
+  WireView,
+} from "../ipc/editor";
 import * as ipc from "../ipc/editor";
+import { log } from "../ipc";
+import { recordCount, recordTiming } from "../state/perf";
+import { applyUpdate, knownLines, type LineCache } from "./lineCache";
 
 export interface EditorTransport {
   apply(
     id: number,
     ops: EditorOp[],
     viewport: Viewport,
+    known: KnownLines | null,
     search: SearchQuery | null,
-  ): Promise<EditorView>;
-  view(id: number, viewport: Viewport, search: SearchQuery | null): Promise<EditorView>;
+  ): Promise<WireView>;
+  view(
+    id: number,
+    viewport: Viewport,
+    known: KnownLines | null,
+    search: SearchQuery | null,
+  ): Promise<WireView>;
   clipboard(
     id: number,
     action: ClipboardAction,
     viewport: Viewport,
+    known: KnownLines | null,
     search: SearchQuery | null,
-  ): Promise<EditorView>;
+  ): Promise<WireView>;
 }
 
 export const ipcTransport: EditorTransport = {
@@ -38,6 +56,7 @@ export class EditorSession {
   private readonly queue: Job[] = [];
   private viewport: Viewport;
   private search: SearchQuery | null = null;
+  private cache: LineCache | null = null;
   private viewportStale = true;
   private busy = false;
   private disposed = false;
@@ -132,22 +151,26 @@ export class EditorSession {
       return;
     }
     const { viewport, search } = this;
+    const known = knownLines(this.cache);
     this.viewportStale = false;
     this.busy = true;
+    const sent = performance.now();
     const request = !job
-      ? this.transport.view(this.documentId, viewport, search)
+      ? this.transport.view(this.documentId, viewport, known, search)
       : job.kind === "ops"
-        ? this.transport.apply(this.documentId, job.ops, viewport, search)
-        : this.transport.clipboard(this.documentId, job.action, viewport, search);
+        ? this.transport.apply(this.documentId, job.ops, viewport, known, search)
+        : this.transport.clipboard(this.documentId, job.action, viewport, known, search);
     request
-      .then((view) => {
+      .then((wire) => {
+        recordTiming("ipc.roundTrip", performance.now() - sent);
         if (!this.disposed) {
-          this.onView(view);
+          this.receive(wire);
         }
       })
       .catch((error: unknown) => {
         if (!this.disposed) {
           // Resynchronize with the backend's state after a failure.
+          this.cache = null;
           this.viewportStale = true;
           this.onError(error);
         }
@@ -156,6 +179,23 @@ export class EditorSession {
         this.busy = false;
         this.pump();
       });
+  }
+
+  private receive(wire: WireView): void {
+    recordCount(
+      "lines.received",
+      wire.lines.chunks.reduce((sum, chunk) => sum + chunk.lines.length, 0),
+    );
+    const cache = applyUpdate(this.cache, wire);
+    if (!cache) {
+      // Should not happen; recover by asking for every line again.
+      log("warn", `Editor ${this.documentId}: line update did not apply; refetching`);
+      this.cache = null;
+      this.viewportStale = true;
+      return;
+    }
+    this.cache = cache;
+    this.onView({ ...wire, lines: cache.lines });
   }
 
   private resolveIdle(): void {

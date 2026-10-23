@@ -10,7 +10,14 @@ import {
   type KeyboardEvent,
   type MouseEvent as ReactMouseEvent,
 } from "react";
-import type { EditorOp, EditorView as View, Position, SearchQuery, Viewport } from "../ipc/editor";
+import type {
+  DisplayLine,
+  EditorOp,
+  EditorView as View,
+  Position,
+  SearchQuery,
+  Viewport,
+} from "../ipc/editor";
 import { appearance } from "../state/appearance";
 import {
   clearPendingSelection,
@@ -20,6 +27,7 @@ import {
 } from "../state/documents";
 import { editorStatus } from "../state/editorStatus";
 import { reportError } from "../state/notifications";
+import { notifyPainted, recordTiming } from "../state/perf";
 import { useStore } from "../state/store";
 import { activeEditor, type EditorController } from "./activeEditor";
 import { FindWidget, type FindState } from "./FindWidget";
@@ -64,7 +72,6 @@ export function EditorView({ documentId, title, transport = ipcTransport }: Edit
   const composingRef = useRef(false);
   const revealRef = useRef(false);
   const restoreScrollRef = useRef(scrollPositions.get(documentId) ?? null);
-  const frameRef = useRef(0);
 
   const { lineHeight } = useStore(appearance);
   const lineHeightRef = useRef(lineHeight);
@@ -75,9 +82,13 @@ export function EditorView({ documentId, title, transport = ipcTransport }: Edit
   const [find, setFind] = useState<FindState | null>(null);
   viewRef.current = view;
   findRef.current = find;
+  /** When the view being rendered arrived, and when the oldest unpainted input happened. */
+  const receivedAtRef = useRef(0);
+  const inputStartRef = useRef<number | null>(null);
 
   const dispatch = (op: EditorOp) => {
     revealRef.current = true;
+    inputStartRef.current ??= performance.now();
     sessionRef.current?.dispatch(op);
   };
 
@@ -90,6 +101,7 @@ export function EditorView({ documentId, title, transport = ipcTransport }: Edit
       documentId,
       viewportFor(scrollRef.current, lineHeightRef.current),
       (next) => {
+        receivedAtRef.current = performance.now();
         setView(next);
         if (pending) {
           clearPendingSelection(documentId, pending);
@@ -115,7 +127,6 @@ export function EditorView({ documentId, title, transport = ipcTransport }: Edit
       unregister();
       session.dispose();
       sessionRef.current = null;
-      cancelAnimationFrame(frameRef.current);
       editorStatus.set(null);
     };
   }, [documentId, transport]);
@@ -130,6 +141,12 @@ export function EditorView({ documentId, title, transport = ipcTransport }: Edit
       refresh: () => sessionRef.current?.refresh(),
       focus: () => inputRef.current?.focus(),
       lineCount: () => viewRef.current?.lineCount ?? 0,
+      scrollToLine: (line) => {
+        const scroller = scrollRef.current;
+        if (scroller) {
+          scroller.scrollTop = line * lineHeightRef.current;
+        }
+      },
     };
     activeEditor.set(controller);
     return () => {
@@ -177,6 +194,20 @@ export function EditorView({ documentId, title, transport = ipcTransport }: Edit
       lineHeight,
     );
     setOverlay(measured);
+    recordTiming("editor.render", performance.now() - receivedAtRef.current);
+    const painted = {
+      documentId,
+      version: view.version,
+      startLine: view.startLine,
+      endLine: view.endLine,
+    };
+    const frame = requestAnimationFrame(() => {
+      if (inputStartRef.current !== null) {
+        recordTiming("editor.inputToPaint", performance.now() - inputStartRef.current);
+        inputStartRef.current = null;
+      }
+      notifyPainted(painted);
+    });
     const saved = restoreScrollRef.current;
     if (saved) {
       restoreScrollRef.current = null;
@@ -193,7 +224,8 @@ export function EditorView({ documentId, title, transport = ipcTransport }: Edit
         gutterRef.current?.offsetWidth ?? 0,
       );
     }
-  }, [view, lineHeight]);
+    return () => cancelAnimationFrame(frame);
+  }, [view, lineHeight, documentId]);
 
   const primarySelection = () => viewRef.current?.selections.find((s) => s.primary);
 
@@ -202,7 +234,7 @@ export function EditorView({ documentId, title, transport = ipcTransport }: Edit
     const primary = primarySelection();
     let prefill: string | null = null;
     if (current && primary && primary.anchor.line === primary.head.line) {
-      const text = current.lines[primary.head.line - current.startLine];
+      const text = current.lines[primary.head.line - current.startLine]?.text;
       const from = Math.min(primary.anchor.column, primary.head.column);
       const to = Math.max(primary.anchor.column, primary.head.column);
       if (text !== undefined && to > from) {
@@ -254,17 +286,14 @@ export function EditorView({ documentId, title, transport = ipcTransport }: Edit
     inputRef.current?.focus();
   };
 
+  // Scroll events already arrive at most once per frame; requesting lines
+  // right away (instead of on the next animation frame) saves a frame per
+  // page of scrolling. The session ignores repeated identical viewports.
   const onScroll = () => {
-    if (frameRef.current) {
-      return;
+    const scroller = scrollRef.current;
+    if (scroller && !covers(viewRef.current, scroller, lineHeight)) {
+      sessionRef.current?.setViewport(viewportFor(scroller, lineHeight));
     }
-    frameRef.current = requestAnimationFrame(() => {
-      frameRef.current = 0;
-      const scroller = scrollRef.current;
-      if (scroller && !covers(viewRef.current, scroller, lineHeight)) {
-        sessionRef.current?.setViewport(viewportFor(scroller, lineHeight));
-      }
-    });
   };
 
   const onKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
@@ -446,8 +475,8 @@ export function EditorView({ documentId, title, transport = ipcTransport }: Edit
                 ))}
               </div>
               <div className="editor-view__lines" ref={linesRef}>
-                {view?.lines.map((text, index) => (
-                  <Line key={startLine + index} text={text} />
+                {view?.lines.map((line, index) => (
+                  <Line key={startLine + index} line={line} />
                 ))}
               </div>
               <div className="editor-view__carets" aria-hidden="true">
@@ -492,8 +521,22 @@ function earlier(a: Position, b: Position): Position {
   return a.line < b.line || (a.line === b.line && a.column <= b.column) ? a : b;
 }
 
-const Line = memo(function Line({ text }: { text: string }) {
-  return <div className="editor-view__line">{text}</div>;
+const Line = memo(function Line({ line }: { line: DisplayLine }) {
+  if (line.fullLength === null) {
+    return <div className="editor-view__line">{line.text}</div>;
+  }
+  // A very long line shortened for display; the document keeps all of it.
+  return (
+    <div className="editor-view__line">
+      {line.text}
+      <span
+        className="editor-view__cut"
+        title={`Line shortened for display (${line.fullLength.toLocaleString()} characters)`}
+      >
+        …
+      </span>
+    </div>
+  );
 });
 
 function visibleRange(scroller: HTMLElement, lineHeight: number): [number, number] {

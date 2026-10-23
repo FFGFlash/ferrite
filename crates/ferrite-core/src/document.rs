@@ -28,6 +28,10 @@ impl fmt::Display for DocumentId {
   }
 }
 
+/// How far into a line visual columns are computed exactly (grapheme by
+/// grapheme, with tab stops). Past this they count characters.
+pub const EXACT_COLUMN_BYTES: usize = 4096;
+
 #[derive(Debug, Clone)]
 pub struct EditorConfig {
   pub tab_size: usize,
@@ -247,9 +251,15 @@ impl Document {
 
   /// The visual column of `offset`: grapheme clusters since the start of the
   /// line, with tabs advancing to the next tab stop.
+  ///
+  /// Beyond [`EXACT_COLUMN_BYTES`] into a line, columns are approximated by
+  /// counting characters, so cursor work on very long lines stays O(log n).
   pub fn visual_column(&self, offset: usize) -> usize {
     let mut position = self.buffer.line_start(self.buffer.line_of(offset));
     let offset = offset.min(self.buffer.len());
+    if offset - position > EXACT_COLUMN_BYTES {
+      return self.buffer.char_count(position..offset);
+    }
     let mut column = 0;
     while position < offset {
       column = self.advance_column(column, position);
@@ -262,6 +272,9 @@ impl Document {
   pub(crate) fn offset_at_visual_column(&self, line: usize, goal: usize) -> usize {
     let mut position = self.buffer.line_start(line);
     let end = self.buffer.line_end(line);
+    if goal > EXACT_COLUMN_BYTES {
+      return self.buffer.offset_after_chars(position, goal, end);
+    }
     let mut column = 0;
     while position < end {
       let next_column = self.advance_column(column, position);
@@ -307,6 +320,20 @@ fn common_affixes(a: &str, b: &str) -> (usize, usize) {
 #[cfg(test)]
 mod tests {
   use super::*;
+
+  #[test]
+  fn columns_on_very_long_lines_count_characters() {
+    let long = format!("	{}", "x".repeat(EXACT_COLUMN_BYTES * 2));
+    let document = Document::new(DocumentId(1), &long, None, 0, &EditorConfig::default());
+    assert_eq!(
+      document.visual_column(1),
+      4,
+      "short distances are exact (tab stop)"
+    );
+    let far = EXACT_COLUMN_BYTES + 100;
+    assert_eq!(document.visual_column(far), far);
+    assert_eq!(document.offset_at_visual_column(0, far), far);
+  }
 
   #[test]
   fn common_affixes_respect_character_boundaries() {

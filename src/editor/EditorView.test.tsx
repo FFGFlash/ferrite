@@ -1,18 +1,20 @@
 import { act, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { EditorOp, EditorView as View, Viewport } from "../ipc/editor";
+import type { EditorOp, Viewport, WireView as View } from "../ipc/editor";
 import { editorStatus } from "../state/editorStatus";
 import { EditorView } from "./EditorView";
 import type { EditorTransport } from "./session";
 
+/** A full (non-incremental) view of `lines`. */
 function makeView(lines: string[], overrides: Partial<View> = {}): View {
   return {
     documentId: 7,
     version: 1,
     lineCount: lines.length,
     startLine: 0,
-    lines,
+    endLine: lines.length,
+    lines: { base: null, splices: [], chunks: [{ start: 0, lines }] },
     selections: [{ anchor: { line: 0, column: 0 }, head: { line: 0, column: 0 }, primary: true }],
     selectionCount: 1,
     primary: { position: { line: 0, column: 0 }, visualColumn: 0 },
@@ -57,7 +59,12 @@ describe("EditorView", () => {
     await renderEditor(transport);
     expect(screen.getByText("fn main() {")).toBeInTheDocument();
     expect(screen.getByText("2")).toBeInTheDocument();
-    expect(transport.view).toHaveBeenCalledWith(7, expect.objectContaining({ startLine: 0 }), null);
+    expect(transport.view).toHaveBeenCalledWith(
+      7,
+      expect.objectContaining({ startLine: 0 }),
+      null,
+      null,
+    );
   });
 
   it("sends typed text and keys as operations and renders the result", async () => {

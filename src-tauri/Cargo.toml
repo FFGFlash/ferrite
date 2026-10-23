@@ -19,8 +19,10 @@ tauri-build = { workspace = true }
 
 [dependencies]
 ferrite-core = { workspace = true }
+ferrite-tasks = { workspace = true }
 ferrite-text = { workspace = true }
 ferrite-workspace = { workspace = true }
+memory-stats = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 tauri = { workspace = true }

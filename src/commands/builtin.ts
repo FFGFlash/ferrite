@@ -1,5 +1,7 @@
 /** The workbench's built-in commands and their default keybindings. */
 import { openPalette } from "../components/paletteState";
+import { togglePerfOverlay } from "../components/PerfOverlay";
+import { resetPerf } from "../state/perf";
 import { activeEditor } from "../editor/activeEditor";
 import {
   activateRelative,
@@ -204,6 +206,18 @@ export const builtinCommands: Command[] = [
     title: "Open Settings (TOML)",
     keybinding: "mod+,",
     run: async () => openPath(await settingsFilePath()),
+  },
+  {
+    id: "developer.togglePerformance",
+    category: "Developer",
+    title: "Toggle Performance Overlay",
+    run: togglePerfOverlay,
+  },
+  {
+    id: "developer.resetPerformance",
+    category: "Developer",
+    title: "Reset Frontend Performance Counters",
+    run: resetPerf,
   },
   {
     id: "preferences.themeDark",

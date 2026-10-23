@@ -8,7 +8,7 @@
 
 use std::path::Path;
 
-use ferrite_core::{CoreError, DocumentId, EditorOp};
+use ferrite_core::{CoreError, Document, DocumentId, EditorOp};
 use ferrite_text::SearchQuery;
 use ferrite_workspace::{FileError, load_text_file, save_text_file};
 use serde::Deserialize;
@@ -17,11 +17,13 @@ use tauri_plugin_clipboard_manager::ClipboardExt;
 
 use super::EditorState;
 use super::protocol::{
-  DocumentSummary, EditorView, MAX_OPS_PER_BATCH, OpDto, SearchQueryDto, Viewport,
+  DocumentSummary, EditorView, KnownDto, MAX_OPS_PER_BATCH, OpDto, SearchQueryDto, SearchView,
+  Viewport,
 };
 use crate::dialogs::{self, UnsavedChoice};
 use crate::error::CommandError;
 use crate::paths;
+use crate::perf::Perf;
 use crate::{settings, ui_state};
 
 #[tauri::command]
@@ -95,37 +97,70 @@ pub async fn document_close(window: WebviewWindow, id: u64) -> Result<bool, Comm
       UnsavedChoice::Cancel => return Ok(false),
     }
   }
-  window.state::<EditorState>().lock().close(id)?;
+  let state = window.state::<EditorState>();
+  state.lock().close(id)?;
+  state.counts.forget(id);
   tracing::info!(document = %id, "closed document");
   ui_state::record_open_files(window.app_handle());
   Ok(true)
 }
 
-/// The view for `viewport`. With `search`, the view includes find matches.
+/// Builds a view, including find matches when `search` is given. Match
+/// counts for large documents are scheduled in the background.
+fn build_view(
+  app: &AppHandle,
+  document: &Document,
+  viewport: Viewport,
+  known: Option<KnownDto>,
+  search: Option<SearchQueryDto>,
+) -> EditorView {
+  let counts = &app.state::<EditorState>().counts;
+  EditorView::of(document, viewport, known, |start, end| {
+    let query = SearchQuery::from(search?);
+    let counted = counts.get(document.id());
+    let (view, needs_count) = SearchView::build(document, &query, start, end, counted.as_deref());
+    if needs_count {
+      counts.schedule(app, document, &query);
+    }
+    Some(view)
+  })
+}
+
+/// The view for `viewport`. `known` describes the lines the client already
+/// holds, so only missing lines are sent. With `search`, the view includes
+/// find matches.
 #[tauri::command]
 pub fn editor_view(
+  app: AppHandle,
   state: State<'_, EditorState>,
+  perf: State<'_, Perf>,
   id: u64,
   viewport: Viewport,
+  known: Option<KnownDto>,
   search: Option<SearchQueryDto>,
 ) -> Result<EditorView, CommandError> {
-  let search = search.map(SearchQuery::from);
+  let _timer = perf.metrics.time("editor.view");
   let editor = state.lock();
   let document = editor.document(DocumentId::from_raw(id))?;
-  Ok(EditorView::of(document, search.as_ref(), viewport))
+  Ok(build_view(&app, document, viewport, known, search))
 }
 
 /// Applies a batch of operations in order and returns the resulting view.
 /// Find operations with an invalid pattern are skipped; the view's search
 /// section reports the problem.
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 pub fn editor_apply(
+  app: AppHandle,
   state: State<'_, EditorState>,
+  perf: State<'_, Perf>,
   id: u64,
   ops: Vec<OpDto>,
   viewport: Viewport,
+  known: Option<KnownDto>,
   search: Option<SearchQueryDto>,
 ) -> Result<EditorView, CommandError> {
+  let _timer = perf.metrics.time("editor.apply");
   if ops.len() > MAX_OPS_PER_BATCH {
     return Err(CommandError::new(
       "tooManyOps",
@@ -141,8 +176,7 @@ pub fn editor_apply(
       Err(error) => return Err(error.into()),
     }
   }
-  let search = search.map(SearchQuery::from);
-  Ok(EditorView::of(document, search.as_ref(), viewport))
+  Ok(build_view(&app, document, viewport, known, search))
 }
 
 #[derive(Debug, Clone, Copy, Deserialize)]
@@ -161,6 +195,7 @@ pub fn editor_clipboard(
   id: u64,
   action: ClipboardAction,
   viewport: Viewport,
+  known: Option<KnownDto>,
   search: Option<SearchQueryDto>,
 ) -> Result<EditorView, CommandError> {
   let mut editor = state.lock();
@@ -174,8 +209,7 @@ pub fn editor_clipboard(
       document.apply(EditorOp::DeleteSelection)?;
     }
   }
-  let search = search.map(SearchQuery::from);
-  Ok(EditorView::of(document, search.as_ref(), viewport))
+  Ok(build_view(&app, document, viewport, known, search))
 }
 
 /// Asks whether to save unsaved documents before the window closes, saving
@@ -220,7 +254,11 @@ async fn open_path(app: &AppHandle, path: &Path) -> Result<DocumentSummary, Comm
   }
 
   let to_load = path.clone();
+  let started = std::time::Instant::now();
   let loaded = blocking(move || load_text_file(&to_load)).await??;
+  app
+    .state::<Perf>()
+    .record("document.load", started.elapsed());
 
   let mut editor = state.lock();
   // Another request may have opened the same file while this one was loading.
@@ -291,7 +329,13 @@ async fn save(
       point.has_bom,
       expected.clone(),
     );
-    match blocking(move || save_text_file(&target, &snapshot, has_bom, check.as_ref())).await? {
+    let started = std::time::Instant::now();
+    let result =
+      blocking(move || save_text_file(&target, &snapshot, has_bom, check.as_ref())).await?;
+    window
+      .state::<Perf>()
+      .record("document.save", started.elapsed());
+    match result {
       Ok(stamp) => break stamp,
       Err(FileError::ModifiedOnDisk { .. }) if expected.is_some() => {
         tracing::warn!(document = %id, path = %path.display(), "file changed on disk before save");

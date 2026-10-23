@@ -1,14 +1,16 @@
 import { describe, expect, it, vi } from "vitest";
-import type { EditorOp, EditorView, Viewport } from "../ipc/editor";
+import type { EditorOp, Viewport, WireView } from "../ipc/editor";
 import { EditorSession, type EditorTransport } from "./session";
 
-function view(version: number, viewport: Viewport): EditorView {
+/** A view of no lines (the tests here are about request flow, not text). */
+function view(version: number, viewport: Viewport): WireView {
   return {
     documentId: 1,
     version,
     lineCount: 100,
     startLine: viewport.startLine,
-    lines: [],
+    endLine: viewport.startLine,
+    lines: { base: null, splices: [], chunks: [] },
     selections: [],
     selectionCount: 1,
     primary: { position: { line: 0, column: 0 }, visualColumn: 0 },
@@ -24,7 +26,7 @@ function controlledTransport() {
   let version = 0;
   const respond = (kind: string, viewport: Viewport, ops?: EditorOp[]) => {
     calls.push({ kind, viewport, ...(ops ? { ops } : {}) });
-    return new Promise<EditorView>((resolve) => {
+    return new Promise<WireView>((resolve) => {
       resolvers.push(() => resolve(view(++version, viewport)));
     });
   };
@@ -164,10 +166,65 @@ describe("EditorSession", () => {
     await next();
     session.dispatch(insert("a"));
     await next();
-    expect(apply).toHaveBeenCalledWith(1, [insert("a")], expect.anything(), search);
+    expect(apply).toHaveBeenCalledWith(
+      1,
+      [insert("a")],
+      expect.anything(),
+      expect.anything(),
+      search,
+    );
     session.setSearch({ ...search, pattern: "" });
     await next();
     expect(calls).toHaveLength(4);
+  });
+
+  it("tells the backend which lines it holds", async () => {
+    const known: unknown[] = [];
+    const transport: EditorTransport = {
+      view: vi.fn((_id, viewport: Viewport, held) => {
+        known.push(held);
+        return Promise.resolve(view(5, viewport));
+      }),
+      apply: vi.fn((_id, _ops, viewport: Viewport, held) => {
+        known.push(held);
+        return Promise.resolve(view(6, viewport));
+      }),
+      clipboard: vi.fn(),
+    };
+    const session = new EditorSession(
+      1,
+      { startLine: 3, endLine: 10 },
+      vi.fn(),
+      vi.fn(),
+      transport,
+    );
+    await session.idle();
+    session.dispatch(insert("a"));
+    await session.idle();
+    expect(known).toEqual([null, { version: 5, startLine: 3, endLine: 3 }]);
+  });
+
+  it("refetches everything when an update cannot be applied", async () => {
+    const onView = vi.fn();
+    let calls = 0;
+    const transport: EditorTransport = {
+      view: vi.fn((_id, viewport: Viewport) => {
+        calls++;
+        // The first response claims a base version the session never had.
+        const wire = view(calls, viewport);
+        return Promise.resolve(
+          calls === 1 ? { ...wire, lines: { base: 99, splices: [], chunks: [] } } : wire,
+        );
+      }),
+      apply: vi.fn(),
+      clipboard: vi.fn(),
+    };
+    const session = new EditorSession(1, { startLine: 0, endLine: 10 }, onView, vi.fn(), transport);
+    await session.idle();
+    await new Promise((r) => setTimeout(r, 0));
+    await session.idle();
+    expect(transport.view).toHaveBeenCalledTimes(2);
+    expect(onView).toHaveBeenCalledOnce();
   });
 
   it("resolves idle once queued work is done", async () => {

@@ -55,6 +55,7 @@ describe("Palette", () => {
       refresh: vi.fn(),
       focus: vi.fn(),
       lineCount: () => 120,
+      scrollToLine: vi.fn(),
     };
     activeEditor.set(editor);
     render(<Palette />);

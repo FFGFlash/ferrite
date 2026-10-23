@@ -68,7 +68,8 @@ export interface Range {
 export interface SearchView {
   /** Matches on the returned lines. */
   matches: Range[];
-  total: number;
+  /** Total matches, or `null` while a background count is running. */
+  total: number | null;
   truncated: boolean;
   /** Index of the match the primary selection covers, if any. */
   current: number | null;
@@ -93,19 +94,63 @@ export interface SelectionView {
   primary: boolean;
 }
 
-export interface EditorView {
+/** Lines `start..start + removed` were replaced by `start..start + inserted`. */
+export interface LineSplice {
+  start: number;
+  removed: number;
+  inserted: number;
+}
+
+/** A line as sent: its text, or its first part plus full length if it was cut. */
+export type WireLine = string | { text: string; fullLength: number };
+
+/**
+ * How to update held lines: replay `splices` on the lines held at version
+ * `base` (or drop them all when `base` is null), then fill in `chunks`.
+ */
+export interface LinesUpdate {
+  base: number | null;
+  splices: LineSplice[];
+  chunks: { start: number; lines: WireLine[] }[];
+}
+
+/** Lines a client holds: `startLine..endLine` at `version`. */
+export interface KnownLines {
+  version: number;
+  startLine: number;
+  endLine: number;
+}
+
+interface ViewFields {
   documentId: number;
   version: number;
   lineCount: number;
+  /** The viewport: lines `startLine..endLine`. */
   startLine: number;
-  /** Text of lines `startLine..startLine + lines.length`, without line breaks. */
-  lines: string[];
-  /** Selections touching the returned lines, plus the primary selection. */
+  endLine: number;
+  /** Selections touching the viewport, plus the primary selection. */
   selections: SelectionView[];
   selectionCount: number;
   primary: { position: Position; visualColumn: number };
   dirty: boolean;
   search: SearchView | null;
+}
+
+/** A view as the backend sends it: only the lines the client was missing. */
+export interface WireView extends ViewFields {
+  lines: LinesUpdate;
+}
+
+export interface DisplayLine {
+  text: string;
+  /** Full length in UTF-16 units when `text` was shortened for display. */
+  fullLength: number | null;
+}
+
+/** A view with every viewport line resolved, ready to render. */
+export interface EditorView extends ViewFields {
+  /** Lines `startLine..endLine`. */
+  lines: DisplayLine[];
 }
 
 export const listDocuments = () => call<DocumentSummary[]>("document_list");
@@ -117,17 +162,23 @@ export const saveDocumentAs = (id: number) =>
 export const closeDocument = (id: number) => call<boolean>("document_close", { id });
 export const openDocument = (path: string) => call<DocumentSummary>("document_open", { path });
 
-export const getView = (id: number, viewport: Viewport, search: SearchQuery | null) =>
-  call<EditorView>("editor_view", { id, viewport, search });
+export const getView = (
+  id: number,
+  viewport: Viewport,
+  known: KnownLines | null,
+  search: SearchQuery | null,
+) => call<WireView>("editor_view", { id, viewport, known, search });
 export const applyOps = (
   id: number,
   ops: EditorOp[],
   viewport: Viewport,
+  known: KnownLines | null,
   search: SearchQuery | null,
-) => call<EditorView>("editor_apply", { id, ops, viewport, search });
+) => call<WireView>("editor_apply", { id, ops, viewport, known, search });
 export const clipboard = (
   id: number,
   action: ClipboardAction,
   viewport: Viewport,
+  known: KnownLines | null,
   search: SearchQuery | null,
-) => call<EditorView>("editor_clipboard", { id, action, viewport, search });
+) => call<WireView>("editor_clipboard", { id, action, viewport, known, search });

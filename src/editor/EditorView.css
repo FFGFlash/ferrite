@@ -65,6 +65,14 @@
   tab-size: var(--editor-tab-size, 4);
 }
 
+.editor-view__cut {
+  margin-left: var(--space-1);
+  padding: 0 var(--space-1);
+  border-radius: var(--radius-control);
+  background: var(--color-control-hover-background);
+  color: var(--color-text-muted);
+}
+
 .editor-view__selections,
 .editor-view__carets {
   position: absolute;

@@ -14,7 +14,9 @@
     "test:watch": "vitest",
     "format": "prettier --write . && cargo fmt --all",
     "format:check": "prettier --check . && cargo fmt --all --check",
-    "tauri": "tauri"
+    "tauri": "tauri",
+    "bench": "cargo bench -p ferrite-benches",
+    "bench:app": "node scripts/bench.mjs"
   },
   "dependencies": {
     "@tauri-apps/api": "2.12.4",

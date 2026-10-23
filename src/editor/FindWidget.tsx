@@ -71,9 +71,11 @@ export function FindWidget({
     ? ""
     : result?.error
       ? "Invalid pattern"
-      : !result || result.total === 0
-        ? "No results"
-        : `${result.current === null ? "?" : result.current + 1} of ${result.total}${result.truncated ? "+" : ""}`;
+      : result && result.total === null
+        ? "Counting…"
+        : !result || result.total === 0
+          ? "No results"
+          : `${result.current === null ? "?" : result.current + 1} of ${result.total}${result.truncated ? "+" : ""}`;
 
   return (
     <div className="find-widget" role="search" aria-label="Find in editor">

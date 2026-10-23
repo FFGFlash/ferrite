@@ -5,7 +5,7 @@
 //! frontend depends only on this documented shape and never on internal Rust
 //! types. Each command validates its own input.
 
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
@@ -64,6 +64,8 @@ pub fn frontend_log(level: FrontendLogLevel, message: String) {
 pub struct StartupState {
   launched_at: Instant,
   frontend_ready: AtomicBool,
+  /// Milliseconds from launch to the first `frontend_ready`, once known.
+  ready_ms: AtomicU64,
 }
 
 impl StartupState {
@@ -71,7 +73,16 @@ impl StartupState {
     Self {
       launched_at,
       frontend_ready: AtomicBool::new(false),
+      ready_ms: AtomicU64::new(0),
     }
+  }
+
+  /// Time from launch to the first frontend render, if it has happened.
+  pub fn ready_ms(&self) -> Option<u64> {
+    self
+      .frontend_ready
+      .load(Ordering::Relaxed)
+      .then(|| self.ready_ms.load(Ordering::Relaxed))
   }
 }
 
@@ -81,9 +92,11 @@ impl StartupState {
 #[tauri::command]
 pub fn frontend_ready(startup: State<'_, StartupState>) {
   let elapsed_ms = millis(startup.launched_at.elapsed());
-  if startup.frontend_ready.swap(true, Ordering::Relaxed) {
+  if startup.frontend_ready.load(Ordering::Relaxed) {
     tracing::debug!(elapsed_ms, "frontend reloaded");
   } else {
+    startup.ready_ms.store(elapsed_ms, Ordering::Relaxed);
+    startup.frontend_ready.store(true, Ordering::Relaxed);
     tracing::info!(elapsed_ms, "frontend ready");
   }
 }

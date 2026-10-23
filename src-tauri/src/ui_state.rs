@@ -4,6 +4,7 @@
 
 use std::io::Write;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Mutex, PoisonError};
 
 use serde::{Deserialize, Serialize};
@@ -29,6 +30,8 @@ pub struct UiState {
 pub struct UiStateStore {
   path: Option<PathBuf>,
   state: Mutex<UiState>,
+  /// When set (benchmark runs), changes are kept in memory only.
+  ephemeral: AtomicBool,
 }
 
 impl UiStateStore {
@@ -46,7 +49,13 @@ impl UiStateStore {
     Self {
       path,
       state: Mutex::new(state),
+      ephemeral: AtomicBool::new(false),
     }
+  }
+
+  /// Stops writing to disk, so a benchmark run leaves the saved session alone.
+  pub fn make_ephemeral(&self) {
+    self.ephemeral.store(true, Ordering::Relaxed);
   }
 
   pub fn get(&self) -> UiState {
@@ -64,6 +73,7 @@ impl UiStateStore {
     change(&mut state);
     if *state != before
       && let Some(path) = &self.path
+      && !self.ephemeral.load(Ordering::Relaxed)
       && let Err(error) = write_atomically(path, &state)
     {
       tracing::warn!(%error, "could not save window state");

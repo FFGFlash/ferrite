@@ -72,6 +72,8 @@ export type AppEvent =
   | { type: "documentReloaded"; document: DocumentSummary }
   | { type: "documentChangedOnDisk"; document: DocumentSummary }
   | { type: "settingsChanged"; settings: FrontendSettings }
+  | { type: "searchCounted"; documentId: number }
+  | { type: "documentOpened"; document: DocumentSummary; active: boolean }
   | { type: "indexStatus"; indexing: boolean; files: number; truncated: boolean };
 
 export const getWorkspace = () => call<WorkspaceInfo | null>("workspace_get");

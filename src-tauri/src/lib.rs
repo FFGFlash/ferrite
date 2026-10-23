@@ -5,6 +5,7 @@
 //! runs the window event loop. Editor behavior belongs in dedicated crates
 //! (see `docs/architecture.md`), not here.
 
+mod bench;
 mod commands;
 mod dialogs;
 mod editor;
@@ -12,6 +13,7 @@ mod error;
 mod events;
 mod logging;
 mod paths;
+mod perf;
 mod settings;
 mod ui_state;
 mod workspace;
@@ -31,6 +33,7 @@ pub fn run() {
     .manage(editor::EditorState::default())
     .manage(events::EventHub::default())
     .manage(workspace::WorkspaceState::default())
+    .manage(perf::Perf::default())
     .setup(move |app| {
       let log_dir = match app.path().app_log_dir() {
         Ok(dir) => Some(dir),
@@ -61,17 +64,28 @@ pub fn run() {
       let previous_files = saved.get().open_files;
       app.manage(saved);
 
-      workspace::restore(app.handle());
-      let named: Vec<std::path::PathBuf> = std::env::args_os()
-        .skip(1)
-        .map(std::path::PathBuf::from)
-        .filter(|arg| !arg.to_string_lossy().starts_with('-'))
-        .collect();
-      editor::open_startup_files(
-        &app.state::<editor::EditorState>(),
-        previous_files.into_iter().chain(named.iter().cloned()),
-      );
-      ui_state::record_open_files(app.handle());
+      let args: Vec<String> = std::env::args().skip(1).collect();
+      let bench = bench::BenchState::from_args(&args, launched_at);
+      let benchmarking = bench.active();
+      app.manage(bench);
+      if benchmarking {
+        app.state::<ui_state::UiStateStore>().make_ephemeral();
+      }
+
+      // Benchmarks start from a clean session.
+      let (previous_files, named) = if benchmarking {
+        (Vec::new(), Vec::new())
+      } else {
+        workspace::restore(app.handle());
+        let skip = bench::BenchState::consumed(&args);
+        let named: Vec<std::path::PathBuf> = args
+          .iter()
+          .skip(skip)
+          .filter(|arg| !arg.starts_with('-'))
+          .map(std::path::PathBuf::from)
+          .collect();
+        (previous_files, named)
+      };
       // A file named on the command line becomes the active tab.
       if let Some(last) = named.last() {
         let active = paths::normalize(last);
@@ -79,6 +93,10 @@ pub fn run() {
           .state::<ui_state::UiStateStore>()
           .update(|state| state.active_file = Some(active));
       }
+      editor::open_startup_files(
+        app.handle(),
+        previous_files.into_iter().chain(named).collect(),
+      );
       Ok(())
     })
     .on_window_event(|window, event| {
@@ -116,6 +134,10 @@ pub fn run() {
       workspace::workspace_find_files,
       workspace::workspace_search,
       workspace::workspace_search_cancel,
+      perf::perf_stats,
+      bench::bench_config,
+      bench::bench_generate,
+      bench::bench_report,
     ])
     .build(tauri::generate_context!());
 
@@ -131,6 +153,10 @@ pub fn run() {
   app.run(|handle, event| {
     if let RunEvent::Exit = event {
       tracing::info!("exiting");
+      // Stop background work (searches, indexing) before the process ends.
+      if let Some(perf) = handle.try_state::<perf::Perf>() {
+        perf.scheduler.shutdown();
+      }
       if let Some(guard) = handle.try_state::<logging::LogGuard>() {
         guard.flush();
       }

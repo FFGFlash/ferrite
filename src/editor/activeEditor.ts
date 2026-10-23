@@ -16,6 +16,8 @@ export interface EditorController {
   refresh(): void;
   focus(): void;
   lineCount(): number;
+  /** Scrolls so `line` is at the top of the viewport. */
+  scrollToLine(line: number): void;
 }
 
 export const activeEditor = createStore<EditorController | null>(null);

@@ -3,15 +3,24 @@
 //! unsaved-changes prompts, and the editing commands the frontend calls.
 
 mod commands;
+mod counts;
 pub(crate) mod protocol;
 
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
+use std::time::Instant;
+
 use ferrite_core::Editor;
+use ferrite_tasks::Priority;
 use ferrite_workspace::load_text_file;
-use tauri::{Manager, WebviewWindow};
+use tauri::{AppHandle, Manager, WebviewWindow};
+
+use crate::events::{self, AppEvent};
+use crate::perf::Perf;
+use crate::ui_state::UiStateStore;
+use protocol::DocumentSummary;
 
 pub use commands::*;
 
@@ -20,6 +29,8 @@ pub use commands::*;
 #[derive(Default)]
 pub struct EditorState {
   editor: Arc<Mutex<Editor>>,
+  /// Background find-match counts for large documents.
+  pub(crate) counts: counts::MatchCounts,
   /// Set once the user has confirmed closing the window with unsaved changes.
   close_confirmed: AtomicBool,
   close_prompt_open: AtomicBool,
@@ -36,27 +47,56 @@ impl EditorState {
   }
 }
 
-/// Opens files before the frontend loads, so they appear as tabs
-/// immediately: those from the previous session and those named on the
-/// command line. Arguments starting with `-` are ignored. Failures are
-/// logged and skipped.
-pub fn open_startup_files(state: &EditorState, files: impl IntoIterator<Item = PathBuf>) {
-  for arg in files {
-    if arg.to_string_lossy().starts_with('-') {
-      continue;
-    }
-    let path = crate::paths::normalize(&arg);
-    match load_text_file(&path) {
-      Ok(file) => {
-        let mut editor = state.lock();
-        if editor.find_by_path(&path).is_none() {
-          let id = editor.open(path.clone(), file);
+/// Opens the previous session's files and those named on the command line,
+/// on the worker pool so the window does not wait for them. Each opened file
+/// is announced to the frontend; the one matching the saved active file
+/// becomes the active tab. Failures are logged and skipped.
+pub fn open_startup_files(app: &AppHandle, files: Vec<PathBuf>) {
+  let task_app = app.clone();
+  app
+    .state::<Perf>()
+    .scheduler
+    .spawn("open-startup-files", Priority::High, None, move |token| {
+      let active = task_app.state::<UiStateStore>().get().active_file;
+      for file in files {
+        if token.is_cancelled() {
+          break;
+        }
+        let path = crate::paths::normalize(&file);
+        let started = Instant::now();
+        let loaded = match load_text_file(&path) {
+          Ok(loaded) => loaded,
+          Err(error) => {
+            tracing::warn!(%error, "could not open file at startup");
+            continue;
+          }
+        };
+        task_app
+          .state::<Perf>()
+          .record("document.load", started.elapsed());
+        let summary = {
+          let state = task_app.state::<EditorState>();
+          let mut editor = state.lock();
+          if editor.find_by_path(&path).is_some() {
+            continue;
+          }
+          let id = editor.open(path.clone(), loaded);
           tracing::info!(document = %id, path = %path.display(), "opened file at startup");
+          editor.document(id).ok().map(DocumentSummary::of)
+        };
+        if let Some(document) = summary {
+          let is_active = active.as_deref() == Some(path.as_path());
+          events::emit(
+            &task_app,
+            AppEvent::DocumentOpened {
+              document,
+              active: is_active,
+            },
+          );
         }
       }
-      Err(error) => tracing::warn!(%error, "could not open file at startup"),
-    }
-  }
+      crate::ui_state::record_open_files(&task_app);
+    });
 }
 
 /// Decides whether the window may close. With unsaved documents, prevents

@@ -5,6 +5,7 @@ use ropey::iter::Chars;
 
 use crate::change::{ChangeSet, Edit, EditError};
 use crate::line_ending::LineEnding;
+use crate::lines::{LineLog, LineSplice};
 
 /// Content version of a buffer. Every applied change produces a new, larger
 /// version; versions are never reused, so they identify stale requests.
@@ -16,6 +17,16 @@ impl Version {
 
   pub fn get(self) -> u64 {
     self.0
+  }
+
+  /// A version received back from a client. Only meaningful for comparing
+  /// with versions of the same buffer.
+  pub fn from_raw(raw: u64) -> Self {
+    Self(raw)
+  }
+
+  pub(crate) fn next(self) -> Self {
+    Self(self.0 + 1)
   }
 }
 
@@ -31,6 +42,7 @@ pub struct Utf16Position {
 pub struct TextBuffer {
   pub(crate) rope: Rope,
   version: Version,
+  line_log: LineLog,
 }
 
 impl TextBuffer {
@@ -42,6 +54,7 @@ impl TextBuffer {
     Self {
       rope: Rope::from_str(text),
       version: Version::INITIAL,
+      line_log: LineLog::default(),
     }
   }
 
@@ -148,11 +161,21 @@ impl TextBuffer {
     }
 
     let post_ranges = changes.post_ranges();
+    let old_lines: Vec<(usize, usize)> = changes
+      .edits()
+      .iter()
+      .map(|edit| {
+        (
+          self.rope.byte_to_line(edit.range.start),
+          self.rope.byte_to_line(edit.range.end),
+        )
+      })
+      .collect();
     let inverse = changes
       .edits()
       .iter()
-      .zip(post_ranges)
-      .map(|(edit, post)| Edit::new(post, self.text_in(edit.range.clone())))
+      .zip(&post_ranges)
+      .map(|(edit, post)| Edit::new(post.clone(), self.text_in(edit.range.clone())))
       .collect();
 
     for edit in changes.edits().iter().rev() {
@@ -165,8 +188,79 @@ impl TextBuffer {
         self.rope.insert(start, &edit.text);
       }
     }
-    self.version = Version(self.version.0 + 1);
+    self.version = self.version.next();
+    let splices = self.line_splices(&old_lines, &post_ranges);
+    self.line_log.push(self.version, splices);
     Ok(ChangeSet::from_sorted(inverse))
+  }
+
+  /// One splice per group of edits touching the same lines, in order.
+  fn line_splices(
+    &self,
+    old_lines: &[(usize, usize)],
+    post_ranges: &[Range<usize>],
+  ) -> Vec<LineSplice> {
+    // (old start, old end, new start, new end), inclusive line numbers.
+    let mut groups: Vec<(usize, usize, usize, usize)> = Vec::new();
+    for (&(old_start, old_end), post) in old_lines.iter().zip(post_ranges) {
+      let new_start = self.rope.byte_to_line(post.start);
+      let new_end = self.rope.byte_to_line(post.end);
+      match groups.last_mut() {
+        Some(last) if old_start <= last.1 => {
+          last.1 = last.1.max(old_end);
+          last.3 = last.3.max(new_end);
+        }
+        _ => groups.push((old_start, old_end, new_start, new_end)),
+      }
+    }
+    groups
+      .into_iter()
+      .map(|(old_start, old_end, new_start, new_end)| LineSplice {
+        start: new_start,
+        removed: old_end - old_start + 1,
+        inserted: new_end - new_start + 1,
+      })
+      .collect()
+  }
+
+  /// How lines moved between `since` and now, for clients holding lines
+  /// from that version. `None` if `since` is too old to reconstruct.
+  pub fn line_changes_since(&self, since: Version) -> Option<Vec<LineSplice>> {
+    self.line_log.since(since, self.version)
+  }
+
+  /// The start of `line`'s text, at most `max_bytes` long (cut at a character
+  /// boundary), and whether it was cut.
+  pub fn line_prefix(&self, line: usize, max_bytes: usize) -> (String, bool) {
+    let start = self.line_start(line);
+    let end = self.line_end(line);
+    if end - start <= max_bytes {
+      return (self.text_in(start..end), false);
+    }
+    let cut = self
+      .rope
+      .char_to_byte(self.rope.byte_to_char(start + max_bytes));
+    (self.text_in(start..cut), true)
+  }
+
+  /// Length of `line` (without its line break) in UTF-16 code units.
+  pub fn line_utf16_len(&self, line: usize) -> usize {
+    let start = self.rope.byte_to_char(self.line_start(line));
+    let end = self.rope.byte_to_char(self.line_end(line));
+    self.rope.char_to_utf16_cu(end) - self.rope.char_to_utf16_cu(start)
+  }
+
+  /// Number of characters (Unicode scalar values) in `range`.
+  pub fn char_count(&self, range: Range<usize>) -> usize {
+    let len = self.len();
+    self.rope.byte_to_char(range.end.min(len)) - self.rope.byte_to_char(range.start.min(len))
+  }
+
+  /// The offset `chars` characters after `offset`, clamped to `limit`.
+  pub fn offset_after_chars(&self, offset: usize, chars: usize, limit: usize) -> usize {
+    let start = self.rope.byte_to_char(offset.min(self.len()));
+    let target = (start + chars).min(self.rope.len_chars());
+    self.rope.char_to_byte(target).min(limit)
   }
 
   pub fn offset_to_utf16(&self, offset: usize) -> Utf16Position {
@@ -199,7 +293,7 @@ impl TextBuffer {
 /// (for example, to write it to disk while editing continues).
 #[derive(Debug, Clone)]
 pub struct TextSnapshot {
-  rope: Rope,
+  pub(crate) rope: Rope,
   version: Version,
 }
 
@@ -353,6 +447,56 @@ mod tests {
         );
       }
     }
+  }
+
+  #[test]
+  fn changes_record_how_lines_moved() {
+    let mut buffer = TextBuffer::from_text("a\nb\nc\nd\n");
+    let start = buffer.version();
+    // Split line 1 ("b") into two lines.
+    apply(&mut buffer, vec![Edit::insert(3, "\nx")]);
+    // Join lines 3 and 4 ("c" and "d") and edit line 0, in one change.
+    apply(&mut buffer, vec![Edit::new(0..1, "A"), Edit::delete(7..8)]);
+    assert_eq!(buffer.contents(), "A\nb\nx\ncd\n");
+    let splice = |start, removed, inserted| LineSplice {
+      start,
+      removed,
+      inserted,
+    };
+    assert_eq!(
+      buffer.line_changes_since(start),
+      Some(vec![splice(1, 1, 2), splice(0, 1, 1), splice(3, 2, 1)])
+    );
+    assert_eq!(buffer.line_changes_since(buffer.version()), Some(vec![]));
+  }
+
+  #[test]
+  fn edits_on_the_same_line_merge_into_one_splice() {
+    let mut buffer = TextBuffer::from_text("abc\ndef");
+    let start = buffer.version();
+    apply(
+      &mut buffer,
+      vec![Edit::insert(0, "1"), Edit::insert(2, "2")],
+    );
+    assert_eq!(
+      buffer.line_changes_since(start),
+      Some(vec![LineSplice {
+        start: 0,
+        removed: 1,
+        inserted: 1
+      }])
+    );
+  }
+
+  #[test]
+  fn long_lines_can_be_read_as_prefixes() {
+    let buffer = TextBuffer::from_text("héllo world\nshort");
+    assert_eq!(buffer.line_prefix(0, 3), ("hé".to_owned(), true));
+    assert_eq!(buffer.line_prefix(1, 10), ("short".to_owned(), false));
+    assert_eq!(buffer.line_utf16_len(0), 11);
+    assert_eq!(buffer.char_count(0..6), 5);
+    assert_eq!(buffer.offset_after_chars(0, 2, 100), 3);
+    assert_eq!(buffer.offset_after_chars(0, 50, 7), 7);
   }
 
   #[test]

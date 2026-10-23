@@ -2,7 +2,7 @@
 import { activeEditor } from "../editor/activeEditor";
 import { subscribeToEvents, type AppEvent } from "../ipc/workspace";
 import { applySettings } from "./appearance";
-import { updateSummary } from "./documents";
+import { documentsStore, updateSummary } from "./documents";
 import { notify } from "./notifications";
 import { refreshDirectories, setIndexing, setWorkspace } from "./workspace";
 
@@ -31,6 +31,21 @@ export function handleEvent(event: AppEvent): void {
     case "settingsChanged":
       applySettings(event.settings);
       notify("info", "Settings applied.");
+      break;
+    case "searchCounted": {
+      const editor = activeEditor.get();
+      if (editor?.documentId === event.documentId) {
+        editor.refresh();
+      }
+      break;
+    }
+    case "documentOpened":
+      documentsStore.update(({ documents, activeId }) => ({
+        documents: documents.some((d) => d.id === event.document.id)
+          ? documents
+          : [...documents, event.document],
+        activeId: event.active || activeId === null ? event.document.id : activeId,
+      }));
       break;
     case "indexStatus":
       setIndexing(event.indexing);

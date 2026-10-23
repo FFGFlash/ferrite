@@ -40,6 +40,16 @@ pub enum AppEvent {
   SettingsChanged {
     settings: FrontendSettings,
   },
+  /// A background match count for a large document finished.
+  SearchCounted {
+    document_id: u64,
+  },
+  /// A file was opened in the background (e.g. at startup).
+  DocumentOpened {
+    document: DocumentSummary,
+    /// Whether it should become the active tab.
+    active: bool,
+  },
   /// Progress of the Go to File index.
   IndexStatus {
     indexing: bool,

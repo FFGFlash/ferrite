@@ -4,7 +4,7 @@ This document describes Ferrite's architecture as it currently exists and how it
 grow. The goals and constraints come from [`DESIGN.md`](DESIGN.md); decisions with lasting
 consequences are recorded as ADRs in [`adr/`](adr/).
 
-## Current state (Milestone 3)
+## Current state (Milestone 4)
 
 ```text
 ┌──────────────────────────── Desktop process (ferrite) ─────────────────────────────┐
@@ -35,17 +35,45 @@ consequences are recorded as ADRs in [`adr/`](adr/).
 Crates use the `ferrite-` prefix. Dependencies point downward only. Only `ferrite-app` depends on
 Tauri, and nothing in Rust depends on the frontend.
 
-| Crate               | Responsibility                                                                                                                                            | Depends on                                                                     |
-| ------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------ |
-| `ferrite-text`      | Rope-backed `TextBuffer`, validated `ChangeSet`s, versions, UTF-16 conversion, grapheme/word boundaries, line endings, regex/literal search over the rope | `ropey`, `unicode-segmentation`, `regex-cursor`                                |
-| `ferrite-workspace` | Reading and atomically writing files, directory listings with ignore rules, the Go to File index, find in files, file watching                            | `ferrite-text`, `ignore`, `globset`, `nucleo-matcher`, `notify-debouncer-mini` |
-| `ferrite-core`      | `Editor` (open documents), `Document`, selections, `EditorOp`s (including find/replace), undo history, dirty state, reload from disk. No I/O.             | `ferrite-text`, `ferrite-workspace` (for `FileStamp`)                          |
-| `ferrite-app`       | Process lifecycle, Tauri commands, dialogs, clipboard, settings, session state, workspace coordination, backend events, logging                           | all of the above, Tauri, `toml`, `toml_edit`                                   |
+| Crate               | Responsibility                                                                                                                                                                 | Depends on                                                                     |
+| ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------ |
+| `ferrite-text`      | Rope-backed `TextBuffer`, validated `ChangeSet`s, versions, the line-splice log, UTF-16 conversion, grapheme/word boundaries, line endings, regex/literal search over the rope | `ropey`, `unicode-segmentation`, `regex-cursor`                                |
+| `ferrite-workspace` | Reading and atomically writing files, directory listings with ignore rules, the Go to File index, find in files, file watching                                                 | `ferrite-text`, `ignore`, `globset`, `nucleo-matcher`, `notify-debouncer-mini` |
+| `ferrite-core`      | `Editor` (open documents), `Document`, selections, `EditorOp`s (including find/replace), undo history, dirty state, reload from disk, incremental viewport updates. No I/O.    | `ferrite-text`, `ferrite-workspace` (for `FileStamp`)                          |
+| `ferrite-tasks`     | Bounded background scheduler (priorities, keyed replacement, cancellation) and timing histograms                                                                               | `tracing`                                                                      |
+| `ferrite-app`       | Process lifecycle, Tauri commands, dialogs, clipboard, settings, session state, workspace coordination, backend events, instrumentation, benchmark mode, logging               | all of the above, Tauri, `toml`, `toml_edit`, `memory-stats`                   |
+| `ferrite-benches`   | Criterion benchmarks and deterministic fixtures (`benches/`), not part of the app                                                                                              | `ferrite-text`, `ferrite-core`, `ferrite-workspace`, `criterion`               |
 
 Planned: `ferrite-syntax` and `ferrite-lsp` (M5), `ferrite-extensions-api` and
 `ferrite-extension-host` (M6). The design brief's `editor-app` and `src-tauri` are one crate
 ([ADR 0001](adr/0001-application-skeleton.md)). Workspace, settings, and command decisions are in
-[ADR 0003](adr/0003-workbench-services.md).
+[ADR 0003](adr/0003-workbench-services.md), and performance decisions in
+[ADR 0004](adr/0004-performance-foundations.md). Measurements are in
+[`performance.md`](performance.md).
+
+## Background work
+
+All background work runs on one `ferrite-tasks` scheduler owned by the app: a fixed pool of
+worker threads (CPU cores − 1, between one and four) with three priorities and a queue of at most
+256 tasks. When the queue is full, the least important, oldest task is dropped.
+
+- Tasks are **keyed**. A new task with the same key cancels a queued or running one, so only the
+  latest search, match count, or reload of a file runs.
+- Cancellation is cooperative through a `CancelToken`, which long loops (walks, scans) check.
+- A panic in a task is caught and counted, and the worker keeps running.
+- On exit, the scheduler is shut down: tasks are cancelled and workers joined.
+
+| Task                  | Priority | Key                  |
+| --------------------- | -------- | -------------------- |
+| `open-startup-files`  | High     | none                 |
+| `workspace-search`    | High     | one search at a time |
+| `count-matches`       | High     | one per document     |
+| `reload-changed-file` | High     | one per path         |
+| `workspace-index`     | Normal   | one index at a time  |
+
+Find in files additionally uses up to four walker threads of its own inside its task, because it
+is dominated by opening many small files (3.4× faster in the benchmark). The editor commands
+themselves stay synchronous: they take under a millisecond and must apply in order.
 
 ## Text model
 
@@ -133,7 +161,7 @@ timestamp granularity and with the same length isn't detected.
 - **Explorer listings** are fetched one directory at a time when a folder is expanded, never by
   walking the whole tree. Directories are listed first, sorted case-insensitively. Listing
   requests outside the workspace root are refused.
-- **The Go to File index** is built on a background thread (`ferrite-index`) and is cancelled if
+- **The Go to File index** is built on the scheduler (`workspace-index`) and is cancelled if
   the workspace changes. It holds relative paths only, up to 200,000 files (beyond that it's
   marked truncated). Queries are fuzzy-matched with `nucleo-matcher` and return the best 100,
   with match positions for highlighting.
@@ -144,8 +172,8 @@ timestamp granularity and with the same length isn't detected.
   - **clean** document: reloaded in place;
   - **dirty** document: left untouched, and the user is told that saving will ask before
     overwriting.
-- **Find in files** runs on a blocking thread and streams results file by file through a Tauri
-  `Channel`. Starting a new search cancels the previous one. Open documents are searched as edited
+- **Find in files** runs on the scheduler, searches files in parallel, and streams results file
+  by file through a Tauri `Channel`. Starting a new search cancels the previous one. Open documents are searched as edited
   (including unsaved changes). Binary files (NUL in the first 8 KiB), non-UTF-8 files, and files
   over `search.max_file_bytes` (4 MiB) are skipped. A search stops at 20,000 matches, or 1,000 per
   file. **Replace across files is not implemented yet** ([ADR 0003](adr/0003-workbench-services.md)).
@@ -202,10 +230,12 @@ The frontend sends **operations**, not text diffs. Each response is the **view**
 viewport:
 
 ```text
-editor_apply(id, ops[], viewport, search?) → EditorView
-EditorView = { version, lineCount, startLine, lines[], selections[], selectionCount,
-               primary: { position, visualColumn }, dirty,
-               search?: { matches[] (visible only), total, truncated, current, error } }
+editor_apply(id, ops[], viewport, known?, search?) → EditorView
+known      = { version, startLine, endLine }          lines the client holds
+EditorView = { version, lineCount, startLine, endLine,
+               lines: { base, splices[], chunks[{ start, lines[] }] },
+               selections[], selectionCount, primary: { position, visualColumn }, dirty,
+               search?: { matches[] (visible only), total | null, truncated, current, error } }
 ```
 
 - Positions on the wire are `{ line, column }` with UTF-16 columns, which are JavaScript string
@@ -214,13 +244,23 @@ EditorView = { version, lineCount, startLine, lines[], selections[], selectionCo
 - `EditorSession` (`src/editor/session.ts`) keeps at most one request in flight. Operations
   issued in the meantime are sent together as the next batch, so ordering is preserved and fast
   typing costs few round trips. Consecutive drag positions collapse to the latest one.
-- Each response contains only the viewport's lines (visible lines plus 20 lines of overscan
-  above and below), not the document. Scrolling requests a new view only when the visible lines
-  aren't already loaded.
+- **Views are incremental.** The viewport is the visible lines plus 20 lines of overscan above
+  and below. Each request says which lines the client holds (`known`). The backend replays the
+  buffer's line splices since that version (`base`) and sends only the lines the client is
+  missing (`chunks`). The client replays the same splices on its cache (`src/editor/lineCache.ts`)
+  and fills in the chunks. A keystroke sends one line, Enter shifts cached lines instead of
+  resending them, and scrolling sends only newly exposed lines. A client too far behind (the log
+  keeps 512 changes) gets a full update. An update the client can't apply makes it drop its cache
+  and refetch, so a mismatch costs a round trip, never wrong text.
+- Lines longer than 16 KiB arrive **shortened for display**, with their full length, and render
+  with a "…" badge. Editing, saving, and search always use the whole line.
+- Scrolling requests a new view only when the visible lines aren't already held.
 - Before saving or closing, the workbench waits for the session to go idle, so the save includes
   every keystroke typed before it.
 - While the find widget is open, its query rides along with every request, so highlights and the
-  "3 of 17" count stay current as you type. Find operations with an invalid regex are skipped,
+  "3 of 17" count stay current as you type. For documents over 1 MiB, the total is counted on the
+  scheduler from a snapshot. The view shows visible matches immediately and `total: null`
+  ("Counting…") until a `searchCounted` event triggers a refresh. Find operations with an invalid regex are skipped,
   and the view reports the error instead.
 
 | Command                                                       | Purpose                                                |
@@ -241,6 +281,8 @@ EditorView = { version, lineCount, startLine, lines[], selections[], selectionCo
 | `settings_get`, `settings_file`, `settings_set_theme`         | Frontend settings, the settings file path, theme       |
 | `ui_state_get`, `ui_state_save`                               | Saved layout and active file                           |
 | `events_subscribe`                                            | Register the backend event channel                     |
+| `perf_stats`                                                  | Backend timings, scheduler statistics, memory          |
+| `bench_config`, `bench_generate`, `bench_report`              | Benchmark mode only (`--bench <name>`)                 |
 
 ### Permissions, dialogs, and clipboard
 
@@ -301,10 +343,26 @@ directory is known:
 - Document lifecycle events (open, save, close) are logged at `info`, file errors at `warn`, and
   frontend errors are forwarded to the backend log.
 
+## Instrumentation
+
+- **Backend:** named timing histograms (`ferrite_tasks::Metrics`; power-of-two buckets, O(1)
+  memory) for `editor.apply`, `editor.view`, `document.load`, `document.save`,
+  `workspace.index`, `workspace.search`, and `search.count`. The scheduler also keeps wait and run
+  times per task type, with completed, cancelled, dropped, and panicked counts.
+- **Frontend** (`src/state/perf.ts`): series for IPC round trips, render and measure time,
+  input-to-paint latency, and lines received per update.
+- **Overlay:** **Developer: Toggle Performance Overlay** shows both, plus backend and JS heap
+  memory and open document sizes.
+- **Benchmarks:** see [`performance.md`](performance.md) for the benchmark suites and the
+  measured baseline.
+
 ## Startup measurement
 
 `run()` records an `Instant` on entry. The backend logs `elapsed_ms` when setup finishes and when
-the frontend first calls `frontend_ready`. Proper benchmarks come in M4.
+the frontend first calls `frontend_ready`. `scripts/bench.mjs startup` measures this
+repeatably; see [`performance.md`](performance.md) for the current numbers. Files from the
+previous session and the command line now open on the scheduler, so they no longer delay the
+window.
 
 Single, warm-cache runs on the development machine (Windows 11, x86_64), for orientation only:
 
@@ -325,10 +383,10 @@ processes, which this figure excludes.
 
 These are tracked for later milestones:
 
-- Very long lines are sent and rendered whole. A single multi-megabyte line in the viewport makes
-  every keystroke slow (M4).
-- Files are loaded completely and synchronously when opened; there's no lazy loading or
-  large-file mode yet (M4).
+- Lines longer than 16 KiB are shown only up to that point (with a badge). The cursor can't be
+  seen beyond it, though editing there works. Visual columns past 4 KiB count characters, not
+  tab stops or grapheme clusters.
+- Files load completely into memory (up to 256 MiB); there's no lazy or partial loading.
 - Replace across files, include/exclude globs in the search panel, and search-result context
   lines aren't implemented.
 - The explorer can't create, rename, move, or delete files yet. Large directories aren't

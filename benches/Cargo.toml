@@ -1,0 +1,39 @@
+[package]
+name = "ferrite-benches"
+description = "Criterion benchmarks for Ferrite's text, core, file, and workspace operations."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+ferrite-core = { workspace = true }
+ferrite-text = { workspace = true }
+ferrite-workspace = { workspace = true }
+tempfile = { workspace = true }
+
+[dev-dependencies]
+criterion = { workspace = true }
+
+[[bench]]
+name = "text"
+path = "text.rs"
+harness = false
+
+[[bench]]
+name = "core"
+path = "core.rs"
+harness = false
+
+[[bench]]
+name = "files"
+path = "files.rs"
+harness = false
+
+[[bench]]
+name = "workspace"
+path = "workspace.rs"
+harness = false
+
+[lints]
+workspace = true

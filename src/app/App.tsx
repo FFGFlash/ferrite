@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { runRequestedBenchmark } from "../bench/runner";
 import { builtinCommands } from "../commands/builtin";
 import { registerCommands } from "../commands/registry";
 import { getAppInfo, isDesktop, log, notifyFrontendReady, type AppInfo } from "../ipc";
@@ -26,6 +27,7 @@ async function restoreSession(): Promise<void> {
     reportError("Restoring the layout", error);
   }
   await Promise.all([loadWorkspace(), loadDocuments(activeFile)]);
+  await runRequestedBenchmark();
 }
 
 export function App() {

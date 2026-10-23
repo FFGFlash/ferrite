@@ -4,10 +4,11 @@
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::{Mutex, PoisonError};
 
 use ferrite_text::{Searcher, TextSnapshot};
-use ignore::WalkBuilder;
+use ignore::{WalkBuilder, WalkState};
 
 use crate::filters::{ExcludeFilter, to_slash};
 
@@ -24,6 +25,9 @@ pub struct SearchLimits {
   pub max_matches: usize,
   /// Matches per file beyond this are not reported.
   pub max_matches_per_file: usize,
+  /// Files searched in parallel. Opening and reading many small files
+  /// dominates, so a few threads help a lot (see docs/performance.md).
+  pub threads: usize,
 }
 
 impl Default for SearchLimits {
@@ -32,6 +36,9 @@ impl Default for SearchLimits {
       max_file_bytes: 4 * 1024 * 1024,
       max_matches: 20_000,
       max_matches_per_file: 1_000,
+      threads: std::thread::available_parallelism()
+        .map_or(2, |n| n.get())
+        .clamp(1, 4),
     }
   }
 }
@@ -68,9 +75,11 @@ pub struct SearchSummary {
   pub cancelled: bool,
 }
 
-/// Searches the workspace. Files in `open` are searched as they are in the
-/// editor (including unsaved changes) instead of on disk. Binary, non-UTF-8,
-/// and oversized files are skipped. Stops early when `cancel` is set.
+/// Searches the workspace on `limits.threads` threads. Files in `open` are
+/// searched as they are in the editor (including unsaved changes) instead of
+/// on disk. Binary, non-UTF-8, and oversized files are skipped. Results
+/// arrive file by file, in no particular order. Stops early when `cancel` is
+/// set or the match limit is reached.
 pub fn search_workspace(
   root: &Path,
   exclude: &ExcludeFilter,
@@ -78,53 +87,74 @@ pub fn search_workspace(
   open: &HashMap<PathBuf, TextSnapshot>,
   limits: SearchLimits,
   cancel: &AtomicBool,
-  mut on_file: impl FnMut(FileMatches),
+  on_file: impl FnMut(FileMatches) + Send,
 ) -> SearchSummary {
-  let mut summary = SearchSummary::default();
   let filter_root = root.to_path_buf();
   let filter = exclude.clone();
   let walker = WalkBuilder::new(root)
     .hidden(false)
+    .threads(limits.threads.max(1))
     .filter_entry(move |entry| !filter.is_excluded(&filter_root, entry.path()))
-    .build();
+    .build_parallel();
 
-  for entry in walker.filter_map(Result::ok) {
-    if cancel.load(Ordering::Relaxed) {
-      summary.cancelled = true;
-      break;
-    }
-    if !entry.file_type().is_some_and(|kind| kind.is_file()) {
-      continue;
-    }
-    let path = entry.path();
-    let Some(text) = read_searchable(path, open, limits.max_file_bytes) else {
-      continue;
-    };
-    summary.files_searched += 1;
+  let on_file = Mutex::new(on_file);
+  let files_searched = AtomicUsize::new(0);
+  let files_with_matches = AtomicUsize::new(0);
+  // Matches reserved so far; may overshoot the limit by what a thread could not use.
+  let reserved = AtomicUsize::new(0);
+  let limit_reached = AtomicBool::new(false);
 
-    let remaining = limits.max_matches - summary.matches;
-    let per_file = limits.max_matches_per_file.min(remaining);
-    let ranges: Vec<_> = searcher.find_in_str(&text).take(per_file + 1).collect();
-    if ranges.is_empty() {
-      continue;
-    }
-    if ranges.len() > per_file && per_file == remaining {
-      summary.truncated = true;
-    }
-    let matches = locate(&text, &ranges[..ranges.len().min(per_file)]);
-    summary.files_with_matches += 1;
-    summary.matches += matches.len();
-    on_file(FileMatches {
-      path: path.to_path_buf(),
-      relative: path.strip_prefix(root).map(to_slash).unwrap_or_default(),
-      matches,
-    });
-    if summary.matches >= limits.max_matches {
-      summary.truncated = true;
-      break;
-    }
+  walker.run(|| {
+    Box::new(|entry| {
+      if cancel.load(Ordering::Relaxed) || limit_reached.load(Ordering::Relaxed) {
+        return WalkState::Quit;
+      }
+      let Ok(entry) = entry else {
+        return WalkState::Continue;
+      };
+      if !entry.file_type().is_some_and(|kind| kind.is_file()) {
+        return WalkState::Continue;
+      }
+      let path = entry.path();
+      let Some(text) = read_searchable(path, open, limits.max_file_bytes) else {
+        return WalkState::Continue;
+      };
+      files_searched.fetch_add(1, Ordering::Relaxed);
+
+      let ranges: Vec<_> = searcher
+        .find_in_str(&text)
+        .take(limits.max_matches_per_file)
+        .collect();
+      if ranges.is_empty() {
+        return WalkState::Continue;
+      }
+      let before = reserved.fetch_add(ranges.len(), Ordering::Relaxed);
+      let allowed = ranges.len().min(limits.max_matches.saturating_sub(before));
+      if before + ranges.len() >= limits.max_matches {
+        limit_reached.store(true, Ordering::Relaxed);
+      }
+      if allowed == 0 {
+        return WalkState::Quit;
+      }
+      let matches = locate(&text, &ranges[..allowed]);
+      files_with_matches.fetch_add(1, Ordering::Relaxed);
+      let mut on_file = on_file.lock().unwrap_or_else(PoisonError::into_inner);
+      on_file(FileMatches {
+        path: path.to_path_buf(),
+        relative: path.strip_prefix(root).map(to_slash).unwrap_or_default(),
+        matches,
+      });
+      WalkState::Continue
+    })
+  });
+
+  SearchSummary {
+    files_searched: files_searched.into_inner(),
+    files_with_matches: files_with_matches.into_inner(),
+    matches: reserved.into_inner().min(limits.max_matches),
+    truncated: limit_reached.into_inner(),
+    cancelled: cancel.load(Ordering::Relaxed),
   }
-  summary
 }
 
 fn read_searchable(

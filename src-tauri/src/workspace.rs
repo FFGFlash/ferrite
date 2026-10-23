@@ -11,6 +11,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError, RwLock};
 
+use ferrite_tasks::{Priority, TaskHandle};
 use ferrite_text::{SearchQuery, TextSnapshot};
 use ferrite_workspace::{
   DirEntry, EntryKind, FileIndex, FileMatches, FileStamp, SearchLimits, SearchSummary,
@@ -24,6 +25,7 @@ use crate::editor::EditorState;
 use crate::editor::protocol::{DocumentSummary, SearchQueryDto};
 use crate::error::CommandError;
 use crate::events::{self, AppEvent, WorkspaceInfo};
+use crate::perf::Perf;
 use crate::settings::SettingsState;
 use crate::ui_state::UiStateStore;
 use crate::{dialogs, paths};
@@ -53,8 +55,8 @@ impl Active {
 #[derive(Default)]
 pub struct WorkspaceState {
   active: Mutex<Option<Active>>,
-  /// Cancellation flag of the running find-in-files search.
-  search: Mutex<Option<Arc<AtomicBool>>>,
+  /// The running find-in-files search, for cancellation.
+  search: Mutex<Option<TaskHandle>>,
 }
 
 impl WorkspaceState {
@@ -131,26 +133,33 @@ pub fn exclusions_changed(app: &AppHandle) {
   }
 }
 
+/// Builds the Go to File index on the worker pool. Reopening a workspace
+/// replaces (cancels) a still-running build.
 fn start_indexing(app: &AppHandle, active: &Active) {
   let exclude = app.state::<SettingsState>().get().exclude_filter();
-  let (root, index, indexing, cancel, app) = (
+  let (root, index, indexing, cancel, task_app) = (
     active.root.clone(),
     active.index.clone(),
     active.indexing.clone(),
     active.cancel.clone(),
     app.clone(),
   );
-  let spawned = std::thread::Builder::new()
-    .name("ferrite-index".into())
-    .spawn(move || {
+  app.state::<Perf>().scheduler.spawn(
+    "workspace-index",
+    Priority::Normal,
+    Some("workspace-index".into()),
+    move |token| {
       let started = std::time::Instant::now();
-      let built = scan_files(&root, &exclude, &cancel);
-      if cancel.load(Ordering::Relaxed) {
+      let built = scan_files(&root, &exclude, token.as_atomic());
+      if token.is_cancelled() || cancel.load(Ordering::Relaxed) {
         return;
       }
       let (files, truncated) = (built.len(), built.is_truncated());
       *index.write().unwrap_or_else(PoisonError::into_inner) = built;
       indexing.store(false, Ordering::Relaxed);
+      task_app
+        .state::<Perf>()
+        .record("workspace.index", started.elapsed());
       tracing::info!(
         files,
         truncated,
@@ -158,17 +167,15 @@ fn start_indexing(app: &AppHandle, active: &Active) {
         "indexed workspace"
       );
       events::emit(
-        &app,
+        &task_app,
         AppEvent::IndexStatus {
           indexing: false,
           files,
           truncated,
         },
       );
-    });
-  if let Err(error) = spawned {
-    tracing::error!(%error, "could not start indexing");
-  }
+    },
+  );
 }
 
 /// Handles a batch of file-change notifications (on the watcher's thread).
@@ -202,8 +209,16 @@ fn on_files_changed(app: &AppHandle, changed: Vec<PathBuf>) {
     },
   );
 
+  // Reloading reads files, so it runs on the worker pool rather than the
+  // watcher's thread. A newer change to the same file replaces a queued reload.
   for path in changed {
-    reload_if_open(app, &path);
+    let task_app = app.clone();
+    app.state::<Perf>().scheduler.spawn(
+      "reload-changed-file",
+      Priority::High,
+      Some(format!("reload:{}", path.display())),
+      move |_| reload_if_open(&task_app, &path),
+    );
   }
 }
 
@@ -483,7 +498,7 @@ pub async fn workspace_find_files(
 /// `channel` and finishing with a `done` event. Starting a search cancels
 /// the previous one.
 #[tauri::command]
-pub async fn workspace_search(
+pub fn workspace_search(
   app: AppHandle,
   query: SearchQueryDto,
   channel: Channel<SearchEvent>,
@@ -495,16 +510,6 @@ pub async fn workspace_search(
   let root = state
     .root()
     .ok_or_else(|| CommandError::new("noWorkspace", "No folder is open."))?;
-  let cancel = Arc::new(AtomicBool::new(false));
-  if let Some(previous) = state
-    .search
-    .lock()
-    .unwrap_or_else(PoisonError::into_inner)
-    .replace(cancel.clone())
-  {
-    previous.store(true, Ordering::Relaxed);
-  }
-
   let settings = app.state::<SettingsState>().get();
   let exclude = settings.exclude_filter();
   let limits = SearchLimits {
@@ -518,34 +523,52 @@ pub async fn workspace_search(
     .filter_map(|document| Some((document.path()?.to_path_buf(), document.buffer().snapshot())))
     .collect();
 
-  tauri::async_runtime::spawn_blocking(move || {
-    let started = std::time::Instant::now();
-    let summary = search_workspace(&root, &exclude, &searcher, &open, limits, &cancel, |file| {
-      if channel.send(SearchEvent::from(file)).is_err() {
-        cancel.store(true, Ordering::Relaxed);
-      }
-    });
-    tracing::debug!(
-      matches = summary.matches,
-      files = summary.files_searched,
-      cancelled = summary.cancelled,
-      elapsed_ms = started.elapsed().as_millis() as u64,
-      "workspace search finished"
-    );
-    let _ = channel.send(SearchEvent::from(summary));
-  })
-  .await
-  .map_err(CommandError::internal)
+  // Runs on the worker pool; a new search replaces (cancels) the previous one.
+  let task_app = app.clone();
+  let handle = app.state::<Perf>().scheduler.spawn(
+    "workspace-search",
+    Priority::High,
+    Some("workspace-search".into()),
+    move |token| {
+      let started = std::time::Instant::now();
+      let summary = search_workspace(
+        &root,
+        &exclude,
+        &searcher,
+        &open,
+        limits,
+        token.as_atomic(),
+        |file| {
+          if channel.send(SearchEvent::from(file)).is_err() {
+            token.cancel();
+          }
+        },
+      );
+      task_app
+        .state::<Perf>()
+        .record("workspace.search", started.elapsed());
+      tracing::debug!(
+        matches = summary.matches,
+        files = summary.files_searched,
+        cancelled = summary.cancelled,
+        elapsed_ms = started.elapsed().as_millis() as u64,
+        "workspace search finished"
+      );
+      let _ = channel.send(SearchEvent::from(summary));
+    },
+  );
+  *state.search.lock().unwrap_or_else(PoisonError::into_inner) = Some(handle);
+  Ok(())
 }
 
 #[tauri::command]
 pub fn workspace_search_cancel(state: State<'_, WorkspaceState>) {
-  if let Some(cancel) = state
+  if let Some(search) = state
     .search
     .lock()
     .unwrap_or_else(PoisonError::into_inner)
     .take()
   {
-    cancel.store(true, Ordering::Relaxed);
+    search.cancel();
   }
 }

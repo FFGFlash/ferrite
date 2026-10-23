@@ -3,6 +3,7 @@ import { useKeybindings } from "../commands/registry";
 import { ActivityBar } from "../components/ActivityBar";
 import { Notifications } from "../components/Notifications";
 import { Palette } from "../components/Palette";
+import { PerfOverlay } from "../components/PerfOverlay";
 import { Sash } from "../components/Sash";
 import { SideBar } from "../components/SideBar";
 import { StatusBar } from "../components/StatusBar";
@@ -57,6 +58,7 @@ export function Workbench({ appInfo }: WorkbenchProps) {
       <StatusBar appInfo={appInfo} />
       <Notifications />
       <Palette />
+      <PerfOverlay />
     </div>
   );
 }

@@ -12,7 +12,7 @@ use regex_automata::{Anchored, Span};
 use regex_cursor::Input;
 use regex_cursor::engines::meta::Regex;
 
-use crate::buffer::TextBuffer;
+use crate::buffer::{TextBuffer, TextSnapshot};
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct SearchQuery {
@@ -90,6 +90,18 @@ impl Searcher {
     self
       .regex
       .find_iter(input)
+      .filter(|found| !found.is_empty())
+      .take(limit)
+      .map(|found| found.range())
+      .collect()
+  }
+
+  /// Non-empty matches in a snapshot (e.g. on a background thread), in
+  /// order, at most `limit`.
+  pub fn find_in_snapshot(&self, snapshot: &TextSnapshot, limit: usize) -> Vec<Range<usize>> {
+    self
+      .regex
+      .find_iter(Input::new(&snapshot.rope))
       .filter(|found| !found.is_empty())
       .take(limit)
       .map(|found| found.range())

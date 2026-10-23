@@ -43,6 +43,19 @@ pub fn scan_files(root: &Path, exclude: &ExcludeFilter, cancel: &AtomicBool) -> 
 }
 
 impl FileIndex {
+  /// An index of the given relative paths (`/`-separated) without touching
+  /// the disk, for tests and benchmarks.
+  pub fn from_paths(root: &Path, paths: impl IntoIterator<Item = String>) -> Self {
+    let mut index = Self {
+      root: root.to_path_buf(),
+      ..Self::default()
+    };
+    for path in paths {
+      index.insert(path);
+    }
+    index
+  }
+
   pub fn root(&self) -> &Path {
     &self.root
   }

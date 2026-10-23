@@ -3,10 +3,11 @@
 A fast, memory-efficient, extensible code editor built with Rust, Tauri, React, and a sandboxed
 WebAssembly extension system.
 
-> **Status:** Milestone 3 (workbench basics) is complete. Ferrite opens folders with a file
-> explorer, Go to File, a command palette, find and replace, find in files, themes, and a
-> restored session. Performance foundations (benchmarks, large-file handling) come in
-> Milestone 4. See [`docs/DESIGN.md`](docs/DESIGN.md) for the full brief and milestone plan.
+> **Status:** Milestone 4 (performance foundations) is complete: incremental views, a bounded
+> background scheduler, large-file handling, instrumentation, and benchmarks with a measured
+> baseline ([`docs/performance.md`](docs/performance.md)). Syntax highlighting and language
+> servers come in Milestone 5. See [`docs/DESIGN.md`](docs/DESIGN.md) for the full brief and
+> milestone plan.
 
 ## Prerequisites
 
@@ -113,6 +114,8 @@ exclude = [".git", "dist"]
 | `pnpm typecheck`                                        | Type-check the frontend                                         |
 | `pnpm format`                                           | Format frontend (Prettier) and Rust (`cargo fmt`) sources       |
 | `pnpm format:check`                                     | Check formatting without writing                                |
+| `pnpm bench`                                            | Criterion microbenchmarks (`benches/`)                          |
+| `pnpm bench:app all`                                    | End-to-end startup, typing, and scrolling benchmarks (release)  |
 | `cargo test --workspace`                                | Run Rust tests                                                  |
 | `cargo clippy --workspace --all-targets -- -D warnings` | Lint Rust sources                                               |
 
@@ -143,7 +146,10 @@ measured from the start of `ferrite_app::run`.
 ```text
 Cargo.toml            Cargo workspace
 package.json          Frontend package and scripts
+benches/              Criterion benchmarks and fixtures
+scripts/              End-to-end benchmark harness
 crates/
+  ferrite-tasks/      Background scheduler and timing metrics
   ferrite-text/       Rope-backed text buffer, change sets, positions, Unicode boundaries
   ferrite-workspace/  Files, explorer listings, Go to File index, find in files, watching
   ferrite-core/       Documents, selections, editing operations, undo, dirty state

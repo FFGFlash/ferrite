@@ -6,8 +6,13 @@
 //! against the document as it is when each operation is applied, and clamped
 //! to valid positions.
 
-use ferrite_core::{Direction, Document, EditorOp, Motion, Unit, VerticalDirection};
-use ferrite_text::{SearchQuery, TextBuffer, Utf16Position};
+use std::ops::Range;
+
+use ferrite_core::{
+  Direction, Document, EditorOp, KnownLines, LineText, Motion, Unit, VerticalDirection,
+  ViewportUpdate,
+};
+use ferrite_text::{SearchQuery, TextBuffer, Utf16Position, Version};
 use serde::{Deserialize, Serialize};
 
 /// Most lines returned in one view, regardless of the requested viewport.
@@ -16,6 +21,11 @@ pub const MAX_VIEW_LINES: usize = 1_000;
 pub const MAX_VIEW_SELECTIONS: usize = 10_000;
 /// Most operations accepted in one batch.
 pub const MAX_OPS_PER_BATCH: usize = 1_000;
+/// Documents up to this size count find matches synchronously; larger ones
+/// count on a background worker.
+pub const SYNC_COUNT_BYTES: usize = 1024 * 1024;
+/// Most match highlights returned for the visible lines.
+const MAX_VISIBLE_MATCHES: usize = 5_000;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Position {
@@ -297,13 +307,24 @@ pub struct RangeDto {
   pub end: Position,
 }
 
+/// Document-wide matches of one query at one version, counted in the
+/// background for large documents.
+#[derive(Debug, Clone)]
+pub struct MatchCount {
+  pub version: Version,
+  pub query: SearchQuery,
+  pub matches: Vec<Range<usize>>,
+  pub truncated: bool,
+}
+
 /// Find results for the view's query: highlights for the visible lines and
 /// document-wide counts.
 #[derive(Debug, Serialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct SearchView {
   pub matches: Vec<RangeDto>,
-  pub total: usize,
+  /// Total matches, or `None` while a background count is running.
+  pub total: Option<usize>,
   pub truncated: bool,
   /// Index of the match the primary selection covers, if any.
   pub current: Option<usize>,
@@ -312,32 +333,156 @@ pub struct SearchView {
 }
 
 impl SearchView {
-  fn of(document: &Document, query: &SearchQuery, start_line: usize, end_line: usize) -> Self {
+  /// Builds the search section for lines `start_line..end_line`. `counted`
+  /// holds background results for this document, if any. Also returns
+  /// whether a background count is needed.
+  pub fn build(
+    document: &Document,
+    query: &SearchQuery,
+    start_line: usize,
+    end_line: usize,
+    counted: Option<&MatchCount>,
+  ) -> (Self, bool) {
     let searcher = match query.compile() {
       Ok(searcher) => searcher,
       Err(error) => {
-        return Self {
+        let view = Self {
           error: Some(error.to_string()),
           ..Self::default()
         };
+        return (view, false);
       }
     };
     let buffer = document.buffer();
     let visible = buffer.line_start(start_line)..buffer.line_end(end_line.saturating_sub(1));
-    let summary = document.match_summary(&searcher, visible);
+    let to_dto = |range: &Range<usize>| RangeDto {
+      start: buffer.offset_to_utf16(range.start).into(),
+      end: buffer.offset_to_utf16(range.end).into(),
+    };
+
+    if buffer.len() <= SYNC_COUNT_BYTES {
+      let summary = document.match_summary(&searcher, visible);
+      let view = Self {
+        matches: summary.visible.iter().map(to_dto).collect(),
+        total: Some(summary.total),
+        truncated: summary.truncated,
+        current: summary.current,
+        error: None,
+      };
+      return (view, false);
+    }
+
+    let matches = searcher
+      .find_in_buffer(buffer, visible, MAX_VISIBLE_MATCHES)
+      .iter()
+      .map(to_dto)
+      .collect();
+    let fresh =
+      counted.filter(|count| count.version == document.version() && count.query == *query);
+    let view = match fresh {
+      Some(count) => {
+        let primary = document.selections().primary().range();
+        Self {
+          matches,
+          total: Some(count.matches.len()),
+          truncated: count.truncated,
+          current: count
+            .matches
+            .binary_search_by_key(&primary.start, |found| found.start)
+            .ok()
+            .filter(|&index| count.matches[index] == primary),
+          error: None,
+        }
+      }
+      None => Self {
+        matches,
+        ..Self::default()
+      },
+    };
+    (view, fresh.is_none())
+  }
+}
+
+/// Lines the client holds, from its last view.
+#[derive(Debug, Clone, Copy, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct KnownDto {
+  pub version: u64,
+  pub start_line: usize,
+  pub end_line: usize,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SpliceDto {
+  pub start: usize,
+  pub removed: usize,
+  pub inserted: usize,
+}
+
+/// A line's text. Lines cut for display carry their full length.
+#[derive(Debug, Serialize)]
+#[serde(untagged)]
+pub enum LineDto {
+  Text(String),
+  #[serde(rename_all = "camelCase")]
+  Cut {
+    text: String,
+    full_length: usize,
+  },
+}
+
+impl From<LineText> for LineDto {
+  fn from(line: LineText) -> Self {
+    match line.full_utf16_len {
+      None => Self::Text(line.text),
+      Some(full_length) => Self::Cut {
+        text: line.text,
+        full_length,
+      },
+    }
+  }
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ChunkDto {
+  pub start: usize,
+  pub lines: Vec<LineDto>,
+}
+
+/// How the client updates its lines: replay `splices` on the lines it held
+/// at version `base` (or discard them if `base` is `None`), then fill in
+/// `chunks`. Afterwards it holds exactly `start_line..end_line` of the view.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LinesDto {
+  pub base: Option<u64>,
+  pub splices: Vec<SpliceDto>,
+  pub chunks: Vec<ChunkDto>,
+}
+
+impl From<ViewportUpdate> for LinesDto {
+  fn from(update: ViewportUpdate) -> Self {
     Self {
-      matches: summary
-        .visible
+      base: update.base.map(Version::get),
+      splices: update
+        .splices
         .into_iter()
-        .map(|range| RangeDto {
-          start: buffer.offset_to_utf16(range.start).into(),
-          end: buffer.offset_to_utf16(range.end).into(),
+        .map(|splice| SpliceDto {
+          start: splice.start,
+          removed: splice.removed,
+          inserted: splice.inserted,
         })
         .collect(),
-      total: summary.total,
-      truncated: summary.truncated,
-      current: summary.current,
-      error: None,
+      chunks: update
+        .chunks
+        .into_iter()
+        .map(|chunk| ChunkDto {
+          start: chunk.start,
+          lines: chunk.lines.into_iter().map(LineDto::from).collect(),
+        })
+        .collect(),
     }
   }
 }
@@ -349,10 +494,11 @@ pub struct EditorView {
   pub document_id: u64,
   pub version: u64,
   pub line_count: usize,
+  /// The viewport this view describes: lines `start_line..end_line`.
   pub start_line: usize,
-  /// Text of lines `start_line..start_line + lines.len()`, without line breaks.
-  pub lines: Vec<String>,
-  /// Selections touching the returned lines, plus the primary selection.
+  pub end_line: usize,
+  pub lines: LinesDto,
+  /// Selections touching the viewport, plus the primary selection.
   pub selections: Vec<SelectionDto>,
   pub selection_count: usize,
   pub primary: CursorDto,
@@ -362,14 +508,26 @@ pub struct EditorView {
 }
 
 impl EditorView {
-  pub fn of(document: &Document, search: Option<&SearchQuery>, viewport: Viewport) -> Self {
+  /// The view of `viewport` for a client holding `known`. `search` builds
+  /// the search section for the clamped viewport lines, if requested.
+  pub fn of(
+    document: &Document,
+    viewport: Viewport,
+    known: Option<KnownDto>,
+    search: impl FnOnce(usize, usize) -> Option<SearchView>,
+  ) -> Self {
     let buffer = document.buffer();
-    let line_count = buffer.line_count();
-    let start = viewport.start_line.min(line_count - 1);
-    let end = viewport
-      .end_line
-      .clamp(start + 1, line_count)
-      .min(start + MAX_VIEW_LINES);
+    let known = known.map(|known| KnownLines {
+      version: Version::from_raw(known.version),
+      start: known.start_line,
+      end: known.end_line,
+    });
+    let update = document.viewport_update(
+      known,
+      viewport.start_line..viewport.end_line,
+      MAX_VIEW_LINES,
+    );
+    let (start, end) = (update.lines.start, update.lines.end);
 
     let selections = document.selections();
     let primary_index = selections.primary_index();
@@ -392,9 +550,10 @@ impl EditorView {
     Self {
       document_id: document.id().get(),
       version: document.version().get(),
-      line_count,
+      line_count: buffer.line_count(),
       start_line: start,
-      lines: (start..end).map(|line| buffer.line_text(line)).collect(),
+      end_line: end,
+      lines: update.into(),
       selections: visible,
       selection_count: selections.len(),
       primary: CursorDto {
@@ -402,19 +561,34 @@ impl EditorView {
         visual_column: document.visual_column(head),
       },
       dirty: document.is_dirty(),
-      search: search.map(|query| SearchView::of(document, query, start, end)),
+      search: search(start, end),
     }
   }
 }
 
 #[cfg(test)]
 mod tests {
-  use ferrite_core::Editor;
+  use ferrite_core::{Editor, MAX_MATCHES};
 
   use super::*;
 
   fn ops(json: &str) -> Vec<OpDto> {
     serde_json::from_str(json).expect("valid ops")
+  }
+
+  fn viewport(start_line: usize, end_line: usize) -> Viewport {
+    Viewport {
+      start_line,
+      end_line,
+    }
+  }
+
+  fn view(document: &Document, viewport: Viewport, known: Option<KnownDto>) -> EditorView {
+    EditorView::of(document, viewport, known, |_, _| None)
+  }
+
+  fn json(view: &EditorView) -> serde_json::Value {
+    serde_json::to_value(view).expect("serializes")
   }
 
   #[test]
@@ -471,30 +645,59 @@ mod tests {
       .apply(EditorOp::Insert("one\ntwo\n🦀3".into()))
       .expect("applies");
 
-    let view = EditorView::of(
-      document,
-      None,
-      Viewport {
-        start_line: 1,
-        end_line: 99,
-      },
+    let first = json(&view(document, viewport(1, 99), None));
+    assert_eq!(
+      first["lines"]["chunks"][0]["lines"],
+      serde_json::json!(["two", "🦀3"])
     );
-    assert_eq!(view.lines, vec!["two", "🦀3"]);
-    assert_eq!(view.line_count, 3);
-    assert_eq!(view.primary.position, Position { line: 2, column: 3 });
-    assert_eq!(view.primary.visual_column, 2);
-    assert!(view.dirty);
+    assert_eq!(first["lines"]["base"], serde_json::Value::Null);
+    assert_eq!(first["startLine"], 1);
+    assert_eq!(first["endLine"], 3);
+    assert_eq!(
+      first["primary"]["position"],
+      serde_json::json!({ "line": 2, "column": 3 })
+    );
+    assert_eq!(first["primary"]["visualColumn"], 2);
+    assert_eq!(first["dirty"], true);
 
-    let view = EditorView::of(
-      document,
-      None,
-      Viewport {
-        start_line: 50,
-        end_line: 10,
-      },
+    let clamped = view(document, viewport(50, 10), None);
+    assert_eq!((clamped.start_line, clamped.end_line), (2, 3));
+  }
+
+  #[test]
+  fn views_send_only_what_the_client_is_missing() {
+    let mut editor = Editor::default();
+    let id = editor.create_untitled();
+    let document = editor.document_mut(id).expect("open");
+    document
+      .apply(EditorOp::Insert("line\n".repeat(50)))
+      .expect("applies");
+    let first = view(document, viewport(0, 10), None);
+    let known = KnownDto {
+      version: first.version,
+      start_line: first.start_line,
+      end_line: first.end_line,
+    };
+    // The cursor is on line 50, outside the viewport.
+    document
+      .apply(EditorOp::Insert("!".into()))
+      .expect("applies");
+    let next = json(&view(document, viewport(0, 10), Some(known)));
+    assert_eq!(next["lines"]["base"], first.version);
+    assert_eq!(next["lines"]["chunks"], serde_json::json!([]));
+    assert_eq!(next["lines"]["splices"].as_array().map(Vec::len), Some(1));
+  }
+
+  #[test]
+  fn cut_lines_serialize_with_their_full_length() {
+    let line = LineDto::from(LineText {
+      text: "abc".into(),
+      full_utf16_len: Some(99),
+    });
+    assert_eq!(
+      serde_json::to_value(line).expect("serializes"),
+      serde_json::json!({ "text": "abc", "fullLength": 99 })
     );
-    assert_eq!(view.start_line, 2);
-    assert_eq!(view.lines.len(), 1);
   }
 
   #[test]
@@ -519,17 +722,10 @@ mod tests {
     ] {
       document.apply(op).expect("applies");
     }
-    let view = EditorView::of(
-      document,
-      None,
-      Viewport {
-        start_line: 0,
-        end_line: 10,
-      },
-    );
-    assert_eq!(view.selection_count, 2);
+    let first = view(document, viewport(0, 10), None);
+    assert_eq!(first.selection_count, 2);
     assert_eq!(
-      view.selections.len(),
+      first.selections.len(),
       2,
       "line 0 is visible and line 50 is primary"
     );
@@ -541,15 +737,50 @@ mod tests {
         add: true,
       })
       .expect("applies");
-    let view = EditorView::of(
-      document,
-      None,
-      Viewport {
-        start_line: 90,
-        end_line: 99,
-      },
+    let later = view(document, viewport(90, 99), None);
+    assert_eq!(later.selections.len(), 1);
+    assert!(later.selections[0].primary);
+  }
+
+  #[test]
+  fn large_documents_count_matches_in_the_background() {
+    let mut editor = Editor::default();
+    let id = editor.create_untitled();
+    let document = editor.document_mut(id).expect("open");
+    // Large enough to count in the background, with a needle every ten lines
+    // (so the total stays under the match limit).
+    let block = format!("needle\n{}", "haystack haystack haystack\n".repeat(9));
+    let blocks = SYNC_COUNT_BYTES / block.len() + 1;
+    document
+      .apply(EditorOp::Insert(block.repeat(blocks)))
+      .expect("applies");
+    let query = SearchQuery::literal("needle");
+
+    let (pending, needs_count) = SearchView::build(document, &query, 0, 20, None);
+    assert!(needs_count);
+    assert_eq!(pending.total, None, "counting");
+    assert_eq!(
+      pending.matches.len(),
+      2,
+      "visible matches are found right away"
     );
-    assert_eq!(view.selections.len(), 1);
-    assert!(view.selections[0].primary);
+
+    let searcher = query.compile().expect("compiles");
+    let buffer = document.buffer();
+    let count = MatchCount {
+      version: document.version(),
+      query: query.clone(),
+      matches: searcher.find_in_buffer(buffer, 0..buffer.len(), MAX_MATCHES + 1),
+      truncated: false,
+    };
+    let (counted, needs_count) = SearchView::build(document, &query, 0, 20, Some(&count));
+    assert!(!needs_count);
+    assert_eq!(counted.total, Some(blocks));
+
+    let stale = MatchCount {
+      query: SearchQuery::literal("other"),
+      ..count
+    };
+    assert!(SearchView::build(document, &query, 0, 20, Some(&stale)).1);
   }
 }
