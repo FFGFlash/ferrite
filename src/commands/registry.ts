@@ -110,7 +110,7 @@ function parse(binding: string, mac: boolean): ParsedBinding {
 export function matchesKeybinding(binding: string, event: KeyInput, mac: boolean): boolean {
   const parsed = parse(binding, mac);
   return (
-    parsed.key === event.key.toLowerCase() &&
+    parsed.key === (event.key === " " ? "space" : event.key.toLowerCase()) &&
     parsed.ctrl === event.ctrlKey &&
     parsed.meta === event.metaKey &&
     parsed.alt === event.altKey &&
@@ -124,6 +124,7 @@ const keyNames: Record<string, string> = {
   tab: "Tab",
   enter: "Enter",
   escape: "Esc",
+  space: "Space",
 };
 
 /** A keybinding for display, e.g. "Ctrl+Shift+P" or "⇧⌘P". */

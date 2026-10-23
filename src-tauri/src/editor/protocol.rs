@@ -15,6 +15,9 @@ use ferrite_core::{
 use ferrite_text::{SearchQuery, TextBuffer, Utf16Position, Version};
 use serde::{Deserialize, Serialize};
 
+use super::syntax::LineHighlightsDto;
+use crate::lsp::{DiagnosticDto, LanguageStatusDto};
+
 /// Most lines returned in one view, regardless of the requested viewport.
 pub const MAX_VIEW_LINES: usize = 1_000;
 /// Most selections returned in one view.
@@ -43,7 +46,7 @@ impl From<Utf16Position> for Position {
 }
 
 impl Position {
-  fn to_offset(self, buffer: &TextBuffer) -> usize {
+  pub(crate) fn to_offset(self, buffer: &TextBuffer) -> usize {
     buffer.utf16_to_offset(Utf16Position {
       line: self.line,
       column: self.column,
@@ -505,16 +508,26 @@ pub struct EditorView {
   pub dirty: bool,
   /// Present when the request included a find query.
   pub search: Option<SearchView>,
+  /// Syntax highlights for view lines whose spans changed. Lines sent in
+  /// `lines.chunks` start with no spans; other lines keep theirs.
+  pub highlights: Vec<LineHighlightsDto>,
+  /// Diagnostics on the view's lines.
+  pub diagnostics: Vec<DiagnosticDto>,
+  /// The document's language and its server, if it has a known language.
+  pub language: Option<LanguageStatusDto>,
 }
 
 impl EditorView {
   /// The view of `viewport` for a client holding `known`. `search` builds
-  /// the search section for the clamped viewport lines, if requested.
+  /// the search section for the clamped viewport lines, if requested;
+  /// `highlights` the highlights for those lines, given the line ranges sent
+  /// as chunks.
   pub fn of(
     document: &Document,
     viewport: Viewport,
     known: Option<KnownDto>,
     search: impl FnOnce(usize, usize) -> Option<SearchView>,
+    highlights: impl FnOnce(Range<usize>, &[Range<usize>]) -> Vec<LineHighlightsDto>,
   ) -> Self {
     let buffer = document.buffer();
     let known = known.map(|known| KnownLines {
@@ -528,6 +541,12 @@ impl EditorView {
       MAX_VIEW_LINES,
     );
     let (start, end) = (update.lines.start, update.lines.end);
+    let chunks: Vec<Range<usize>> = update
+      .chunks
+      .iter()
+      .map(|chunk| chunk.start..chunk.start + chunk.lines.len())
+      .collect();
+    let highlights = highlights(start..end, &chunks);
 
     let selections = document.selections();
     let primary_index = selections.primary_index();
@@ -562,6 +581,9 @@ impl EditorView {
       },
       dirty: document.is_dirty(),
       search: search(start, end),
+      highlights,
+      diagnostics: Vec::new(),
+      language: None,
     }
   }
 }
@@ -584,7 +606,7 @@ mod tests {
   }
 
   fn view(document: &Document, viewport: Viewport, known: Option<KnownDto>) -> EditorView {
-    EditorView::of(document, viewport, known, |_, _| None)
+    EditorView::of(document, viewport, known, |_, _| None, |_, _| Vec::new())
   }
 
   fn json(view: &EditorView) -> serde_json::Value {

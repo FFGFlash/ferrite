@@ -73,6 +73,9 @@ export type AppEvent =
   | { type: "documentChangedOnDisk"; document: DocumentSummary }
   | { type: "settingsChanged"; settings: FrontendSettings }
   | { type: "searchCounted"; documentId: number }
+  | { type: "syntaxUpdated"; documentId: number }
+  | { type: "diagnosticsChanged"; documentId: number }
+  | { type: "languageServerChanged" }
   | { type: "documentOpened"; document: DocumentSummary; active: boolean }
   | { type: "indexStatus"; indexing: boolean; files: number; truncated: boolean };
 

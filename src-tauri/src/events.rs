@@ -44,6 +44,17 @@ pub enum AppEvent {
   SearchCounted {
     document_id: u64,
   },
+  /// A document's diagnostics changed.
+  DiagnosticsChanged {
+    document_id: u64,
+  },
+  /// A language server started, stopped, or began or finished work.
+  LanguageServerChanged,
+  /// A background parse finished, so a document's highlighting may have
+  /// changed.
+  SyntaxUpdated {
+    document_id: u64,
+  },
   /// A file was opened in the background (e.g. at startup).
   DocumentOpened {
     document: DocumentSummary,

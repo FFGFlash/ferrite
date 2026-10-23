@@ -3,11 +3,11 @@
 A fast, memory-efficient, extensible code editor built with Rust, Tauri, React, and a sandboxed
 WebAssembly extension system.
 
-> **Status:** Milestone 4 (performance foundations) is complete: incremental views, a bounded
-> background scheduler, large-file handling, instrumentation, and benchmarks with a measured
-> baseline ([`docs/performance.md`](docs/performance.md)). Syntax highlighting and language
-> servers come in Milestone 5. See [`docs/DESIGN.md`](docs/DESIGN.md) for the full brief and
-> milestone plan.
+> **Status:** Milestone 5 (syntax and language servers) is complete: Tree-sitter highlighting
+> for six languages, and diagnostics, hover, go to definition, and completion through language
+> servers such as rust-analyzer. Extensions come in Milestone 6. See
+> [`docs/DESIGN.md`](docs/DESIGN.md) for the full brief and milestone plan, and
+> [`docs/performance.md`](docs/performance.md) for measurements.
 
 ## Prerequisites
 
@@ -62,6 +62,8 @@ preserved exactly, and new lines use the file's existing line ending.
 | Delete word                         | Ctrl+Backspace / Ctrl+Delete     | ⌥Backspace / ⌥Delete     |
 | Add cursor above / below / at click | Ctrl+Alt+↑ / ↓, Alt+click        | ⌘⌥↑ / ↓, ⌥click          |
 | Select word / one cursor            | Double-click / Escape            | Double-click / Escape    |
+| Go to definition                    | F12, Ctrl+click                  | F12, ⌘click              |
+| Trigger suggestions                 | Ctrl+Space                       | ⌃Space                   |
 
 In the find widget, Alt+C, Alt+W, and Alt+R toggle Match Case, Whole Word, and Regular
 Expression; in the replace field, Enter replaces and Ctrl+Enter replaces all. Regex
@@ -71,6 +73,25 @@ Hold Shift with any movement key to extend the selection. Closing a tab or the w
 unsaved changes asks whether to save them. If another program changes an open file, Ferrite
 reloads it when you have no unsaved changes, and otherwise keeps your version and asks before
 overwriting when you save.
+
+## Languages
+
+Rust, TypeScript (and TSX), JavaScript, JSON, TOML, and Python files are highlighted with
+Tree-sitter grammars built into Ferrite.
+
+With a language server installed, Ferrite also shows errors and warnings as you type (squiggles,
+plus counts in the status bar), shows type information and documentation when the pointer rests
+on a symbol, goes to definitions (F12 or Ctrl/⌘+click), and offers completions (as you type, after
+`.` and similar characters, or with Ctrl+Space). Servers start when you open a file that needs one:
+
+| Language                | Server                       | Install                                                |
+| ----------------------- | ---------------------------- | ------------------------------------------------------ |
+| Rust                    | `rust-analyzer`              | `rustup component add rust-analyzer`                   |
+| TypeScript / JavaScript | `typescript-language-server` | `npm install -g typescript-language-server typescript` |
+| Python                  | `pyright-langserver`         | `npm install -g pyright`                               |
+
+The status bar shows the server's state; hover it for details if a server is missing or failed.
+Servers can be changed, added, or turned off in the `[lsp]` section of the settings.
 
 ## Workspace
 
@@ -94,6 +115,9 @@ theme = "light"   # "system", "dark", or "light"
 
 [files]
 exclude = [".git", "dist"]
+
+[lsp.servers.rust-analyzer]
+command = "C:/tools/rust-analyzer.exe"   # use a specific build
 ```
 
 | Platform | Settings                                            | Session state                                       |
@@ -116,6 +140,7 @@ exclude = [".git", "dist"]
 | `pnpm format:check`                                     | Check formatting without writing                                |
 | `pnpm bench`                                            | Criterion microbenchmarks (`benches/`)                          |
 | `pnpm bench:app all`                                    | End-to-end startup, typing, and scrolling benchmarks (release)  |
+| `pnpm bench:app typing --file F`                        | Typing benchmark, also typing into file `F` (e.g. a `.rs` file) |
 | `cargo test --workspace`                                | Run Rust tests                                                  |
 | `cargo clippy --workspace --all-targets -- -D warnings` | Lint Rust sources                                               |
 
@@ -150,6 +175,8 @@ benches/              Criterion benchmarks and fixtures
 scripts/              End-to-end benchmark harness
 crates/
   ferrite-tasks/      Background scheduler and timing metrics
+  ferrite-syntax/     Tree-sitter grammars, incremental parsing, highlighting
+  ferrite-lsp/        Language server client: processes, JSON-RPC, positions, document sync
   ferrite-text/       Rope-backed text buffer, change sets, positions, Unicode boundaries
   ferrite-workspace/  Files, explorer listings, Go to File index, find in files, watching
   ferrite-core/       Documents, selections, editing operations, undo, dirty state
@@ -158,7 +185,7 @@ src/                  React + TypeScript workbench
   app/                Root component, workbench layout, view registry
   commands/           Command registry, keybindings, fuzzy matching, built-in commands
   components/         Workbench chrome (activity bar, side bar, palette, notifications, ...)
-  editor/             Editor view, find widget, tabs, input keymap, backend session
+  editor/             Editor view, find widget, hover and completion, tabs, keymap, session
   panels/             Side bar views (explorer, search)
   state/              Small observable stores (documents, workspace, search, layout, ...)
   ipc/                Typed wrappers for Tauri commands (the only place that calls invoke)

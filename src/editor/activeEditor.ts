@@ -18,6 +18,12 @@ export interface EditorController {
   lineCount(): number;
   /** Scrolls so `line` is at the top of the viewport. */
   scrollToLine(line: number): void;
+  /** Goes to the definition of the symbol at the cursor. */
+  goToDefinition(): void;
+  /** Opens completion at the cursor. */
+  triggerSuggest(): void;
+  /** Shows hover information for the symbol at the cursor. */
+  showHover(): void;
 }
 
 export const activeEditor = createStore<EditorController | null>(null);

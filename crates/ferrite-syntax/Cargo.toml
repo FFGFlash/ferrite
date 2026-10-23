@@ -1,0 +1,22 @@
+[package]
+name = "ferrite-syntax"
+description = "Tree-sitter parsing and syntax highlighting for Ferrite."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+ferrite-text = { workspace = true }
+streaming-iterator = { workspace = true }
+thiserror = { workspace = true }
+tree-sitter = { workspace = true }
+tree-sitter-javascript = { workspace = true }
+tree-sitter-json = { workspace = true }
+tree-sitter-python = { workspace = true }
+tree-sitter-rust = { workspace = true }
+tree-sitter-toml-ng = { workspace = true }
+tree-sitter-typescript = { workspace = true }
+
+[lints]
+workspace = true

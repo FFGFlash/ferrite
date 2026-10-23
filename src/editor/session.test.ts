@@ -16,6 +16,9 @@ function view(version: number, viewport: Viewport): WireView {
     primary: { position: { line: 0, column: 0 }, visualColumn: 0 },
     dirty: false,
     search: null,
+    highlights: [],
+    diagnostics: [],
+    language: null,
   };
 }
 

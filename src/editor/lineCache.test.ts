@@ -15,6 +15,9 @@ function wire(version: number, startLine: number, endLine: number, lines: LinesU
     primary: { position: { line: 0, column: 0 }, visualColumn: 0 },
     dirty: false,
     search: null,
+    highlights: [],
+    diagnostics: [],
+    language: null,
   };
 }
 
@@ -77,7 +80,32 @@ describe("applyUpdate", () => {
         chunks: [{ start: 0, lines: [{ text: "abc", fullLength: 1_000_000 }] }],
       }),
     );
-    expect(next?.lines[0]).toEqual({ text: "abc", fullLength: 1_000_000 });
+    expect(next?.lines[0]).toEqual({ text: "abc", fullLength: 1_000_000, spans: [] });
+  });
+
+  it("keeps the spans of held lines and applies changed ones", () => {
+    const highlighted = applyUpdate(initial, {
+      ...wire(1, 0, 5, { base: 1, splices: [], chunks: [] }),
+      highlights: [
+        { line: 0, spans: [0, 1, 2] },
+        { line: 1, spans: [0, 1, 3] },
+      ],
+    });
+    // Line 1 is edited (and so resent without spans); line 0 shifts down.
+    const next = applyUpdate(highlighted, {
+      ...wire(2, 0, 6, {
+        base: 1,
+        splices: [{ start: 1, removed: 1, inserted: 2 }],
+        chunks: [{ start: 0, lines: ["z", "b1", "b2"] }],
+      }),
+      highlights: [{ line: 3, spans: [0, 1, 1] }],
+    });
+    expect(next?.lines.map((line) => line.spans)).toEqual([[], [], [], [0, 1, 1], [], []]);
+    const shifted = applyUpdate(highlighted, {
+      ...wire(2, 0, 5, { base: 1, splices: [{ start: 0, removed: 0, inserted: 0 }], chunks: [] }),
+      highlights: [],
+    });
+    expect(shifted?.lines[0]?.spans).toEqual([0, 1, 2]);
   });
 
   it("refuses updates it cannot apply", () => {

@@ -25,5 +25,7 @@ mod search;
 pub use buffer::{TextBuffer, TextSnapshot, Utf16Position, Version};
 pub use change::{Bias, ChangeSet, Edit, EditError};
 pub use line_ending::{LineEnding, normalize_line_endings};
-pub use lines::{LineSplice, map_line_range, missing_ranges};
+pub use lines::{
+  ByteEdit, LineSplice, TextPoint, map_line_range, map_offset_through, missing_ranges,
+};
 pub use search::{SearchError, SearchQuery, Searcher};

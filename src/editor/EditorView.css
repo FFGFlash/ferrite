@@ -98,6 +98,32 @@
   outline: 1px solid var(--color-editor-find-match-border);
 }
 
+/* A wavy underline along the bottom of the diagnostic's range. */
+.editor-view__diagnostic {
+  --squiggle: var(--color-diagnostic-error);
+  position: absolute;
+  height: var(--editor-line-height);
+  background:
+    linear-gradient(135deg, transparent 45%, var(--squiggle) 45% 60%, transparent 60%) 0 100% / 4px
+      3px repeat-x,
+    linear-gradient(45deg, transparent 45%, var(--squiggle) 45% 60%, transparent 60%) 2px 100% / 4px
+      3px repeat-x;
+}
+
+.editor-view__diagnostic[data-severity="warning"] {
+  --squiggle: var(--color-diagnostic-warning);
+}
+
+.editor-view__diagnostic[data-severity="info"] {
+  --squiggle: var(--color-diagnostic-info);
+}
+
+.editor-view__diagnostic[data-severity="hint"] {
+  background: none;
+  border-bottom: 2px dotted var(--color-text-muted);
+  opacity: 0.6;
+}
+
 .editor-view__caret {
   position: absolute;
   width: 2px;
@@ -137,4 +163,74 @@
   field-sizing: content;
   opacity: 1;
   text-decoration: underline;
+}
+
+/* Syntax highlighting: one class per token kind (see TOKEN_KINDS). */
+.tok-comment {
+  color: var(--color-syntax-comment);
+  font-style: italic;
+}
+
+.tok-keyword {
+  color: var(--color-syntax-keyword);
+}
+
+.tok-string {
+  color: var(--color-syntax-string);
+}
+
+.tok-escape {
+  color: var(--color-syntax-escape);
+}
+
+.tok-number {
+  color: var(--color-syntax-number);
+}
+
+.tok-constant {
+  color: var(--color-syntax-constant);
+}
+
+.tok-function {
+  color: var(--color-syntax-function);
+}
+
+.tok-macro {
+  color: var(--color-syntax-macro);
+}
+
+.tok-type {
+  color: var(--color-syntax-type);
+}
+
+.tok-variable {
+  color: var(--color-syntax-variable);
+}
+
+.tok-property {
+  color: var(--color-syntax-property);
+}
+
+.tok-operator {
+  color: var(--color-syntax-operator);
+}
+
+.tok-punctuation {
+  color: var(--color-syntax-punctuation);
+}
+
+.tok-attribute {
+  color: var(--color-syntax-attribute);
+}
+
+.tok-tag {
+  color: var(--color-syntax-tag);
+}
+
+.tok-label {
+  color: var(--color-syntax-label);
+}
+
+.tok-module {
+  color: var(--color-syntax-module);
 }

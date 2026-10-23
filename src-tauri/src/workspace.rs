@@ -25,6 +25,7 @@ use crate::editor::EditorState;
 use crate::editor::protocol::{DocumentSummary, SearchQueryDto};
 use crate::error::CommandError;
 use crate::events::{self, AppEvent, WorkspaceInfo};
+use crate::lsp::LspState;
 use crate::perf::Perf;
 use crate::settings::SettingsState;
 use crate::ui_state::UiStateStore;
@@ -64,7 +65,7 @@ impl WorkspaceState {
     self.active.lock().unwrap_or_else(PoisonError::into_inner)
   }
 
-  fn root(&self) -> Option<PathBuf> {
+  pub(crate) fn root(&self) -> Option<PathBuf> {
     self.lock().as_ref().map(|active| active.root.clone())
   }
 }
@@ -105,8 +106,13 @@ pub fn open(app: &AppHandle, path: &Path) -> Result<WorkspaceInfo, CommandError>
   };
   let info = active.info();
   start_indexing(app, &active);
-  if let Some(previous) = app.state::<WorkspaceState>().lock().replace(active) {
+  let previous = app.state::<WorkspaceState>().lock().replace(active);
+  if let Some(previous) = &previous {
     previous.cancel.store(true, Ordering::Relaxed);
+  }
+  if previous.is_some_and(|previous| previous.root != root) {
+    // Language servers are per workspace root.
+    app.state::<LspState>().restart_all(app);
   }
 
   app
@@ -425,6 +431,7 @@ pub fn workspace_close(app: AppHandle, state: State<'_, WorkspaceState>) {
   if let Some(previous) = state.lock().take() {
     previous.cancel.store(true, Ordering::Relaxed);
     tracing::info!(root = %previous.root.display(), "closed workspace");
+    app.state::<LspState>().restart_all(&app);
   }
   app.state::<UiStateStore>().update(|ui| ui.workspace = None);
   events::emit(&app, AppEvent::WorkspaceChanged { workspace: None });

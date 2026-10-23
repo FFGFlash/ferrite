@@ -12,6 +12,7 @@ mod editor;
 mod error;
 mod events;
 mod logging;
+mod lsp;
 mod paths;
 mod perf;
 mod settings;
@@ -34,6 +35,7 @@ pub fn run() {
     .manage(events::EventHub::default())
     .manage(workspace::WorkspaceState::default())
     .manage(perf::Perf::default())
+    .manage(lsp::LspState::default())
     .setup(move |app| {
       let log_dir = match app.path().app_log_dir() {
         Ok(dir) => Some(dir),
@@ -134,6 +136,9 @@ pub fn run() {
       workspace::workspace_find_files,
       workspace::workspace_search,
       workspace::workspace_search_cancel,
+      lsp::lsp_hover,
+      lsp::lsp_definition,
+      lsp::lsp_completion,
       perf::perf_stats,
       bench::bench_config,
       bench::bench_generate,
@@ -153,7 +158,11 @@ pub fn run() {
   app.run(|handle, event| {
     if let RunEvent::Exit = event {
       tracing::info!("exiting");
-      // Stop background work (searches, indexing) before the process ends.
+      // Stop language servers and background work (searches, indexing)
+      // before the process ends.
+      if let Some(lsp) = handle.try_state::<lsp::LspState>() {
+        lsp.shutdown_all();
+      }
       if let Some(perf) = handle.try_state::<perf::Perf>() {
         perf.scheduler.shutdown();
       }

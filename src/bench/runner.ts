@@ -13,6 +13,7 @@ import {
   type BenchConfig,
 } from "../ipc/perf";
 import { activate, documentsStore } from "../state/documents";
+import { editorStatus } from "../state/editorStatus";
 import { nextPaint, perfSnapshot, resetPerf, summarize } from "../state/perf";
 
 type Benchmark = (config: BenchConfig) => Promise<Record<string, unknown>>;
@@ -54,6 +55,27 @@ async function typeAndTime(editor: EditorController, count: number): Promise<num
   return samples;
 }
 
+/**
+ * Waits (up to a minute) until the active document's language server, if
+ * any, has started and finished its initial work, so typing is measured in
+ * the steady state rather than while the server indexes.
+ */
+async function languageServerSettled(): Promise<void> {
+  const deadline = now() + 60_000;
+  let readySince: number | null = null;
+  while (now() < deadline) {
+    const state = editorStatus.get()?.language?.server?.state;
+    if (state === undefined || state === "failed") {
+      return;
+    }
+    readySince = state === "ready" ? (readySince ?? now()) : null;
+    if (readySince !== null && now() - readySince > 2_000) {
+      return;
+    }
+    await delay(100);
+  }
+}
+
 const benchmarks: Record<string, Benchmark> = {
   /** Time to an interactive window, measured once the app is idle. */
   async startup() {
@@ -61,8 +83,12 @@ const benchmarks: Record<string, Benchmark> = {
     return { navigationToIdleMs: now(), frontend: perfSnapshot() };
   },
 
-  /** Keystroke-to-paint latency in a small and a large document, and a typing burst. */
-  async typing() {
+  /**
+   * Keystroke-to-paint latency in a small and a large document, and a typing
+   * burst. With a file, also typing in the middle of that file (which, for a
+   * source file, includes syntax highlighting and language server sync).
+   */
+  async typing(config) {
     const small = await addDocument(await newDocument());
     await typeAndTime(small, 20);
     resetPerf();
@@ -96,9 +122,25 @@ const benchmarks: Record<string, Benchmark> = {
     await typeAndTime(large, 20);
     const largeSamples = await typeAndTime(large, 300);
 
+    let fileSamples: number[] | null = null;
+    if (config.file) {
+      const file = await addDocument(await openDocument(config.file));
+      const middle = Math.floor(file.lineCount() / 2);
+      file.dispatch({
+        type: "setCursor",
+        position: { line: middle, column: 0 },
+        extend: false,
+        add: false,
+      });
+      await languageServerSettled();
+      await typeAndTime(file, 20);
+      fileSamples = await typeAndTime(file, 300);
+    }
+
     return {
       smallDocumentKeystroke: summarize("keystrokeToPaint", "ms", smallSamples),
       largeDocumentKeystroke: summarize("keystrokeToPaint", "ms", largeSamples),
+      fileKeystroke: fileSamples && summarize("keystrokeToPaint", "ms", fileSamples),
       burst300CharactersMs: burstMs,
       frontend: perfSnapshot(),
       backend: await getPerfStats(),

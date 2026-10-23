@@ -5,6 +5,8 @@
  *   pnpm tauri build --no-bundle          # build target/release/ferrite first
  *   node scripts/bench.mjs startup        # launch time and idle memory (5 runs)
  *   node scripts/bench.mjs typing         # keystroke-to-paint latency
+ *                                         (--file F also types into F, e.g.
+ *                                         a source file with highlighting)
  *   node scripts/bench.mjs scroll         # page-jump scrolling, 200k lines
  *   node scripts/bench.mjs open --file F  # open a file until first paint
  *   node scripts/bench.mjs all            # startup, typing, and scroll
@@ -184,11 +186,14 @@ function printLatency(label, stats) {
 }
 
 async function typing() {
-  const { report, memory } = await runOnce("typing");
+  const { report, memory } = await runOnce("typing", file ? [path.resolve(file)] : []);
   const result = report.result;
   console.log("\nTyping (keystroke → painted)");
   printLatency("small document", result.smallDocumentKeystroke);
   printLatency("200k-line document", result.largeDocumentKeystroke);
+  if (result.fileKeystroke) {
+    printLatency(path.basename(file), result.fileKeystroke);
+  }
   console.log(`  300-character burst        ${ms(result.burst300CharactersMs)} until settled`);
   console.log(`  memory afterwards          ${mb(memory.residentBytes)} resident`);
   return { ...result, memory };

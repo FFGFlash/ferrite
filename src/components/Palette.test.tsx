@@ -56,6 +56,9 @@ describe("Palette", () => {
       focus: vi.fn(),
       lineCount: () => 120,
       scrollToLine: vi.fn(),
+      goToDefinition: vi.fn(),
+      triggerSuggest: vi.fn(),
+      showHover: vi.fn(),
     };
     activeEditor.set(editor);
     render(<Palette />);

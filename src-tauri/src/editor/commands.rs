@@ -22,6 +22,7 @@ use super::protocol::{
 };
 use crate::dialogs::{self, UnsavedChoice};
 use crate::error::CommandError;
+use crate::lsp::LspState;
 use crate::paths;
 use crate::perf::Perf;
 use crate::{settings, ui_state};
@@ -100,13 +101,17 @@ pub async fn document_close(window: WebviewWindow, id: u64) -> Result<bool, Comm
   let state = window.state::<EditorState>();
   state.lock().close(id)?;
   state.counts.forget(id);
+  state.syntax.forget(id);
+  window.state::<LspState>().close(id);
   tracing::info!(document = %id, "closed document");
   ui_state::record_open_files(window.app_handle());
   Ok(true)
 }
 
-/// Builds a view, including find matches when `search` is given. Match
-/// counts for large documents are scheduled in the background.
+/// Syncs the document with its language server and builds a view,
+/// including find matches when `search` is given, syntax highlights, and
+/// diagnostics. Match counts for large documents and syntax parses that take
+/// too long are scheduled in the background.
 fn build_view(
   app: &AppHandle,
   document: &Document,
@@ -114,16 +119,26 @@ fn build_view(
   known: Option<KnownDto>,
   search: Option<SearchQueryDto>,
 ) -> EditorView {
-  let counts = &app.state::<EditorState>().counts;
-  EditorView::of(document, viewport, known, |start, end| {
-    let query = SearchQuery::from(search?);
-    let counted = counts.get(document.id());
-    let (view, needs_count) = SearchView::build(document, &query, start, end, counted.as_deref());
-    if needs_count {
-      counts.schedule(app, document, &query);
-    }
-    Some(view)
-  })
+  let state = app.state::<EditorState>();
+  let lsp = app.state::<LspState>();
+  lsp.sync(app, document);
+  let mut view = EditorView::of(
+    document,
+    viewport,
+    known,
+    |start, end| {
+      let query = SearchQuery::from(search?);
+      let counted = state.counts.get(document.id());
+      let (view, needs_count) = SearchView::build(document, &query, start, end, counted.as_deref());
+      if needs_count {
+        state.counts.schedule(app, document, &query);
+      }
+      Some(view)
+    },
+    |lines, chunks| state.syntax.highlights(app, document, lines, known, chunks),
+  );
+  (view.diagnostics, view.language) = lsp.view(document, view.start_line..view.end_line);
+  view
 }
 
 /// The view for `viewport`. `known` describes the lines the client already
@@ -353,6 +368,7 @@ async fn save(
     let mut editor = state.lock();
     let document = editor.document_mut(id)?;
     document.mark_saved(&point, saved_path.clone(), stamp);
+    window.state::<LspState>().saved(document);
     tracing::info!(document = %id, path = %path.display(), bytes = point.snapshot.len(), "saved file");
     DocumentSummary::of(document)
   };

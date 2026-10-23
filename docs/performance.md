@@ -17,6 +17,7 @@ compare against, not claims about other machines or other editors.
 | Compare with a saved baseline                  | `cargo bench -p ferrite-benches -- --save-baseline m4`, later `-- --baseline m4` |
 | End-to-end: startup and idle memory            | `pnpm tauri build --no-bundle`, then `pnpm bench:app startup`                    |
 | End-to-end: typing latency                     | `pnpm bench:app typing`                                                          |
+| End-to-end: typing in a source file            | `pnpm bench:app typing --file path/to/file.rs`                                   |
 | End-to-end: large-document scrolling           | `pnpm bench:app scroll`                                                          |
 | End-to-end: opening a file                     | `pnpm bench:app open --file path/to/file`                                        |
 | Live statistics while using the app            | Command palette → **Developer: Toggle Performance Overlay**                      |
@@ -134,6 +135,52 @@ Median of Criterion's estimate.
 | Find in 10,000 files, common literal (stops at 20,000 matches) | 51 ms (140 ms on one thread)  |
 | List a directory of 100 entries                                | 2.4 ms                        |
 | Go to File over 100,000 paths                                  | 5–9 ms                        |
+
+## Milestone 5: syntax highlighting and language servers
+
+Same machine and method. On the measurement day, the Milestone 4 binary
+itself measured 14.5 ms p50 keystroke-to-paint (against 13.3 ms when the
+baseline was recorded), so the frame timing of the environment had shifted.
+The comparison below therefore runs both builds back to back.
+
+| Measurement (release builds, same session) | Milestone 4          | Milestone 5      |
+| ------------------------------------------ | -------------------- | ---------------- |
+| Keystroke → painted, small plain document  | 14.5 ms p50 (2 runs) | 14.5–14.6 ms p50 |
+| Keystroke → painted, 200,000-line document | 14.5 ms p50          | 14.5 ms p50      |
+| Startup, later runs (median of 3)          | 982 ms (381–1,018)   | 349 ms           |
+| Idle memory, whole process tree            | 366 MB resident      | 365 MB resident  |
+| Binary size (`ferrite.exe`)                | 15.2 MB              | 21.7 MB          |
+
+Grammars and highlight queries are compiled on first use, so they cost
+nothing at startup; the binary grows by the six bundled grammars. p95 values
+varied between 15 and 32 ms from run to run in both builds, so they are not
+compared.
+
+Typing in the middle of a 676-line Rust file (a copy of
+`crates/ferrite-text/src/buffer.rs` in a small Cargo project):
+
+| Measurement                                                  | p50     | p95     | max     |
+| ------------------------------------------------------------ | ------- | ------- | ------- |
+| Keystroke → painted, highlighted, no language server (`.py`) | 14.5 ms | 15.4 ms | 57.8 ms |
+| Keystroke → painted, with rust-analyzer idle                 | 14.6 ms | 18.8 ms | 189 ms  |
+| Keystroke → painted, while rust-analyzer indexes             | 14.6 ms | 35.2 ms | 191 ms  |
+| Backend highlighting per view (`syntax.highlight`)           | 0.95 ms | 1.9 ms  | 3.1 ms  |
+| Backend `editor_apply`, including sync and highlighting      | 0.17 ms | 1.9 ms  | 3.1 ms  |
+| First (background) parse, including compiling the query      | 22 ms   | —       | —       |
+
+- Highlighting stays within one frame: typing in a highlighted file
+  measures the same as plain text. Incremental reparses finished inline;
+  the only background parse was the first one.
+- With rust-analyzer, the backend work per keystroke is still a few
+  milliseconds (sending the change is a queued write). The wider tail
+  comes from CPU contention: while rust-analyzer indexes the standard
+  library it uses every core, and frames are delayed even though Ferrite's
+  own timings don't change. The benchmark therefore waits until the server
+  reports it is idle before measuring (`languageServerSettled` in
+  `src/bench/runner.ts`).
+- Language servers dominate memory: with rust-analyzer indexed, the
+  process tree used about 2 GB resident, against about 90 MB for Ferrite's
+  own process.
 
 ## Optimizations made from these measurements
 

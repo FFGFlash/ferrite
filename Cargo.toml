@@ -9,12 +9,15 @@ license = "MIT OR Apache-2.0"
 
 [workspace.dependencies]
 ferrite-core = { path = "crates/ferrite-core" }
+ferrite-lsp = { path = "crates/ferrite-lsp" }
+ferrite-syntax = { path = "crates/ferrite-syntax" }
 ferrite-tasks = { path = "crates/ferrite-tasks" }
 ferrite-text = { path = "crates/ferrite-text" }
 ferrite-workspace = { path = "crates/ferrite-workspace" }
 
 criterion = { version = "0.8.2", default-features = false, features = ["cargo_bench_support", "html_reports", "plotters"] }
 globset = "0.4.20"
+lsp-types = "0.97.0"
 ignore = "0.4.33"
 memory-stats = "1.2.0"
 notify-debouncer-mini = "0.7.0"
@@ -26,6 +29,7 @@ toml = "1.1.8"
 toml_edit = "0.25.17"
 # Only LF, CR and CRLF break lines (matching LSP), not Unicode line separators.
 ropey = { version = "1.6.1", default-features = false, features = ["cr_lines", "simd"] }
+streaming-iterator = "0.1.9"
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.154"
 tauri = { version = "2.12.5", features = [] }
@@ -35,6 +39,13 @@ tauri-plugin-dialog = "2.8.3"
 tempfile = "3.27.0"
 thiserror = "2.0.21"
 tracing = "0.1.44"
+tree-sitter = "0.27.1"
+tree-sitter-javascript = "0.25.0"
+tree-sitter-json = "0.24.8"
+tree-sitter-python = "0.25.0"
+tree-sitter-rust = "0.24.2"
+tree-sitter-toml-ng = "0.7.0"
+tree-sitter-typescript = "0.23.2"
 tracing-appender = "0.2.5"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter", "fmt"] }
 unicode-segmentation = "1.13.3"

@@ -6,6 +6,9 @@
  * rest), then fills in the lines the backend sent. The backend sends only
  * lines the cache cannot provide, so both sides must agree; if they ever
  * don't, `applyUpdate` returns `null` and the caller starts over.
+ *
+ * Syntax highlights follow the same rule: held lines keep their spans, sent
+ * lines start without, and the view lists the lines whose spans changed.
  */
 import type { DisplayLine, KnownLines, WireLine, WireView } from "../ipc/editor";
 
@@ -25,10 +28,12 @@ export function knownLines(cache: LineCache | null): KnownLines | null {
     : null;
 }
 
+const NO_SPANS: readonly number[] = [];
+
 function toDisplay(line: WireLine): DisplayLine {
   return typeof line === "string"
-    ? { text: line, fullLength: null }
-    : { text: line.text, fullLength: line.fullLength };
+    ? { text: line, fullLength: null, spans: NO_SPANS }
+    : { text: line.text, fullLength: line.fullLength, spans: NO_SPANS };
 }
 
 /** The cache after `view`, or `null` if `view` cannot be applied to it. */
@@ -63,6 +68,13 @@ export function applyUpdate(cache: LineCache | null, view: WireView): LineCache 
       return null;
     }
     resolved.push(text);
+  }
+  for (const { line, spans } of view.highlights) {
+    const index = line - view.startLine;
+    const held = resolved[index];
+    if (held) {
+      resolved[index] = { ...held, spans };
+    }
   }
   return { version: view.version, startLine: view.startLine, lines: resolved };
 }

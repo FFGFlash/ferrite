@@ -9,30 +9,52 @@ import {
   type FormEvent,
   type KeyboardEvent,
   type MouseEvent as ReactMouseEvent,
+  type ReactNode,
 } from "react";
-import type {
-  DisplayLine,
-  EditorOp,
-  EditorView as View,
-  Position,
-  SearchQuery,
-  Viewport,
+import {
+  TOKEN_KINDS,
+  type DisplayLine,
+  type EditorOp,
+  type EditorView as View,
+  type Position,
+  type SearchQuery,
+  type Viewport,
 } from "../ipc/editor";
+import * as lsp from "../ipc/lsp";
 import { appearance } from "../state/appearance";
 import {
   clearPendingSelection,
+  openPath,
   pendingSelection,
   registerBeforeSave,
   setDirty,
 } from "../state/documents";
 import { editorStatus } from "../state/editorStatus";
-import { reportError } from "../state/notifications";
+import { notify, reportError } from "../state/notifications";
 import { notifyPainted, recordTiming } from "../state/perf";
 import { useStore } from "../state/store";
 import { activeEditor, type EditorController } from "./activeEditor";
+import { isWordChar, visibleCompletions } from "./completion";
 import { FindWidget, type FindState } from "./FindWidget";
 import { isMac, keyToCommand } from "./keymap";
-import { columnAt, EMPTY_OVERLAY, measureOverlay, type Overlay } from "./measure";
+import {
+  COMPLETION_ROW_HEIGHT,
+  COMPLETION_ROWS,
+  COMPLETION_WIDTH,
+  CompletionList,
+  HoverCard,
+  severityName,
+  type Placement,
+} from "./LanguagePopups";
+import {
+  columnAt,
+  columnX,
+  EMPTY_OVERLAY,
+  lineLength,
+  measureOverlay,
+  type Overlay,
+  type Rect,
+} from "./measure";
 import { EditorSession, ipcTransport, type EditorTransport } from "./session";
 import "./EditorView.css";
 
@@ -46,6 +68,24 @@ const EMPTY_QUERY: SearchQuery = {
   caseSensitive: false,
   wholeWord: false,
 };
+
+/** How long the pointer rests on a symbol before its hover card shows. */
+const HOVER_DELAY = 500;
+/** How far the pointer may drift along a line while a hover card stays. */
+const HOVER_SLACK = 40;
+
+interface HoverState {
+  hover: lsp.Hover;
+  line: number;
+  x: number;
+  placement: Placement;
+}
+
+interface CompletionState {
+  items: lsp.CompletionItem[];
+  incomplete: boolean;
+  selected: number;
+}
 
 /** Scroll positions of documents whose editor was unmounted (tab switches). */
 const scrollPositions = new Map<number, { top: number; left: number }>();
@@ -62,6 +102,7 @@ interface EditorViewProps {
  * sent through an `EditorSession`.
  */
 export function EditorView({ documentId, title, transport = ipcTransport }: EditorViewProps) {
+  const frameRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const gutterRef = useRef<HTMLDivElement>(null);
   const linesRef = useRef<HTMLDivElement>(null);
@@ -80,8 +121,22 @@ export function EditorView({ documentId, title, transport = ipcTransport }: Edit
   const [overlay, setOverlay] = useState<Overlay>(EMPTY_OVERLAY);
   const [composing, setComposing] = useState(false);
   const [find, setFind] = useState<FindState | null>(null);
+  const [hover, setHover] = useState<HoverState | null>(null);
+  const [completion, setCompletion] = useState<CompletionState | null>(null);
+  /** Re-renders popups anchored to the text when it scrolls. */
+  const [, setScrollTick] = useState(0);
   viewRef.current = view;
   findRef.current = find;
+  const hoverRef = useRef(hover);
+  hoverRef.current = hover;
+  const hoverTimerRef = useRef<number | undefined>(undefined);
+  /** Bumped to discard hover answers that arrive too late. */
+  const hoverSeqRef = useRef(0);
+  const completionRef = useRef(completion);
+  completionRef.current = completion;
+  const completionSeqRef = useRef(0);
+  /** Completion to request once the view reflects the latest typing. */
+  const completionPendingRef = useRef<{ trigger: string | null } | null>(null);
   /** When the view being rendered arrived, and when the oldest unpainted input happened. */
   const receivedAtRef = useRef(0);
   const inputStartRef = useRef<number | null>(null);
@@ -147,6 +202,9 @@ export function EditorView({ documentId, title, transport = ipcTransport }: Edit
           scroller.scrollTop = line * lineHeightRef.current;
         }
       },
+      goToDefinition: () => void goToDefinition(),
+      triggerSuggest: () => requestCompletion(null, false),
+      showHover: () => void showHoverAtCursor(),
     };
     activeEditor.set(controller);
     return () => {
@@ -177,8 +235,16 @@ export function EditorView({ documentId, title, transport = ipcTransport }: Edit
       line: view.primary.position.line + 1,
       column: view.primary.visualColumn + 1,
       selectionCount: view.selectionCount,
+      language: view.language,
     });
+    const pending = completionPendingRef.current;
+    if (pending) {
+      completionPendingRef.current = null;
+      void fetchCompletion(view.primary.position, pending.trigger);
+    }
   }, [view, documentId]);
+
+  useEffect(() => () => window.clearTimeout(hoverTimerRef.current), []);
 
   useLayoutEffect(() => {
     const lines = linesRef.current;
@@ -192,6 +258,7 @@ export function EditorView({ documentId, title, transport = ipcTransport }: Edit
       view.selections,
       view.search?.matches ?? [],
       lineHeight,
+      view.diagnostics,
     );
     setOverlay(measured);
     recordTiming("editor.render", performance.now() - receivedAtRef.current);
@@ -290,6 +357,12 @@ export function EditorView({ documentId, title, transport = ipcTransport }: Edit
   // right away (instead of on the next animation frame) saves a frame per
   // page of scrolling. The session ignores repeated identical viewports.
   const onScroll = () => {
+    if (hoverRef.current) {
+      setHover(null);
+    }
+    if (completionRef.current) {
+      setScrollTick((tick) => tick + 1);
+    }
     const scroller = scrollRef.current;
     if (scroller && !covers(viewRef.current, scroller, lineHeight)) {
       sessionRef.current?.setViewport(viewportFor(scroller, lineHeight));
@@ -299,6 +372,39 @@ export function EditorView({ documentId, title, transport = ipcTransport }: Edit
   const onKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
     if (event.nativeEvent.isComposing || composingRef.current) {
       return;
+    }
+    hideHover();
+    if (shownCompletions && shownCompletions.length > 0 && completion) {
+      const plain = !event.ctrlKey && !event.metaKey && !event.altKey && !event.shiftKey;
+      const count = shownCompletions.length;
+      const selected = Math.min(completion.selected, count - 1);
+      const select = (index: number) => {
+        event.preventDefault();
+        setCompletion({ ...completion, selected: Math.max(0, Math.min(count - 1, index)) });
+      };
+      switch (plain ? event.key : "") {
+        case "ArrowDown":
+          select((selected + 1) % count);
+          return;
+        case "ArrowUp":
+          select((selected - 1 + count) % count);
+          return;
+        case "PageDown":
+          select(selected + COMPLETION_ROWS);
+          return;
+        case "PageUp":
+          select(selected - COMPLETION_ROWS);
+          return;
+        case "Enter":
+        case "Tab":
+          event.preventDefault();
+          acceptCompletion(shownCompletions[selected]!);
+          return;
+        case "Escape":
+          event.preventDefault();
+          closeCompletion();
+          return;
+      }
     }
     if (event.key === "Escape" && findRef.current) {
       event.preventDefault();
@@ -330,6 +436,7 @@ export function EditorView({ documentId, title, transport = ipcTransport }: Edit
     event.currentTarget.value = "";
     if (text) {
       dispatch({ type: "insert", text });
+      afterTyping(text);
     }
   };
 
@@ -344,6 +451,7 @@ export function EditorView({ documentId, title, transport = ipcTransport }: Edit
     event.currentTarget.value = "";
     if (event.data) {
       dispatch({ type: "insert", text: event.data });
+      afterTyping(event.data);
     }
   };
 
@@ -386,8 +494,17 @@ export function EditorView({ documentId, title, transport = ipcTransport }: Edit
     }
     event.preventDefault();
     inputRef.current?.focus();
+    hideHover();
+    closeCompletion();
     const position = positionAt(event.clientX, event.clientY);
     if (!position) {
+      return;
+    }
+    const definitionClick =
+      (isMac() ? event.metaKey : event.ctrlKey) && !event.shiftKey && !event.altKey;
+    if (definitionClick) {
+      dispatch({ type: "setCursor", position, extend: false, add: false });
+      void goToDefinition(position);
       return;
     }
     if (event.detail === 2) {
@@ -410,14 +527,214 @@ export function EditorView({ documentId, title, transport = ipcTransport }: Edit
     window.addEventListener("mouseup", onUp);
   };
 
+  const hideHover = () => {
+    window.clearTimeout(hoverTimerRef.current);
+    hoverSeqRef.current++;
+    if (hoverRef.current) {
+      setHover(null);
+    }
+  };
+
+  /** Where a popup of `height` goes: below `line`, or above it if there is no room. */
+  const placeAt = (line: number, left: number, height: number): Placement | null => {
+    const frame = frameRef.current;
+    const lines = linesRef.current;
+    const current = viewRef.current;
+    if (!frame || !lines || !current) {
+      return null;
+    }
+    const frameBox = frame.getBoundingClientRect();
+    const lineTop =
+      lines.getBoundingClientRect().top - frameBox.top + (line - current.startLine) * lineHeight;
+    const x = Math.max(0, Math.min(left, frameBox.width - COMPLETION_WIDTH));
+    const fitsBelow = lineTop + lineHeight + height <= frameBox.height;
+    return fitsBelow || lineTop < height
+      ? { top: lineTop + lineHeight, left: x }
+      : { bottom: frameBox.height - lineTop, left: x };
+  };
+
+  const showHoverAt = async (position: Position, x: number) => {
+    const seq = ++hoverSeqRef.current;
+    let result: lsp.Hover | null = null;
+    try {
+      result = await lsp.hover(documentId, position);
+    } catch (error) {
+      console.debug("hover failed", error);
+    }
+    const frame = frameRef.current;
+    if (seq !== hoverSeqRef.current || !result || !frame) {
+      return;
+    }
+    const left = x - frame.getBoundingClientRect().left;
+    // Hover cards vary in height: show below the line in the upper half.
+    const placement = placeAt(position.line, left, frame.clientHeight / 2);
+    if (placement) {
+      setHover({ hover: result, line: position.line, x, placement });
+    }
+  };
+
+  const showHoverAtCursor = async () => {
+    const current = viewRef.current;
+    const caret = overlay.carets.find((c) => c.primary);
+    const lines = linesRef.current;
+    if (current && caret && lines) {
+      await showHoverAt(current.primary.position, lines.getBoundingClientRect().left + caret.left);
+    }
+  };
+
+  const onContentMouseMove = (event: ReactMouseEvent<HTMLDivElement>) => {
+    if (event.buttons !== 0) {
+      return;
+    }
+    const { clientX, clientY } = event;
+    const position = positionAt(clientX, clientY);
+    const shown = hoverRef.current;
+    if (shown && position?.line === shown.line && Math.abs(clientX - shown.x) < HOVER_SLACK) {
+      return;
+    }
+    hideHover();
+    if (!position || !viewRef.current?.language) {
+      return;
+    }
+    hoverTimerRef.current = window.setTimeout(() => {
+      // Only over text, not the empty space after a line.
+      const lines = linesRef.current;
+      const element = lines?.children[position.line - (viewRef.current?.startLine ?? 0)];
+      if (!lines || !element) {
+        return;
+      }
+      const end = lines.getBoundingClientRect().left + columnX(element, lineLength(element));
+      if (clientX <= end) {
+        void showHoverAt(position, clientX);
+      }
+    }, HOVER_DELAY);
+  };
+
+  const onContentMouseLeave = (event: ReactMouseEvent<HTMLDivElement>) => {
+    const to = event.relatedTarget;
+    const card = frameRef.current?.querySelector(".hover-card");
+    if (!(to instanceof Node && card?.contains(to))) {
+      hideHover();
+    }
+  };
+
+  const goToDefinition = async (position?: Position) => {
+    const at = position ?? viewRef.current?.primary.position;
+    if (!at) {
+      return;
+    }
+    try {
+      const location = await lsp.definition(documentId, at);
+      if (location) {
+        await openPath(location.path, { start: location.start });
+      } else {
+        notify("info", "No definition found.");
+      }
+    } catch (error) {
+      reportError("Going to the definition", error);
+    }
+  };
+
+  const closeCompletion = () => {
+    completionSeqRef.current++;
+    completionPendingRef.current = null;
+    if (completionRef.current) {
+      setCompletion(null);
+    }
+  };
+
+  /**
+   * Asks for completions at the cursor: right away, or (`afterEdit`) once
+   * the view reflects the edit just dispatched.
+   */
+  const requestCompletion = (trigger: string | null, afterEdit: boolean) => {
+    const current = viewRef.current;
+    if (!current?.language?.completionTriggers) {
+      return;
+    }
+    if (afterEdit) {
+      completionPendingRef.current = { trigger };
+    } else {
+      void fetchCompletion(current.primary.position, trigger);
+    }
+  };
+
+  const fetchCompletion = async (position: Position, trigger: string | null) => {
+    const seq = ++completionSeqRef.current;
+    let result: lsp.Completions | null = null;
+    try {
+      result = await lsp.completion(documentId, position, trigger);
+    } catch (error) {
+      console.debug("completion failed", error);
+    }
+    if (seq !== completionSeqRef.current) {
+      return;
+    }
+    setCompletion(
+      result && result.items.length > 0
+        ? { items: result.items, incomplete: result.incomplete, selected: 0 }
+        : null,
+    );
+  };
+
+  /** Opens, refines, or closes completion after `text` was typed. */
+  const afterTyping = (text: string) => {
+    const triggers = viewRef.current?.language?.completionTriggers;
+    const last = text.slice(-1);
+    if (!triggers || !last) {
+      return;
+    }
+    const open = completionRef.current;
+    if (triggers.includes(last)) {
+      requestCompletion(last, true);
+    } else if (isWordChar(last)) {
+      if (!open || open.incomplete) {
+        requestCompletion(null, true);
+      }
+    } else {
+      closeCompletion();
+    }
+  };
+
+  const acceptCompletion = (item: lsp.CompletionItem) => {
+    // Select from the item's start to the cursor, then replace it.
+    dispatch({ type: "setCursor", position: item.from, extend: true, add: false });
+    dispatch({ type: "insert", text: item.insert });
+    closeCompletion();
+    inputRef.current?.focus();
+  };
+
+  const primaryCaret: Rect | undefined = overlay.carets.find((c) => c.primary);
+  const cursorLine = view?.primary.position.line ?? 0;
+  const shownCompletions =
+    completion && view
+      ? visibleCompletions(
+          completion.items,
+          view.primary.position,
+          view.lines[cursorLine - view.startLine]?.text ?? "",
+        )
+      : null;
+  const completionLeft =
+    (linesRef.current?.getBoundingClientRect().left ?? 0) -
+    (frameRef.current?.getBoundingClientRect().left ?? 0) +
+    (primaryCaret?.left ?? 0);
+  const completionPlacement =
+    shownCompletions && shownCompletions.length > 0 && primaryCaret
+      ? placeAt(
+          cursorLine,
+          completionLeft,
+          Math.min(shownCompletions.length, COMPLETION_ROWS) * COMPLETION_ROW_HEIGHT + 2,
+        )
+      : null;
+
   const startLine = view?.startLine ?? 0;
   const lineCount = view?.lineCount ?? 1;
-  const primary = overlay.carets.find((c) => c.primary);
+  const primary = primaryCaret;
   const activeLine = view?.primary.position.line;
   const layerStyle = { transform: `translateY(${startLine * lineHeight}px)` };
 
   return (
-    <div className="editor-view-frame">
+    <div className="editor-view-frame" ref={frameRef}>
       {find && (
         <FindWidget
           state={find}
@@ -455,7 +772,12 @@ export function EditorView({ documentId, title, transport = ipcTransport }: Edit
               ))}
             </div>
           </div>
-          <div className="editor-view__content" onMouseDown={onMouseDown}>
+          <div
+            className="editor-view__content"
+            onMouseDown={onMouseDown}
+            onMouseMove={onContentMouseMove}
+            onMouseLeave={onContentMouseLeave}
+          >
             <div className="editor-view__layer" style={layerStyle}>
               <div className="editor-view__selections" aria-hidden="true">
                 {overlay.matches.map((rect, index) => (
@@ -470,6 +792,14 @@ export function EditorView({ documentId, title, transport = ipcTransport }: Edit
                   <div
                     key={index}
                     className="editor-view__selection"
+                    style={{ top: rect.top, left: rect.left, width: rect.width }}
+                  />
+                ))}
+                {overlay.diagnostics.map((rect, index) => (
+                  <div
+                    key={`d${index}`}
+                    className="editor-view__diagnostic"
+                    data-severity={severityName(rect.severity)}
                     style={{ top: rect.top, left: rect.left, width: rect.width }}
                   />
                 ))}
@@ -513,6 +843,17 @@ export function EditorView({ documentId, title, transport = ipcTransport }: Edit
           </div>
         </div>
       </div>
+      {hover && (
+        <HoverCard hover={hover.hover} placement={hover.placement} onMouseLeave={hideHover} />
+      )}
+      {shownCompletions && completion && completionPlacement && (
+        <CompletionList
+          items={shownCompletions}
+          selected={Math.min(completion.selected, shownCompletions.length - 1)}
+          placement={completionPlacement}
+          onPick={acceptCompletion}
+        />
+      )}
     </div>
   );
 }
@@ -522,13 +863,14 @@ function earlier(a: Position, b: Position): Position {
 }
 
 const Line = memo(function Line({ line }: { line: DisplayLine }) {
+  const text = line.spans.length === 0 ? line.text : highlighted(line.text, line.spans);
   if (line.fullLength === null) {
-    return <div className="editor-view__line">{line.text}</div>;
+    return <div className="editor-view__line">{text}</div>;
   }
   // A very long line shortened for display; the document keeps all of it.
   return (
     <div className="editor-view__line">
-      {line.text}
+      {text}
       <span
         className="editor-view__cut"
         title={`Line shortened for display (${line.fullLength.toLocaleString()} characters)`}
@@ -538,6 +880,32 @@ const Line = memo(function Line({ line }: { line: DisplayLine }) {
     </div>
   );
 });
+
+/** `text` split into plain and highlighted runs (see `measure.ts`). */
+function highlighted(text: string, spans: readonly number[]): ReactNode[] {
+  const parts: ReactNode[] = [];
+  let at = 0;
+  for (let i = 0; i + 2 < spans.length; i += 3) {
+    const start = spans[i]!;
+    const end = Math.min(spans[i + 1]!, text.length);
+    if (start < at || start >= end) {
+      continue;
+    }
+    if (start > at) {
+      parts.push(text.slice(at, start));
+    }
+    parts.push(
+      <span key={start} className={`tok-${TOKEN_KINDS[spans[i + 2]! - 1] ?? "none"}`}>
+        {text.slice(start, end)}
+      </span>,
+    );
+    at = end;
+  }
+  if (at < text.length) {
+    parts.push(text.slice(at));
+  }
+  return parts;
+}
 
 function visibleRange(scroller: HTMLElement, lineHeight: number): [number, number] {
   const first = Math.floor(scroller.scrollTop / lineHeight);

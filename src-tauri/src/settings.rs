@@ -2,10 +2,12 @@
 //! in Ferrite itself. Saving the file applies it; invalid files are reported
 //! and the previous settings stay in effect.
 
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::{PoisonError, RwLock};
 
 use ferrite_core::EditorConfig;
+use ferrite_lsp::{ServerCommand, ServerConfig, default_servers};
 use ferrite_workspace::ExcludeFilter;
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Manager, State};
@@ -36,6 +38,25 @@ const TEMPLATE: &str = r#"# Ferrite settings. Uncomment a line to change it; sav
 
 [search]
 # max_file_bytes = 4194304  # larger files are skipped by find in files
+
+[lsp]
+# Language servers provide diagnostics, hover, go to definition, and
+# completion. Known servers start when a file needs one, if installed:
+# rust-analyzer, typescript-language-server, and pyright-langserver.
+# enabled = true
+#
+# Change a server, or add one (languages: rust, typescript, typescriptreact,
+# javascript, python, json, toml):
+# [lsp.servers.rust-analyzer]
+# command = "rust-analyzer"
+# args = []
+# enabled = true
+#
+# [lsp.servers.my-server]
+# command = "my-language-server"
+# args = ["--stdio"]
+# languages = ["python"]
+# root_markers = ["pyproject.toml"]
 "#;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
@@ -54,6 +75,7 @@ pub struct Settings {
   pub workbench: WorkbenchSettings,
   pub files: FilesSettings,
   pub search: SearchSettings,
+  pub lsp: LspSettings,
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize)]
@@ -81,6 +103,34 @@ pub struct FilesSettings {
 #[serde(default, deny_unknown_fields)]
 pub struct SearchSettings {
   pub max_file_bytes: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct LspSettings {
+  pub enabled: bool,
+  pub servers: BTreeMap<String, ServerSettings>,
+}
+
+impl Default for LspSettings {
+  fn default() -> Self {
+    Self {
+      enabled: true,
+      servers: BTreeMap::new(),
+    }
+  }
+}
+
+/// Changes to a known server, or a new one (which needs `command` and
+/// `languages`).
+#[derive(Debug, Clone, PartialEq, Deserialize, Default)]
+#[serde(default, deny_unknown_fields)]
+pub struct ServerSettings {
+  pub enabled: Option<bool>,
+  pub command: Option<String>,
+  pub args: Option<Vec<String>>,
+  pub languages: Option<Vec<String>>,
+  pub root_markers: Option<Vec<String>>,
 }
 
 impl Default for EditorSettings {
@@ -139,7 +189,61 @@ impl Settings {
       return Err("search.max_file_bytes must be greater than 0".into());
     }
     ExcludeFilter::new(&self.files.exclude).map_err(|error| format!("files.exclude: {error}"))?;
+    let known: Vec<String> = default_servers()
+      .into_iter()
+      .map(|server| server.name)
+      .collect();
+    for (name, server) in &self.lsp.servers {
+      if !known.contains(name) && (server.command.is_none() || server.languages.is_none()) {
+        return Err(format!(
+          "lsp.servers.{name} needs a command and languages (known servers: {})",
+          known.join(", ")
+        ));
+      }
+    }
     Ok(())
+  }
+
+  /// The language servers to use: the known ones with any changes from
+  /// settings, plus added ones, minus disabled ones.
+  pub fn language_servers(&self) -> Vec<ServerConfig> {
+    if !self.lsp.enabled {
+      return Vec::new();
+    }
+    let mut servers = default_servers();
+    for (name, settings) in &self.lsp.servers {
+      let index = match servers.iter().position(|server| server.name == *name) {
+        Some(index) => index,
+        None => {
+          servers.push(ServerConfig {
+            name: name.clone(),
+            command: ServerCommand {
+              program: String::new(),
+              args: Vec::new(),
+            },
+            languages: Vec::new(),
+            root_markers: Vec::new(),
+          });
+          servers.len() - 1
+        }
+      };
+      let server = &mut servers[index];
+      if let Some(command) = &settings.command {
+        server.command.program = command.clone();
+      }
+      if let Some(args) = &settings.args {
+        server.command.args = args.clone();
+      }
+      if let Some(languages) = &settings.languages {
+        server.languages = languages.clone();
+      }
+      if let Some(markers) = &settings.root_markers {
+        server.root_markers = markers.clone();
+      }
+    }
+    servers
+      .retain(|server| self.lsp.servers.get(&server.name).and_then(|s| s.enabled) != Some(false));
+    servers
   }
 
   pub fn exclude_filter(&self) -> ExcludeFilter {
@@ -235,6 +339,9 @@ fn apply(app: &AppHandle, previous: &Settings, settings: &Settings) {
     .set_config(settings.editor_config());
   if previous.files.exclude != settings.files.exclude {
     crate::workspace::exclusions_changed(app);
+  }
+  if previous.lsp != settings.lsp {
+    app.state::<crate::lsp::LspState>().restart_all(app);
   }
   events::emit(
     app,
@@ -335,5 +442,37 @@ mod tests {
     assert!(theme.contains("neon"), "{theme}");
     let glob = Settings::parse("[files]\nexclude = [\"[x\"]\n").expect_err("bad glob");
     assert!(glob.contains("files.exclude"));
+    let server =
+      Settings::parse("[lsp.servers.mine]\ncommand = \"x\"\n").expect_err("no languages");
+    assert!(server.contains("lsp.servers.mine"), "{server}");
+  }
+
+  #[test]
+  fn language_servers_merge_settings_over_the_known_ones() {
+    let settings = Settings::parse(
+      r#"
+[lsp.servers.rust-analyzer]
+command = "/opt/ra"
+[lsp.servers.pyright]
+enabled = false
+[lsp.servers.mine]
+command = "mine"
+args = ["--stdio"]
+languages = ["toml"]
+"#,
+    )
+    .expect("valid");
+    let servers = settings.language_servers();
+    let rust = servers
+      .iter()
+      .find(|s| s.name == "rust-analyzer")
+      .expect("rust");
+    assert_eq!(rust.command.program, "/opt/ra");
+    assert_eq!(rust.languages, ["rust"]);
+    assert!(servers.iter().all(|s| s.name != "pyright"));
+    let mine = servers.iter().find(|s| s.name == "mine").expect("added");
+    assert_eq!(mine.command.args, ["--stdio"]);
+    let disabled = Settings::parse("[lsp]\nenabled = false\n").expect("valid");
+    assert!(disabled.language_servers().is_empty());
   }
 }

@@ -32,7 +32,12 @@ export function handleEvent(event: AppEvent): void {
       applySettings(event.settings);
       notify("info", "Settings applied.");
       break;
-    case "searchCounted": {
+    case "languageServerChanged":
+      activeEditor.get()?.refresh();
+      break;
+    case "searchCounted":
+    case "syntaxUpdated":
+    case "diagnosticsChanged": {
       const editor = activeEditor.get();
       if (editor?.documentId === event.documentId) {
         editor.refresh();

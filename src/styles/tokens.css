@@ -99,8 +99,23 @@
   --color-syntax-keyword: #e48a5c;
   --color-syntax-string: #a8c98a;
   --color-syntax-number: #d8b26a;
+  --color-diagnostic-error: #f0706a;
+  --color-diagnostic-warning: #d8b26a;
+  --color-diagnostic-info: #6fa8dc;
+
   --color-syntax-function: #8fb8de;
   --color-syntax-type: #c6a0e0;
+  --color-syntax-escape: #e0c27a;
+  --color-syntax-constant: #d8b26a;
+  --color-syntax-macro: #7fc4c0;
+  --color-syntax-variable: #e07a7a;
+  --color-syntax-property: #b4c4d8;
+  --color-syntax-operator: #b8bec8;
+  --color-syntax-punctuation: #9aa1ad;
+  --color-syntax-attribute: #b0b878;
+  --color-syntax-tag: #e48a5c;
+  --color-syntax-label: #d0a0c0;
+  --color-syntax-module: #c8c0a0;
 }
 
 [data-theme="light"] {
@@ -158,6 +173,21 @@
   --color-syntax-keyword: #a8461f;
   --color-syntax-string: #3f7a2a;
   --color-syntax-number: #8a5f00;
+  --color-diagnostic-error: #c42b1c;
+  --color-diagnostic-warning: #a36b00;
+  --color-diagnostic-info: #2a5f94;
+
   --color-syntax-function: #2a5f94;
   --color-syntax-type: #7a3fa0;
+  --color-syntax-escape: #9a5a00;
+  --color-syntax-constant: #8a5f00;
+  --color-syntax-macro: #1f7470;
+  --color-syntax-variable: #a83232;
+  --color-syntax-property: #3a4f6a;
+  --color-syntax-operator: #4b515c;
+  --color-syntax-punctuation: #646b77;
+  --color-syntax-attribute: #5f6a1f;
+  --color-syntax-tag: #a8461f;
+  --color-syntax-label: #8a3f70;
+  --color-syntax-module: #6a5f30;
 }

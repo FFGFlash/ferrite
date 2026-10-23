@@ -5,6 +5,7 @@
 mod commands;
 mod counts;
 pub(crate) mod protocol;
+mod syntax;
 
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -31,6 +32,8 @@ pub struct EditorState {
   editor: Arc<Mutex<Editor>>,
   /// Background find-match counts for large documents.
   pub(crate) counts: counts::MatchCounts,
+  /// Syntax trees and highlighting state.
+  pub(crate) syntax: syntax::SyntaxStates,
   /// Set once the user has confirmed closing the window with unsaved changes.
   close_confirmed: AtomicBool,
   close_prompt_open: AtomicBool,

@@ -5,7 +5,7 @@ use ropey::iter::Chars;
 
 use crate::change::{ChangeSet, Edit, EditError};
 use crate::line_ending::LineEnding;
-use crate::lines::{LineLog, LineSplice};
+use crate::lines::{ByteEdit, LineLog, LineSplice, TextPoint};
 
 /// Content version of a buffer. Every applied change produces a new, larger
 /// version; versions are never reused, so they identify stale requests.
@@ -54,6 +54,16 @@ impl TextBuffer {
     Self {
       rope: Rope::from_str(text),
       version: Version::INITIAL,
+      line_log: LineLog::default(),
+    }
+  }
+
+  /// A buffer holding `snapshot`'s text, at its version but with no history
+  /// of earlier edits. Cheap: the text is shared, not copied.
+  pub fn from_snapshot(snapshot: &TextSnapshot) -> Self {
+    Self {
+      rope: snapshot.rope.clone(),
+      version: snapshot.version,
       line_log: LineLog::default(),
     }
   }
@@ -171,6 +181,36 @@ impl TextBuffer {
         )
       })
       .collect();
+    // Applied last to first, each edit's coordinates are still the original ones.
+    let byte_edits: Vec<ByteEdit> = changes
+      .edits()
+      .iter()
+      .rev()
+      .filter(|edit| !edit.is_noop())
+      .map(|edit| {
+        let start_point = self.point(edit.range.start);
+        let (breaks, after_last_break) = line_breaks(&edit.text);
+        let new_end_point = match after_last_break {
+          Some(column) => TextPoint {
+            row: start_point.row + breaks,
+            column,
+          },
+          None => TextPoint {
+            row: start_point.row,
+            column: start_point.column + edit.text.len(),
+          },
+        };
+        ByteEdit {
+          start: edit.range.start,
+          old_end: edit.range.end,
+          new_end: edit.range.start + edit.text.len(),
+          start_point,
+          old_end_point: self.point(edit.range.end),
+          new_end_point,
+          text: edit.text.clone(),
+        }
+      })
+      .collect();
     let inverse = changes
       .edits()
       .iter()
@@ -190,7 +230,7 @@ impl TextBuffer {
     }
     self.version = self.version.next();
     let splices = self.line_splices(&old_lines, &post_ranges);
-    self.line_log.push(self.version, splices);
+    self.line_log.push(self.version, splices, byte_edits);
     Ok(ChangeSet::from_sorted(inverse))
   }
 
@@ -221,6 +261,38 @@ impl TextBuffer {
         inserted: new_end - new_start + 1,
       })
       .collect()
+  }
+
+  /// The byte edits between `since` and now, in application order. `None`
+  /// if `since` is too old to reconstruct.
+  pub fn edits_since(&self, since: Version) -> Option<Vec<ByteEdit>> {
+    self.line_log.edits_since(since, self.version)
+  }
+
+  /// The line (counted like the rest of the buffer: LF, CRLF, or CR) and
+  /// byte column of `offset`.
+  pub fn point(&self, offset: usize) -> TextPoint {
+    let offset = offset.min(self.len());
+    let line = self.rope.byte_to_line(offset);
+    TextPoint {
+      row: line,
+      column: offset - self.rope.line_to_byte(line),
+    }
+  }
+
+  /// The text from `offset` to the end of its rope chunk (for parsers that
+  /// read the text piece by piece). Empty at the end of the text.
+  pub fn chunk_from(&self, offset: usize) -> &str {
+    if offset >= self.len() {
+      return "";
+    }
+    let (chunk, chunk_start, _, _) = self.rope.chunk_at_byte(offset);
+    &chunk[offset - chunk_start..]
+  }
+
+  /// The text of `range` as a sequence of string pieces, without copying.
+  pub fn chunks_in(&self, range: Range<usize>) -> impl Iterator<Item = &str> {
+    self.rope.byte_slice(range).chunks()
   }
 
   /// How lines moved between `since` and now, for clients holding lines
@@ -314,6 +386,52 @@ impl TextSnapshot {
   pub fn chunks(&self) -> impl Iterator<Item = &str> {
     self.rope.chunks()
   }
+
+  /// The text from `offset` to the end of its rope chunk; see
+  /// [`TextBuffer::chunk_from`].
+  pub fn chunk_from(&self, offset: usize) -> &str {
+    if offset >= self.len() {
+      return "";
+    }
+    let (chunk, chunk_start, _, _) = self.rope.chunk_at_byte(offset);
+    &chunk[offset - chunk_start..]
+  }
+
+  /// The text of `range` as a sequence of string pieces, without copying.
+  pub fn chunks_in(&self, range: Range<usize>) -> impl Iterator<Item = &str> {
+    self.rope.byte_slice(range).chunks()
+  }
+
+  /// The whole text as one string.
+  pub fn text(&self) -> String {
+    self.rope.to_string()
+  }
+}
+
+/// The number of line breaks (LF, CRLF, or CR) in `text`, and the byte
+/// length after the last one, if any.
+fn line_breaks(text: &str) -> (usize, Option<usize>) {
+  let bytes = text.as_bytes();
+  let (mut breaks, mut last_end) = (0, None);
+  let mut i = 0;
+  while i < bytes.len() {
+    match bytes[i] {
+      b'\n' => {
+        breaks += 1;
+        last_end = Some(i + 1);
+      }
+      b'\r' => {
+        breaks += 1;
+        if bytes.get(i + 1) == Some(&b'\n') {
+          i += 1;
+        }
+        last_end = Some(i + 1);
+      }
+      _ => {}
+    }
+    i += 1;
+  }
+  (breaks, last_end.map(|end| bytes.len() - end))
 }
 
 #[cfg(test)]
@@ -468,6 +586,54 @@ mod tests {
       Some(vec![splice(1, 1, 2), splice(0, 1, 1), splice(3, 2, 1)])
     );
     assert_eq!(buffer.line_changes_since(buffer.version()), Some(vec![]));
+  }
+
+  #[test]
+  fn changes_record_byte_edits_in_application_order() {
+    let mut buffer = TextBuffer::from_text("ab\ncd\n");
+    let start = buffer.version();
+    apply(
+      &mut buffer,
+      vec![Edit::new(0..1, "X"), Edit::insert(4, "1\n22")],
+    );
+    assert_eq!(buffer.contents(), "Xb\nc1\n22d\n");
+    let edits = buffer.edits_since(start).expect("recorded");
+    // The later edit comes first, so each applies in the original coordinates.
+    assert_eq!(edits.len(), 2);
+    assert_eq!(
+      (edits[0].start, edits[0].old_end, edits[0].new_end),
+      (4, 4, 8)
+    );
+    assert_eq!(edits[0].start_point, TextPoint { row: 1, column: 1 });
+    assert_eq!(edits[0].new_end_point, TextPoint { row: 2, column: 2 });
+    assert_eq!(
+      (edits[1].start, edits[1].old_end, edits[1].new_end),
+      (0, 1, 1)
+    );
+    assert_eq!(crate::lines::map_offset_through(&edits, 5, false), 9);
+  }
+
+  #[test]
+  fn points_count_every_kind_of_line_break() {
+    let buffer = TextBuffer::from_text("a\rb\nc\r\nd");
+    assert_eq!(buffer.point(2), TextPoint { row: 1, column: 0 });
+    assert_eq!(buffer.point(5), TextPoint { row: 2, column: 1 });
+    assert_eq!(buffer.point(7), TextPoint { row: 3, column: 0 });
+    assert_eq!(line_breaks("x\r\ny\rzz"), (2, Some(2)));
+    assert_eq!(line_breaks("plain"), (0, None));
+  }
+
+  #[test]
+  fn chunks_can_be_read_piece_by_piece() {
+    let text = "x".repeat(10_000);
+    let buffer = TextBuffer::from_text(&text);
+    let mut read = String::new();
+    while read.len() < buffer.len() {
+      read.push_str(buffer.chunk_from(read.len()));
+    }
+    assert_eq!(read, text);
+    assert_eq!(buffer.chunk_from(buffer.len()), "");
+    assert_eq!(buffer.chunks_in(2..5).collect::<String>(), "xxx");
   }
 
   #[test]

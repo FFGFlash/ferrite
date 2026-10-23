@@ -19,6 +19,8 @@ tauri-build = { workspace = true }
 
 [dependencies]
 ferrite-core = { workspace = true }
+ferrite-lsp = { workspace = true }
+ferrite-syntax = { workspace = true }
 ferrite-tasks = { workspace = true }
 ferrite-text = { workspace = true }
 ferrite-workspace = { workspace = true }

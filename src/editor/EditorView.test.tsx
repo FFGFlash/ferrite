@@ -20,6 +20,9 @@ function makeView(lines: string[], overrides: Partial<View> = {}): View {
     primary: { position: { line: 0, column: 0 }, visualColumn: 0 },
     dirty: false,
     search: null,
+    highlights: [],
+    diagnostics: [],
+    language: null,
     ...overrides,
   } as View;
 }
@@ -91,10 +94,10 @@ describe("EditorView", () => {
     const user = userEvent.setup();
     const { transport } = fakeTransport(makeView(["abc"]));
     const input = await renderEditor(transport);
-    expect(editorStatus.get()).toEqual({ line: 1, column: 1, selectionCount: 1 });
+    expect(editorStatus.get()).toEqual({ line: 1, column: 1, selectionCount: 1, language: null });
     input.focus();
     await user.keyboard("a");
-    expect(editorStatus.get()).toEqual({ line: 1, column: 4, selectionCount: 1 });
+    expect(editorStatus.get()).toEqual({ line: 1, column: 4, selectionCount: 1, language: null });
   });
 
   it("inserts pasted text", async () => {

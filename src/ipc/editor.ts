@@ -121,6 +121,59 @@ export interface KnownLines {
   endLine: number;
 }
 
+/** Highlight categories, in protocol order: span kind `k` is `TOKEN_KINDS[k - 1]`. */
+export const TOKEN_KINDS = [
+  "comment",
+  "keyword",
+  "string",
+  "escape",
+  "number",
+  "constant",
+  "function",
+  "macro",
+  "type",
+  "variable",
+  "property",
+  "operator",
+  "punctuation",
+  "attribute",
+  "tag",
+  "label",
+  "module",
+] as const;
+
+/**
+ * A line's syntax highlights, flattened as `[start, end, kind, ...]` with
+ * UTF-16 columns, in order and non-overlapping.
+ */
+export interface LineHighlights {
+  line: number;
+  spans: number[];
+}
+
+/** A diagnostic on the view's lines. Severity: 1 error, 2 warning, 3 info, 4 hint. */
+export interface DiagnosticView {
+  start: Position;
+  end: Position;
+  severity: number;
+}
+
+export interface ServerStatus {
+  name: string;
+  state: "starting" | "ready" | "busy" | "failed";
+  message: string | null;
+}
+
+/** The document's language and language server. */
+export interface LanguageStatus {
+  language: string;
+  server: ServerStatus | null;
+  errors: number;
+  warnings: number;
+  /** Characters that open completion; `null` without completion support. */
+  completionTriggers: string[] | null;
+}
+
 interface ViewFields {
   documentId: number;
   version: number;
@@ -134,17 +187,26 @@ interface ViewFields {
   primary: { position: Position; visualColumn: number };
   dirty: boolean;
   search: SearchView | null;
+  diagnostics: DiagnosticView[];
+  language: LanguageStatus | null;
 }
 
 /** A view as the backend sends it: only the lines the client was missing. */
 export interface WireView extends ViewFields {
   lines: LinesUpdate;
+  /**
+   * Highlights for lines whose spans changed. Lines in `lines.chunks` start
+   * with none; other held lines keep theirs.
+   */
+  highlights: LineHighlights[];
 }
 
 export interface DisplayLine {
   text: string;
   /** Full length in UTF-16 units when `text` was shortened for display. */
   fullLength: number | null;
+  /** Syntax highlights, as in `LineHighlights.spans`. */
+  spans: readonly number[];
 }
 
 /** A view with every viewport line resolved, ready to render. */

@@ -4,30 +4,30 @@ This document describes Ferrite's architecture as it currently exists and how it
 grow. The goals and constraints come from [`DESIGN.md`](DESIGN.md); decisions with lasting
 consequences are recorded as ADRs in [`adr/`](adr/).
 
-## Current state (Milestone 4)
+## Current state (Milestone 5)
 
 ```text
 ┌──────────────────────────── Desktop process (ferrite) ─────────────────────────────┐
 │                                                                                    │
 │  ┌─────────── WebView ───────────┐        ┌──────────── ferrite-app ────────────┐  │
 │  │ React workbench (src/)        │        │ commands.rs   app info, logging     │  │
-│  │  EditorView ─▶ EditorSession ─┼─ IPC ─▶│ editor/       documents, editing    │  │
-│  │  (visible lines only)         │◀─view──│ workspace.rs  folder, index, search │  │
-│  │  palette, explorer, search,   │◀─events│ settings.rs   settings.toml         │  │
-│  │  tabs, status bar ◀─ stores   │ channel│ ui_state.rs   session restore       │  │
-│  └───────────────────────────────┘        └──────┬──────────────────┬───────────┘  │
-│                                                  │                  │              │
-│                                    ┌─────────────▼──────┐   ┌───────▼───────────┐  │
-│                                    │ ferrite-core       │──▶│ ferrite-workspace │  │
-│                                    │ documents, cursors,│   │ files, tree, index│  │
-│                                    │ ops, find, undo    │   │ search, watcher   │  │
-│                                    └─────────┬──────────┘   └───────┬───────────┘  │
-│                                              │   ┌──────────────────▼┐             │
-│                                              └──▶│ ferrite-text      │             │
-│                                                  │ rope, change sets,│             │
-│                                                  │ positions, Unicode│             │
-│                                                  └───────────────────┘             │
-└────────────────────────────────────────────────────────────────────────────────────┘
+│  │  EditorView ─▶ EditorSession ─┼─ IPC ─▶│ editor/       documents, editing,   │  │
+│  │  (visible lines, highlights,  │◀─view──│               syntax state          │  │
+│  │   squiggles, hover, suggest)  │        │ lsp/          servers, sync, hover, │  │
+│  │  palette, explorer, search,   │◀─events│               definition, complete  │  │
+│  │  tabs, status bar ◀─ stores   │ channel│ workspace.rs, settings.rs, ...      │  │
+│  └───────────────────────────────┘        └──┬─────────┬──────────┬─────────┬───┘  │
+│                                              │         │          │         │      │
+│        ┌─────────────────┐  ┌────────────────▼─┐ ┌─────▼────────┐ │  ┌──────▼────┐ │
+│        │ ferrite-syntax  │◀─┤ ferrite-core     │ │ ferrite-lsp  │ │  │ ferrite-  │ │
+│        │ Tree-sitter     │  │ documents, ops,  │ │ JSON-RPC,    │ │  │ workspace │ │
+│        │ parse, highlight│  │ find, undo       │ │ positions    │ │  │           │ │
+│        └───────┬─────────┘  └────────┬─────────┘ └──────┬───────┘ │  └─────┬─────┘ │
+│                └─────────────────────▼──────────────────▼─────────▼────────▼       │
+│                                   ferrite-text: rope, change sets, edit log        │
+└──────────────────────────────────────────────────────────┬─────────────────────────┘
+                                                            │ stdio
+                                           language servers (rust-analyzer, ...)
 ```
 
 ## Crates
@@ -35,20 +35,22 @@ consequences are recorded as ADRs in [`adr/`](adr/).
 Crates use the `ferrite-` prefix. Dependencies point downward only. Only `ferrite-app` depends on
 Tauri, and nothing in Rust depends on the frontend.
 
-| Crate               | Responsibility                                                                                                                                                                 | Depends on                                                                     |
-| ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------ |
-| `ferrite-text`      | Rope-backed `TextBuffer`, validated `ChangeSet`s, versions, the line-splice log, UTF-16 conversion, grapheme/word boundaries, line endings, regex/literal search over the rope | `ropey`, `unicode-segmentation`, `regex-cursor`                                |
-| `ferrite-workspace` | Reading and atomically writing files, directory listings with ignore rules, the Go to File index, find in files, file watching                                                 | `ferrite-text`, `ignore`, `globset`, `nucleo-matcher`, `notify-debouncer-mini` |
-| `ferrite-core`      | `Editor` (open documents), `Document`, selections, `EditorOp`s (including find/replace), undo history, dirty state, reload from disk, incremental viewport updates. No I/O.    | `ferrite-text`, `ferrite-workspace` (for `FileStamp`)                          |
-| `ferrite-tasks`     | Bounded background scheduler (priorities, keyed replacement, cancellation) and timing histograms                                                                               | `tracing`                                                                      |
-| `ferrite-app`       | Process lifecycle, Tauri commands, dialogs, clipboard, settings, session state, workspace coordination, backend events, instrumentation, benchmark mode, logging               | all of the above, Tauri, `toml`, `toml_edit`, `memory-stats`                   |
-| `ferrite-benches`   | Criterion benchmarks and deterministic fixtures (`benches/`), not part of the app                                                                                              | `ferrite-text`, `ferrite-core`, `ferrite-workspace`, `criterion`               |
+| Crate               | Responsibility                                                                                                                                                                                                  | Depends on                                                                     |
+| ------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------ |
+| `ferrite-text`      | Rope-backed `TextBuffer`, validated `ChangeSet`s, versions, the line-splice log, UTF-16 conversion, grapheme/word boundaries, line endings, regex/literal search over the rope                                  | `ropey`, `unicode-segmentation`, `regex-cursor`                                |
+| `ferrite-workspace` | Reading and atomically writing files, directory listings with ignore rules, the Go to File index, find in files, file watching                                                                                  | `ferrite-text`, `ignore`, `globset`, `nucleo-matcher`, `notify-debouncer-mini` |
+| `ferrite-core`      | `Editor` (open documents), `Document`, selections, `EditorOp`s (including find/replace), undo history, dirty state, reload from disk, incremental viewport updates. No I/O.                                     | `ferrite-text`, `ferrite-workspace` (for `FileStamp`)                          |
+| `ferrite-syntax`    | Bundled Tree-sitter grammars and highlight queries (Rust, TypeScript/TSX, JavaScript, JSON, TOML, Python), language detection, incremental and interruptible parsing, per-line highlight spans                  | `ferrite-text`, `tree-sitter`, grammar crates                                  |
+| `ferrite-lsp`       | Language server processes and JSON-RPC over stdio, UTF-8/UTF-16 position conversion, incremental document changes from the edit log, known servers and workspace roots, a scripted test server                  | `ferrite-text`, `lsp-types`, `serde_json`                                      |
+| `ferrite-tasks`     | Bounded background scheduler (priorities, keyed replacement, cancellation) and timing histograms                                                                                                                | `tracing`                                                                      |
+| `ferrite-app`       | Process lifecycle, Tauri commands, dialogs, clipboard, settings, session state, workspace coordination, syntax and language server state per document, backend events, instrumentation, benchmark mode, logging | all of the above, Tauri, `toml`, `toml_edit`, `memory-stats`                   |
+| `ferrite-benches`   | Criterion benchmarks and deterministic fixtures (`benches/`), not part of the app                                                                                                                               | `ferrite-text`, `ferrite-core`, `ferrite-workspace`, `criterion`               |
 
-Planned: `ferrite-syntax` and `ferrite-lsp` (M5), `ferrite-extensions-api` and
-`ferrite-extension-host` (M6). The design brief's `editor-app` and `src-tauri` are one crate
+Planned: `ferrite-extensions-api` and `ferrite-extension-host` (M6). The design brief's `editor-app` and `src-tauri` are one crate
 ([ADR 0001](adr/0001-application-skeleton.md)). Workspace, settings, and command decisions are in
 [ADR 0003](adr/0003-workbench-services.md), and performance decisions in
-[ADR 0004](adr/0004-performance-foundations.md). Measurements are in
+[ADR 0004](adr/0004-performance-foundations.md), and syntax and language server decisions in
+[ADR 0005](adr/0005-syntax-and-language-servers.md). Measurements are in
 [`performance.md`](performance.md).
 
 ## Background work
@@ -208,11 +210,12 @@ Editing keys that need the editor's textarea (arrows, Backspace, clipboard) stay
 - **Rust owns authoritative state.** The frontend never holds a document's text; it renders views
   of the lines near the visible area.
 - **Commands are the only entry point.** Tauri commands are defined in `src-tauri/src/`
-  (`commands.rs`, `editor/commands.rs`, `workspace.rs`, `settings.rs`, `ui_state.rs`,
-  `events.rs`). They are mirrored by typed wrappers in `src/ipc/`, the only frontend code that
+  (`commands.rs`, `editor/commands.rs`, `lsp/commands.rs`, `workspace.rs`, `settings.rs`,
+  `ui_state.rs`, `events.rs`). They are mirrored by typed wrappers in `src/ipc/`, the only frontend code that
   calls `invoke`.
 - **Backend events** (workspace changed, files changed, document reloaded or changed on disk,
-  settings changed, index status) are pushed through one Tauri `Channel` that the frontend
+  settings changed, index status, match counts, syntax parsed, diagnostics changed, language
+  server state) are pushed through one Tauri `Channel` that the frontend
   registers at startup, so the webview needs no event permissions.
 - **Payloads are explicit DTOs** (`src-tauri/src/editor/protocol.rs`) with camelCase fields, not
   core types.
@@ -235,7 +238,11 @@ known      = { version, startLine, endLine }          lines the client holds
 EditorView = { version, lineCount, startLine, endLine,
                lines: { base, splices[], chunks[{ start, lines[] }] },
                selections[], selectionCount, primary: { position, visualColumn }, dirty,
-               search?: { matches[] (visible only), total | null, truncated, current, error } }
+               search?: { matches[] (visible only), total | null, truncated, current, error },
+               highlights: [{ line, spans: [start, end, kind, ...] }]  changed lines only,
+               diagnostics: [{ start, end, severity }]                  visible lines,
+               language?: { language, server?: { name, state, message }, errors, warnings,
+                            completionTriggers } }
 ```
 
 - Positions on the wire are `{ line, column }` with UTF-16 columns, which are JavaScript string
@@ -262,6 +269,13 @@ EditorView = { version, lineCount, startLine, endLine,
   scheduler from a snapshot. The view shows visible matches immediately and `total: null`
   ("Counting…") until a `searchCounted` event triggers a refresh. Find operations with an invalid regex are skipped,
   and the view reports the error instead.
+- **Highlights are incremental too.** Spans use UTF-16 columns and token kinds numbered as in
+  `TOKEN_KINDS`. Lines sent as chunks start with no spans; other held lines keep theirs. The
+  backend remembers a hash of the spans it sent for each line the client holds, replays the
+  line splices on those hashes, and sends spans only for lines whose hash changed. Typing on a
+  line resends that line's spans; opening a block comment resends the lines it now covers.
+- **Every view syncs the document with its language server first**, so diagnostics, hover, and
+  completion requests always refer to text the server has.
 
 | Command                                                       | Purpose                                                |
 | ------------------------------------------------------------- | ------------------------------------------------------ |
@@ -282,6 +296,7 @@ EditorView = { version, lineCount, startLine, endLine,
 | `ui_state_get`, `ui_state_save`                               | Saved layout and active file                           |
 | `events_subscribe`                                            | Register the backend event channel                     |
 | `perf_stats`                                                  | Backend timings, scheduler statistics, memory          |
+| `lsp_hover`, `lsp_definition`, `lsp_completion`               | Language server requests at a position                 |
 | `bench_config`, `bench_generate`, `bench_report`              | Benchmark mode only (`--bench <name>`)                 |
 
 ### Permissions, dialogs, and clipboard
@@ -295,6 +310,73 @@ event, which needs no permission.
 The production Content Security Policy allows only same-origin scripts, IPC, and inline styles.
 The development CSP additionally allows Vite's HMR socket and inline scripts.
 
+## Syntax highlighting
+
+`ferrite-syntax` bundles the grammars; the app keeps one Tree-sitter tree per document of a known
+language (`editor/syntax.rs`), detected from the file name and re-detected after Save As.
+
+- **Edits update the tree immediately.** On each view, the byte edits since the tree's version
+  (from the buffer's edit log, with row/column points) are applied with `Tree::edit`, so the old
+  tree's spans stay aligned with the text right away.
+- **Reparsing is incremental and budgeted.** With a tree, an incremental reparse runs inline
+  under the editor lock, stopped by Tree-sitter's progress callback after 3 ms. If it doesn't
+  finish (or there is no tree yet), the parse runs on the scheduler (keyed `parse:<id>`, high
+  priority) over a snapshot, with the edited old tree, and can be cancelled. Its result is caught
+  up with any edits made meanwhile, stored, and announced with a `syntaxUpdated` event that makes
+  the editor refetch. Only one background parse per document runs at a time, so continuous typing
+  in a large file costs at most one wasted 3 ms attempt per background parse.
+- **Highlighting covers only the viewport.** The highlight query runs over the visible lines'
+  byte range (each line limited to the 16 KiB display limit), reading the rope through a
+  `TextProvider` without copying the document. Overlapping captures resolve by painting wide
+  captures first and narrow ones over them, with earlier query patterns winning for the same
+  node, which is the convention highlight queries are written for. Capture names map to a fixed
+  set of token kinds (`TokenKind`), styled by `--color-syntax-*` tokens.
+- Grammars and queries are compiled once, on first use of each language. Documents over 16 MiB
+  aren't highlighted.
+
+## Language servers
+
+`ferrite-lsp` runs servers and speaks the protocol; the app decides which documents go to which
+server (`lsp/`).
+
+- **Servers start on demand.** The first view of a document whose language has a configured
+  server opens it on the server for its root (the workspace folder if it contains the file, else
+  the nearest ancestor with a root marker such as `Cargo.toml`, else its directory). The server
+  is started on its own thread; until it is up, the status bar shows "starting", and when it is
+  up every waiting document is opened. Known servers are rust-analyzer, typescript-language-server,
+  and pyright; settings (`[lsp]`) can change or add servers or turn them off. A server that isn't
+  installed is reported once in the status bar, not retried.
+- **One connection, three threads.** A writer thread drains a queue to the server's stdin, so
+  sending never blocks the caller (or the editor lock); a reader thread parses
+  `Content-Length`-framed messages (at most 64 MiB) and routes responses to waiting requests and
+  notifications to the app; a third forwards stderr to the log. The client answers the requests
+  servers send (configuration, progress tokens, capability registration) with defaults.
+- **Positions.** The client offers UTF-8 and UTF-16 position encodings, preferring UTF-8, which is
+  Ferrite's native unit, so rust-analyzer needs no conversion. For UTF-16 servers, positions are
+  converted with the rope's indices.
+- **Document sync is incremental.** Each view sends the buffer's edits since the last sync as
+  `didChange` ranges (for UTF-8, straight from the edit log's points; for UTF-16, by replaying
+  the edits on a copy of the last synced snapshot, which is cheap with a rope). Servers that only
+  accept full text get full text; documents over 8 MiB aren't sent. `didSave` and `didClose`
+  follow the document's lifecycle.
+- **Diagnostics are anchored to text.** A `publishDiagnostics` notification is interpreted
+  against the snapshot of the version it names (the last 16 synced snapshots are kept), stored
+  as byte ranges, and mapped through later edits when shown, so squiggles move with the text
+  while the server catches up. Each view carries the diagnostics on its lines and the document's
+  error and warning counts.
+- **Requests never hold locks while waiting.** `lsp_hover`, `lsp_definition`, and
+  `lsp_completion` sync the document, capture the position and a snapshot under the locks,
+  then wait on a blocking thread (5 s timeout). Completion results are filtered and ranked in
+  Rust (prefix, case-insensitive prefix, then letters in order; at most 200) and their edit
+  positions are mapped to the current text. The frontend narrows them further as typing
+  continues, asking again only for incomplete lists. Requests the server cancels or invalidates
+  (`ContentModified`) are dropped quietly. Abandoned requests are cancelled with
+  `$/cancelRequest`.
+- **Failures are contained.** A server that exits fails its pending requests, drops its
+  documents' diagnostics, and is restarted on demand up to three times, then marked failed.
+  Opening or closing a folder, or changing `[lsp]` settings, restarts all servers. On exit, the
+  app asks every server to shut down and kills those that don't within 2 seconds.
+
 ## Frontend structure
 
 - **`ipc/`**: typed command wrappers. `call()` normalizes failures to `CommandError`.
@@ -307,10 +389,17 @@ The development CSP additionally allows Vite's HMR socket and inline scripts.
   commands. `editor/activeEditor.ts` exposes the active editor to commands (find, go to line,
   next match) without coupling them to React.
 - **`editor/EditorView`**: a scroll container sized to `lineCount × lineHeight`. Only the
-  viewport's lines are in the DOM, positioned with a single `translateY`. Each line is one text
-  node. Carets and selection rectangles are measured from the DOM with `Range` after each render,
-  and clicks map back to columns with `caretPositionFromPoint`, so proportional glyphs, tabs, and
-  wide characters line up without a custom text-layout engine.
+  viewport's lines are in the DOM, positioned with a single `translateY`. Each line is a run of
+  text nodes, plain or in `tok-*` spans for highlighting. Carets, selection rectangles, find
+  matches, and diagnostic squiggles are measured from the DOM with `Range` after each render
+  (`editor/measure.ts` maps UTF-16 columns across a line's text nodes), and clicks map back to
+  columns with `caretPositionFromPoint`, so proportional glyphs, tabs, and wide characters line
+  up without a custom text-layout engine.
+- **Language features**: resting the pointer on text shows a hover card (diagnostics at that
+  point plus the server's Markdown, rendered as React elements, never HTML); F12 or Ctrl/Cmd+click
+  goes to the definition; completion opens on the server's trigger characters, on typing a word,
+  or with Ctrl+Space, and is navigated with the arrow keys and accepted with Enter or Tab. The
+  status bar shows problem counts, the language, and the server's state.
 - **Input**: a hidden textarea at the primary caret receives keys, text, IME composition (shown
   inline while composing), and paste. `editor/keymap.ts` maps keys to operations per platform
   (Ctrl on Windows/Linux, Cmd/Option on macOS). Commands' keybindings are handled in the capture
@@ -396,6 +485,13 @@ These are tracked for later milestones:
 - Single folder only; multi-root workspaces aren't supported.
 - Scroll positions are remembered per tab only while the app runs. Unsaved changes aren't
   persisted across restarts (closing asks about them).
+- Language features are limited to diagnostics, hover, go to definition, and completion. Find
+  references, rename, code actions, formatting, signature help, and semantic tokens aren't
+  implemented, nor are completion's additional edits (such as auto-imports) or snippets
+  (completion asks servers for plain text). There's no problems panel; diagnostics for files that
+  aren't open aren't shown.
+- Highlighting uses each grammar's bundled query; there's no injection support (e.g. code in
+  Markdown or doc comments) and no language detection beyond file names.
 - There's no graphical settings UI; settings are edited as TOML. Keybindings aren't configurable
   yet (M7).
 - Multi-line Tab/Shift+Tab indentation, auto-closing brackets, and copying the whole line when
