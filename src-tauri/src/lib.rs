@@ -31,12 +31,12 @@ pub fn run() {
       app.manage(commands::StartupState::new(launched_at));
 
       tracing::info!(
-          version = %app.package_info().version,
-          os = std::env::consts::OS,
-          arch = std::env::consts::ARCH,
-          log_dir = ?log_dir,
-          elapsed_ms = commands::millis(launched_at.elapsed()),
-          "backend initialized"
+        version = %app.package_info().version,
+        os = std::env::consts::OS,
+        arch = std::env::consts::ARCH,
+        log_dir = ?log_dir,
+        elapsed_ms = commands::millis(launched_at.elapsed()),
+        "backend initialized"
       );
       Ok(())
     })
