@@ -1,0 +1,551 @@
+//! The open workspace folder: explorer listings, the Go to File index, find
+//! in files, and reacting to changes on disk.
+//!
+//! Indexing and searching run on background threads and can be cancelled;
+//! the editor stays responsive while they run. File-change notifications
+//! update the index incrementally, refresh the explorer, and reload open
+//! documents that have no unsaved changes.
+
+use std::collections::{BTreeSet, HashMap};
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex, MutexGuard, PoisonError, RwLock};
+
+use ferrite_text::{SearchQuery, TextSnapshot};
+use ferrite_workspace::{
+  DirEntry, EntryKind, FileIndex, FileMatches, FileStamp, SearchLimits, SearchSummary,
+  WorkspaceWatcher, list_directory, load_text_file, scan_files, search_workspace,
+};
+use serde::Serialize;
+use tauri::ipc::Channel;
+use tauri::{AppHandle, Manager, State, WebviewWindow};
+
+use crate::editor::EditorState;
+use crate::editor::protocol::{DocumentSummary, SearchQueryDto};
+use crate::error::CommandError;
+use crate::events::{self, AppEvent, WorkspaceInfo};
+use crate::settings::SettingsState;
+use crate::ui_state::UiStateStore;
+use crate::{dialogs, paths};
+
+/// Most Go to File results returned.
+const MAX_FILE_RESULTS: usize = 100;
+
+struct Active {
+  root: PathBuf,
+  name: String,
+  index: Arc<RwLock<FileIndex>>,
+  indexing: Arc<AtomicBool>,
+  /// Set to stop this workspace's background work when it is replaced.
+  cancel: Arc<AtomicBool>,
+  _watcher: Option<WorkspaceWatcher>,
+}
+
+impl Active {
+  fn info(&self) -> WorkspaceInfo {
+    WorkspaceInfo {
+      root: self.root.display().to_string(),
+      name: self.name.clone(),
+    }
+  }
+}
+
+#[derive(Default)]
+pub struct WorkspaceState {
+  active: Mutex<Option<Active>>,
+  /// Cancellation flag of the running find-in-files search.
+  search: Mutex<Option<Arc<AtomicBool>>>,
+}
+
+impl WorkspaceState {
+  fn lock(&self) -> MutexGuard<'_, Option<Active>> {
+    self.active.lock().unwrap_or_else(PoisonError::into_inner)
+  }
+
+  fn root(&self) -> Option<PathBuf> {
+    self.lock().as_ref().map(|active| active.root.clone())
+  }
+}
+
+/// Opens `path` as the workspace, replacing any previous one.
+pub fn open(app: &AppHandle, path: &Path) -> Result<WorkspaceInfo, CommandError> {
+  let root = paths::normalize(path);
+  if !root.is_dir() {
+    return Err(CommandError::new(
+      "notADirectory",
+      format!("{} is not a folder.", root.display()),
+    ));
+  }
+  let name = root
+    .file_name()
+    .map(|name| name.to_string_lossy().into_owned())
+    .unwrap_or_else(|| root.display().to_string());
+
+  let cancel = Arc::new(AtomicBool::new(false));
+  let watcher = {
+    let app = app.clone();
+    let cancel = cancel.clone();
+    WorkspaceWatcher::new(&root, move |changed| {
+      if !cancel.load(Ordering::Relaxed) {
+        on_files_changed(&app, changed);
+      }
+    })
+    .inspect_err(|error| tracing::warn!(%error, "file watching unavailable"))
+    .ok()
+  };
+  let active = Active {
+    index: Arc::new(RwLock::new(FileIndex::default())),
+    indexing: Arc::new(AtomicBool::new(true)),
+    cancel,
+    _watcher: watcher,
+    root: root.clone(),
+    name,
+  };
+  let info = active.info();
+  start_indexing(app, &active);
+  if let Some(previous) = app.state::<WorkspaceState>().lock().replace(active) {
+    previous.cancel.store(true, Ordering::Relaxed);
+  }
+
+  app
+    .state::<UiStateStore>()
+    .update(|state| state.workspace = Some(root.clone()));
+  tracing::info!(root = %root.display(), "opened workspace");
+  events::emit(
+    app,
+    AppEvent::WorkspaceChanged {
+      workspace: Some(info.clone()),
+    },
+  );
+  Ok(info)
+}
+
+/// Rebuilds the index and refreshes the explorer after `files.exclude`
+/// changed.
+pub fn exclusions_changed(app: &AppHandle) {
+  let root = app.state::<WorkspaceState>().root();
+  if let Some(root) = root
+    && let Err(error) = open(app, &root)
+  {
+    tracing::warn!(message = %error.message, "could not reopen workspace");
+  }
+}
+
+fn start_indexing(app: &AppHandle, active: &Active) {
+  let exclude = app.state::<SettingsState>().get().exclude_filter();
+  let (root, index, indexing, cancel, app) = (
+    active.root.clone(),
+    active.index.clone(),
+    active.indexing.clone(),
+    active.cancel.clone(),
+    app.clone(),
+  );
+  let spawned = std::thread::Builder::new()
+    .name("ferrite-index".into())
+    .spawn(move || {
+      let started = std::time::Instant::now();
+      let built = scan_files(&root, &exclude, &cancel);
+      if cancel.load(Ordering::Relaxed) {
+        return;
+      }
+      let (files, truncated) = (built.len(), built.is_truncated());
+      *index.write().unwrap_or_else(PoisonError::into_inner) = built;
+      indexing.store(false, Ordering::Relaxed);
+      tracing::info!(
+        files,
+        truncated,
+        elapsed_ms = started.elapsed().as_millis() as u64,
+        "indexed workspace"
+      );
+      events::emit(
+        &app,
+        AppEvent::IndexStatus {
+          indexing: false,
+          files,
+          truncated,
+        },
+      );
+    });
+  if let Err(error) = spawned {
+    tracing::error!(%error, "could not start indexing");
+  }
+}
+
+/// Handles a batch of file-change notifications (on the watcher's thread).
+fn on_files_changed(app: &AppHandle, changed: Vec<PathBuf>) {
+  let exclude = app.state::<SettingsState>().get().exclude_filter();
+  let (root, index) = {
+    let workspace = app.state::<WorkspaceState>();
+    let guard = workspace.lock();
+    let Some(active) = guard.as_ref() else {
+      return;
+    };
+    (active.root.clone(), active.index.clone())
+  };
+
+  index
+    .write()
+    .unwrap_or_else(PoisonError::into_inner)
+    .update(&changed, &exclude);
+
+  let directories: BTreeSet<String> = changed
+    .iter()
+    .flat_map(|path| [Some(path.as_path()), path.parent()])
+    .flatten()
+    .filter(|path| path.starts_with(&root))
+    .map(|path| path.display().to_string())
+    .collect();
+  events::emit(
+    app,
+    AppEvent::FilesChanged {
+      directories: directories.into_iter().collect(),
+    },
+  );
+
+  for path in changed {
+    reload_if_open(app, &path);
+  }
+}
+
+/// Reloads an open document whose file changed on disk, unless the change
+/// is Ferrite's own save. Documents with unsaved changes are left alone and
+/// the user is told.
+fn reload_if_open(app: &AppHandle, path: &Path) {
+  let editor_state = app.state::<EditorState>();
+  let (id, dirty, stamp) = {
+    let editor = editor_state.lock();
+    let Some(id) = editor.find_by_path(path) else {
+      return;
+    };
+    let Ok(document) = editor.document(id) else {
+      return;
+    };
+    (id, document.is_dirty(), document.disk_stamp().cloned())
+  };
+  let current = match FileStamp::read(path) {
+    Ok(Some(current)) => current,
+    // Deleted or unreadable: keep the document as it is.
+    _ => return,
+  };
+  if stamp.as_ref() == Some(&current) {
+    return;
+  }
+  if dirty {
+    let editor = editor_state.lock();
+    if let Ok(document) = editor.document(id) {
+      tracing::info!(document = %id, "open document with unsaved changes changed on disk");
+      events::emit(
+        app,
+        AppEvent::DocumentChangedOnDisk {
+          document: DocumentSummary::of(document),
+        },
+      );
+    }
+    return;
+  }
+  let loaded = match load_text_file(path) {
+    Ok(loaded) => loaded,
+    Err(error) => {
+      tracing::warn!(%error, "could not reload changed file");
+      return;
+    }
+  };
+  let mut editor = editor_state.lock();
+  let Ok(document) = editor.document_mut(id) else {
+    return;
+  };
+  // Edited while the file was being read: leave it for the user.
+  if document.is_dirty() {
+    return;
+  }
+  match document.reload(&loaded.text, loaded.has_bom, loaded.stamp) {
+    Ok(_) => {
+      tracing::info!(document = %id, "reloaded document changed on disk");
+      events::emit(
+        app,
+        AppEvent::DocumentReloaded {
+          document: DocumentSummary::of(document),
+        },
+      );
+    }
+    Err(error) => tracing::error!(%error, "reload failed"),
+  }
+}
+
+/// Reopens the workspace saved from the previous session, if it still exists.
+pub fn restore(app: &AppHandle) {
+  if let Some(root) = app.state::<UiStateStore>().get().workspace
+    && root.is_dir()
+    && let Err(error) = open(app, &root)
+  {
+    tracing::warn!(message = %error.message, "could not restore workspace");
+  }
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EntryDto {
+  pub name: String,
+  pub path: String,
+  pub directory: bool,
+  pub ignored: bool,
+}
+
+impl From<DirEntry> for EntryDto {
+  fn from(entry: DirEntry) -> Self {
+    Self {
+      name: entry.name,
+      path: entry.path.display().to_string(),
+      directory: entry.kind == EntryKind::Directory,
+      ignored: entry.ignored,
+    }
+  }
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FileResult {
+  pub path: String,
+  pub relative: String,
+  pub indices: Vec<u32>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FindFilesResult {
+  pub files: Vec<FileResult>,
+  pub indexing: bool,
+  pub truncated: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MatchDto {
+  pub line: usize,
+  pub start_column: usize,
+  pub end_column: usize,
+  pub preview: String,
+  pub preview_start: usize,
+  pub preview_end: usize,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(
+  tag = "type",
+  rename_all = "camelCase",
+  rename_all_fields = "camelCase"
+)]
+pub enum SearchEvent {
+  File {
+    path: String,
+    relative: String,
+    matches: Vec<MatchDto>,
+  },
+  Done {
+    files_searched: usize,
+    files_with_matches: usize,
+    matches: usize,
+    truncated: bool,
+    cancelled: bool,
+  },
+}
+
+impl From<FileMatches> for SearchEvent {
+  fn from(file: FileMatches) -> Self {
+    Self::File {
+      path: file.path.display().to_string(),
+      relative: file.relative,
+      matches: file
+        .matches
+        .into_iter()
+        .map(|found| MatchDto {
+          line: found.line,
+          start_column: found.start_column,
+          end_column: found.end_column,
+          preview: found.preview,
+          preview_start: found.preview_start,
+          preview_end: found.preview_end,
+        })
+        .collect(),
+    }
+  }
+}
+
+impl From<SearchSummary> for SearchEvent {
+  fn from(summary: SearchSummary) -> Self {
+    Self::Done {
+      files_searched: summary.files_searched,
+      files_with_matches: summary.files_with_matches,
+      matches: summary.matches,
+      truncated: summary.truncated,
+      cancelled: summary.cancelled,
+    }
+  }
+}
+
+#[tauri::command]
+pub fn workspace_get(state: State<'_, WorkspaceState>) -> Option<WorkspaceInfo> {
+  state.lock().as_ref().map(Active::info)
+}
+
+#[tauri::command]
+pub fn workspace_open(app: AppHandle, path: String) -> Result<WorkspaceInfo, CommandError> {
+  open(&app, Path::new(&path))
+}
+
+/// Shows a folder picker and opens the chosen folder. `None` if cancelled.
+#[tauri::command]
+pub async fn workspace_open_dialog(
+  app: AppHandle,
+  window: WebviewWindow,
+) -> Result<Option<WorkspaceInfo>, CommandError> {
+  match dialogs::pick_folder(&window).await {
+    Some(path) => open(&app, &path).map(Some),
+    None => Ok(None),
+  }
+}
+
+#[tauri::command]
+pub fn workspace_close(app: AppHandle, state: State<'_, WorkspaceState>) {
+  if let Some(previous) = state.lock().take() {
+    previous.cancel.store(true, Ordering::Relaxed);
+    tracing::info!(root = %previous.root.display(), "closed workspace");
+  }
+  app.state::<UiStateStore>().update(|ui| ui.workspace = None);
+  events::emit(&app, AppEvent::WorkspaceChanged { workspace: None });
+}
+
+/// Lists a directory inside the workspace for the explorer.
+#[tauri::command]
+pub async fn workspace_list_dir(
+  app: AppHandle,
+  path: String,
+) -> Result<Vec<EntryDto>, CommandError> {
+  let root = app
+    .state::<WorkspaceState>()
+    .root()
+    .ok_or_else(|| CommandError::new("noWorkspace", "No folder is open."))?;
+  let dir = PathBuf::from(path);
+  if !dir.starts_with(&root) {
+    return Err(CommandError::new(
+      "outsideWorkspace",
+      "Only folders inside the workspace can be listed.",
+    ));
+  }
+  let exclude = app.state::<SettingsState>().get().exclude_filter();
+  let entries = tauri::async_runtime::spawn_blocking(move || list_directory(&root, &dir, &exclude))
+    .await
+    .map_err(CommandError::internal)??;
+  Ok(entries.into_iter().map(EntryDto::from).collect())
+}
+
+/// Fuzzy-matches workspace files by path for Go to File.
+#[tauri::command]
+pub async fn workspace_find_files(
+  app: AppHandle,
+  query: String,
+) -> Result<FindFilesResult, CommandError> {
+  let Some((root, index, indexing)) = app.state::<WorkspaceState>().lock().as_ref().map(|active| {
+    (
+      active.root.clone(),
+      active.index.clone(),
+      active.indexing.load(Ordering::Relaxed),
+    )
+  }) else {
+    return Ok(FindFilesResult {
+      files: Vec::new(),
+      indexing: false,
+      truncated: false,
+    });
+  };
+  tauri::async_runtime::spawn_blocking(move || {
+    let index = index.read().unwrap_or_else(PoisonError::into_inner);
+    let files = index
+      .query(&query, MAX_FILE_RESULTS)
+      .into_iter()
+      .map(|found| FileResult {
+        path: root.join(&found.relative).display().to_string(),
+        relative: found.relative,
+        indices: found.indices,
+      })
+      .collect();
+    FindFilesResult {
+      files,
+      indexing,
+      truncated: index.is_truncated(),
+    }
+  })
+  .await
+  .map_err(CommandError::internal)
+}
+
+/// Searches workspace files, streaming results file by file through
+/// `channel` and finishing with a `done` event. Starting a search cancels
+/// the previous one.
+#[tauri::command]
+pub async fn workspace_search(
+  app: AppHandle,
+  query: SearchQueryDto,
+  channel: Channel<SearchEvent>,
+) -> Result<(), CommandError> {
+  let searcher = SearchQuery::from(query)
+    .compile()
+    .map_err(|error| CommandError::new("invalidSearch", error.to_string()))?;
+  let state = app.state::<WorkspaceState>();
+  let root = state
+    .root()
+    .ok_or_else(|| CommandError::new("noWorkspace", "No folder is open."))?;
+  let cancel = Arc::new(AtomicBool::new(false));
+  if let Some(previous) = state
+    .search
+    .lock()
+    .unwrap_or_else(PoisonError::into_inner)
+    .replace(cancel.clone())
+  {
+    previous.store(true, Ordering::Relaxed);
+  }
+
+  let settings = app.state::<SettingsState>().get();
+  let exclude = settings.exclude_filter();
+  let limits = SearchLimits {
+    max_file_bytes: settings.search.max_file_bytes,
+    ..SearchLimits::default()
+  };
+  let open: HashMap<PathBuf, TextSnapshot> = app
+    .state::<EditorState>()
+    .lock()
+    .documents()
+    .filter_map(|document| Some((document.path()?.to_path_buf(), document.buffer().snapshot())))
+    .collect();
+
+  tauri::async_runtime::spawn_blocking(move || {
+    let started = std::time::Instant::now();
+    let summary = search_workspace(&root, &exclude, &searcher, &open, limits, &cancel, |file| {
+      if channel.send(SearchEvent::from(file)).is_err() {
+        cancel.store(true, Ordering::Relaxed);
+      }
+    });
+    tracing::debug!(
+      matches = summary.matches,
+      files = summary.files_searched,
+      cancelled = summary.cancelled,
+      elapsed_ms = started.elapsed().as_millis() as u64,
+      "workspace search finished"
+    );
+    let _ = channel.send(SearchEvent::from(summary));
+  })
+  .await
+  .map_err(CommandError::internal)
+}
+
+#[tauri::command]
+pub fn workspace_search_cancel(state: State<'_, WorkspaceState>) {
+  if let Some(cancel) = state
+    .search
+    .lock()
+    .unwrap_or_else(PoisonError::into_inner)
+    .take()
+  {
+    cancel.store(true, Ordering::Relaxed);
+  }
+}

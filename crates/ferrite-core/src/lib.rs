@@ -11,6 +11,7 @@
 mod document;
 mod editor;
 mod error;
+mod find;
 mod history;
 mod ops;
 mod selection;
@@ -18,6 +19,7 @@ mod selection;
 pub use document::{Document, DocumentId, EditorConfig, SavePoint};
 pub use editor::Editor;
 pub use error::CoreError;
+pub use find::{MAX_MATCHES, MatchSummary};
 pub use history::{EditKind, HistoryLimits, StateId};
 pub use ops::{Direction, EditorOp, Motion, Unit, VerticalDirection};
 pub use selection::{Selection, Selections};

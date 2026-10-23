@@ -1,0 +1,60 @@
+.explorer-tree {
+  margin: 0;
+  padding: 0 0 var(--space-2);
+  list-style: none;
+  outline: none;
+}
+
+.explorer-tree__row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  height: 22px;
+  padding-right: var(--space-2);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.explorer-tree__row:hover {
+  background: var(--color-list-hover-background);
+}
+
+.explorer-tree__row[aria-selected="true"] {
+  background: var(--color-list-active-background);
+}
+
+.explorer-tree:focus-visible .explorer-tree__row[data-focused] {
+  outline: 1px solid var(--color-list-focus-outline);
+  outline-offset: -1px;
+}
+
+.explorer-tree__row[data-ignored] {
+  color: var(--color-text-ignored);
+}
+
+.explorer-tree__chevron {
+  flex: none;
+  width: 12px;
+  color: var(--color-text-muted);
+  font-size: 10px;
+  text-align: center;
+}
+
+.explorer-tree__name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.panel-button {
+  margin-top: var(--space-2);
+  padding: var(--space-1) var(--space-3);
+  border: none;
+  border-radius: var(--radius-control);
+  background: var(--color-button-background);
+  color: var(--color-button-foreground);
+  cursor: pointer;
+}
+
+.panel-button:hover {
+  background: var(--color-button-hover-background);
+}

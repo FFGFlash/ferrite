@@ -8,6 +8,9 @@ publish = false
 
 [dependencies]
 ropey = { workspace = true }
+regex-automata = { workspace = true }
+regex-cursor = { workspace = true }
+regex-syntax = { workspace = true }
 thiserror = { workspace = true }
 unicode-segmentation = { workspace = true }
 

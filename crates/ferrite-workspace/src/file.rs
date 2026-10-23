@@ -79,7 +79,7 @@ pub enum FileError {
 }
 
 impl FileError {
-  fn from_io(path: &Path, source: io::Error) -> Self {
+  pub(crate) fn from_io(path: &Path, source: io::Error) -> Self {
     let path = path.to_path_buf();
     match source.kind() {
       io::ErrorKind::NotFound => Self::NotFound { path },

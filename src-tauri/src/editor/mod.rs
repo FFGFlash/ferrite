@@ -3,10 +3,7 @@
 //! unsaved-changes prompts, and the editing commands the frontend calls.
 
 mod commands;
-mod dialogs;
-mod error;
-mod paths;
-mod protocol;
+pub(crate) mod protocol;
 
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -29,7 +26,7 @@ pub struct EditorState {
 }
 
 impl EditorState {
-  fn lock(&self) -> MutexGuard<'_, Editor> {
+  pub(crate) fn lock(&self) -> MutexGuard<'_, Editor> {
     // A panic while holding the lock must not make every document inaccessible.
     self.editor.lock().unwrap_or_else(PoisonError::into_inner)
   }
@@ -39,24 +36,25 @@ impl EditorState {
   }
 }
 
-/// Opens files named on the command line before the frontend loads, so they
-/// appear as tabs immediately. Arguments starting with `-` are ignored.
-/// Failures are logged and skipped.
-pub fn open_startup_files(state: &EditorState, args: impl IntoIterator<Item = PathBuf>) {
-  for arg in args {
+/// Opens files before the frontend loads, so they appear as tabs
+/// immediately: those from the previous session and those named on the
+/// command line. Arguments starting with `-` are ignored. Failures are
+/// logged and skipped.
+pub fn open_startup_files(state: &EditorState, files: impl IntoIterator<Item = PathBuf>) {
+  for arg in files {
     if arg.to_string_lossy().starts_with('-') {
       continue;
     }
-    let path = paths::normalize(&arg);
+    let path = crate::paths::normalize(&arg);
     match load_text_file(&path) {
       Ok(file) => {
         let mut editor = state.lock();
         if editor.find_by_path(&path).is_none() {
           let id = editor.open(path.clone(), file);
-          tracing::info!(document = %id, path = %path.display(), "opened file from command line");
+          tracing::info!(document = %id, path = %path.display(), "opened file at startup");
         }
       }
-      Err(error) => tracing::warn!(%error, "could not open file from command line"),
+      Err(error) => tracing::warn!(%error, "could not open file at startup"),
     }
   }
 }

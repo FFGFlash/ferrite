@@ -30,6 +30,7 @@ impl From<CoreError> for CommandError {
     let code = match error {
       CoreError::UnknownDocument(_) => "unknownDocument",
       CoreError::Edit(_) => "invalidEdit",
+      CoreError::Search(_) => "invalidSearch",
     };
     tracing::warn!(%error, code, "editor command failed");
     Self::new(code, error.to_string())

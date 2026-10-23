@@ -3,7 +3,7 @@
 
 use std::ops::Range;
 
-use ferrite_text::{ChangeSet, Edit, normalize_line_endings};
+use ferrite_text::{ChangeSet, Edit, SearchQuery, normalize_line_endings};
 
 use crate::document::Document;
 use crate::error::CoreError;
@@ -87,6 +87,30 @@ pub enum EditorOp {
   AddCursor(VerticalDirection),
   Undo,
   Redo,
+  /// Selects the next (or previous) match after the primary selection,
+  /// wrapping around the document.
+  FindNext {
+    query: SearchQuery,
+    backward: bool,
+  },
+  /// Selects every match, up to a limit.
+  SelectAllMatches {
+    query: SearchQuery,
+  },
+  /// Replaces the primary selection if it is a match, then selects the next
+  /// match.
+  Replace {
+    query: SearchQuery,
+    replacement: String,
+  },
+  /// Replaces every match as a single undoable change.
+  ReplaceAll {
+    query: SearchQuery,
+    replacement: String,
+  },
+  /// Selects the word at the cursor, or adds a selection at the next
+  /// occurrence of the primary selection's text.
+  AddNextMatch,
 }
 
 impl Document {
@@ -132,6 +156,24 @@ impl Document {
       }
       EditorOp::Undo => self.restore(|document| document.history.undo(&mut document.buffer)),
       EditorOp::Redo => self.restore(|document| document.history.redo(&mut document.buffer)),
+      EditorOp::FindNext { query, backward } => {
+        self.find_next(&query.compile()?, backward);
+        Ok(false)
+      }
+      EditorOp::SelectAllMatches { query } => {
+        self.select_all_matches(&query.compile()?);
+        Ok(false)
+      }
+      EditorOp::Replace { query, replacement } => {
+        self.replace_current(&query.compile()?, &replacement)
+      }
+      EditorOp::ReplaceAll { query, replacement } => {
+        self.replace_all(&query.compile()?, &replacement)
+      }
+      EditorOp::AddNextMatch => {
+        self.add_next_match();
+        Ok(false)
+      }
     }
   }
 
@@ -282,7 +324,7 @@ impl Document {
   }
 
   /// Replaces the selections; any change ends the current typing group.
-  fn set_selections(&mut self, selections: Selections) {
+  pub(crate) fn set_selections(&mut self, selections: Selections) {
     if selections != self.selections {
       self.history.seal();
     }

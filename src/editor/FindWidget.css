@@ -1,0 +1,108 @@
+.find-widget {
+  position: absolute;
+  top: 0;
+  right: var(--space-6);
+  z-index: 5;
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-1);
+  padding: var(--space-1) var(--space-2) var(--space-1) var(--space-1);
+  border: 1px solid var(--color-widget-border);
+  border-top: none;
+  border-radius: 0 0 var(--radius-control) var(--radius-control);
+  background: var(--color-widget-background);
+  box-shadow: 0 4px 12px rgb(0 0 0 / 0.25);
+  font-family: var(--font-ui);
+  font-size: var(--font-size-ui);
+  cursor: default;
+}
+
+.find-widget__rows {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.find-widget__row {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.find-widget__field {
+  display: flex;
+  align-items: center;
+  width: 280px;
+  margin-right: var(--space-1);
+  padding-right: 2px;
+  border: 1px solid var(--color-input-border);
+  border-radius: var(--radius-control);
+  background: var(--color-input-background);
+}
+
+.find-widget__field:focus-within {
+  border-color: var(--color-focus-ring);
+}
+
+.find-widget__field[data-invalid] {
+  border-color: var(--color-error);
+}
+
+.find-widget__input {
+  flex: 1;
+  min-width: 0;
+  padding: 3px var(--space-2);
+  border: none;
+  outline: none;
+  background: none;
+  color: var(--color-text);
+  font: inherit;
+}
+
+.find-widget__option,
+.find-widget__button,
+.find-widget__toggle {
+  display: grid;
+  place-items: center;
+  min-width: 22px;
+  height: 22px;
+  padding: 0 2px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-control);
+  background: none;
+  color: var(--color-text-muted);
+  font-size: var(--font-size-ui-small);
+  cursor: pointer;
+}
+
+.find-widget__option {
+  font-family: var(--font-mono);
+}
+
+.find-widget__option:hover,
+.find-widget__button:hover,
+.find-widget__toggle:hover {
+  background: var(--color-control-hover-background);
+  color: var(--color-text);
+}
+
+.find-widget__option[aria-pressed="true"] {
+  border-color: var(--color-focus-ring);
+  color: var(--color-text);
+}
+
+.find-widget__toggle {
+  height: 24px;
+}
+
+.find-widget__button--text {
+  padding: 0 var(--space-2);
+}
+
+.find-widget__status {
+  min-width: 72px;
+  padding: 0 var(--space-1);
+  color: var(--color-text-muted);
+  font-size: var(--font-size-ui-small);
+  white-space: nowrap;
+}

@@ -45,6 +45,13 @@ pub enum EditError {
   NotCharBoundary { offset: usize },
 }
 
+/// Which side of an edit an offset inside it moves to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Bias {
+  Before,
+  After,
+}
+
 /// A set of edits applied as one atomic change.
 ///
 /// Edits are expressed in the coordinates of the text *before* the change,
@@ -106,6 +113,28 @@ impl ChangeSet {
       .collect()
   }
 
+  /// Maps an offset in the text before the change to the text after it.
+  /// Offsets inside a replaced range move to the start of its replacement
+  /// (`Bias::Before`) or past its end (`Bias::After`).
+  pub fn map_offset(&self, offset: usize, bias: Bias) -> usize {
+    let (mut added, mut removed) = (0, 0);
+    for edit in &self.edits {
+      if offset < edit.range.start {
+        break;
+      }
+      if offset <= edit.range.end {
+        let start = edit.range.start - removed + added;
+        return match bias {
+          Bias::Before => start,
+          Bias::After => start + edit.text.len(),
+        };
+      }
+      removed += edit.range.len();
+      added += edit.text.len();
+    }
+    offset - removed + added
+  }
+
   /// Bytes of text carried by this change set; used for history accounting.
   pub fn text_bytes(&self) -> usize {
     self.edits.iter().map(|edit| edit.text.len()).sum()
@@ -153,6 +182,20 @@ mod tests {
     ])
     .expect("valid");
     assert_eq!(changes.post_ranges(), vec![0..1, 3..5, 6..6]);
+  }
+
+  #[test]
+  fn maps_offsets_through_edits() {
+    let changes =
+      ChangeSet::new(vec![Edit::new(2..4, "xyz"), Edit::insert(6, "!")]).expect("valid");
+    assert_eq!(changes.map_offset(1, Bias::After), 1);
+    assert_eq!(changes.map_offset(3, Bias::Before), 2);
+    assert_eq!(changes.map_offset(3, Bias::After), 5);
+    assert_eq!(changes.map_offset(5, Bias::Before), 6);
+    // The insertion at 6 sits after the first edit, which grew the text by one.
+    assert_eq!(changes.map_offset(6, Bias::Before), 7);
+    assert_eq!(changes.map_offset(6, Bias::After), 8);
+    assert_eq!(changes.map_offset(8, Bias::Before), 10);
   }
 
   #[test]

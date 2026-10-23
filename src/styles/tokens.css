@@ -74,6 +74,23 @@
   --color-editor-line-number-active: #b4b9c2;
   --color-editor-cursor: var(--color-accent);
   --color-editor-selection: rgb(143 184 222 / 0.25);
+  --color-editor-find-match: rgb(240 138 75 / 0.22);
+  --color-editor-find-match-current: rgb(240 138 75 / 0.45);
+  --color-editor-find-match-border: rgb(240 138 75 / 0.8);
+
+  --color-widget-background: #25282e;
+  --color-widget-border: #363a42;
+  --color-input-background: #1b1d21;
+  --color-input-border: #3a3e46;
+  --color-list-hover-background: rgb(255 255 255 / 0.05);
+  --color-list-active-background: rgb(143 184 222 / 0.18);
+  --color-list-focus-outline: var(--color-focus-ring);
+  --color-text-ignored: #6b717d;
+  --color-text-highlight: var(--color-accent);
+  --color-overlay-backdrop: rgb(0 0 0 / 0.3);
+  --color-button-background: #2f6ea8;
+  --color-button-foreground: #ffffff;
+  --color-button-hover-background: #3a7fbe;
 
   --color-statusbar-background: #a8461f;
   --color-statusbar-foreground: #ffffff;
@@ -118,6 +135,21 @@
   --color-editor-line-number: #a3a8b1;
   --color-editor-line-number-active: #4b515c;
   --color-editor-selection: rgb(47 110 168 / 0.2);
+  --color-editor-find-match: rgb(185 80 31 / 0.18);
+  --color-editor-find-match-current: rgb(185 80 31 / 0.35);
+  --color-editor-find-match-border: rgb(185 80 31 / 0.7);
+
+  --color-widget-background: #ffffff;
+  --color-widget-border: #d3d6dc;
+  --color-input-background: #ffffff;
+  --color-input-border: #c5c9d0;
+  --color-list-hover-background: rgb(0 0 0 / 0.04);
+  --color-list-active-background: rgb(47 110 168 / 0.14);
+  --color-text-ignored: #9aa0aa;
+  --color-overlay-backdrop: rgb(0 0 0 / 0.15);
+  --color-button-background: #2f6ea8;
+  --color-button-foreground: #ffffff;
+  --color-button-hover-background: #275d8e;
 
   --color-statusbar-background: #a8461f;
   --color-statusbar-foreground: #ffffff;

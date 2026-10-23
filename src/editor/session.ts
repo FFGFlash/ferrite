@@ -7,13 +7,23 @@
  * never reorders. Every response carries the latest viewport's lines, so a
  * scroll during an edit needs no extra request.
  */
-import type { ClipboardAction, EditorOp, EditorView, Viewport } from "../ipc/editor";
+import type { ClipboardAction, EditorOp, EditorView, SearchQuery, Viewport } from "../ipc/editor";
 import * as ipc from "../ipc/editor";
 
 export interface EditorTransport {
-  apply(id: number, ops: EditorOp[], viewport: Viewport): Promise<EditorView>;
-  view(id: number, viewport: Viewport): Promise<EditorView>;
-  clipboard(id: number, action: ClipboardAction, viewport: Viewport): Promise<EditorView>;
+  apply(
+    id: number,
+    ops: EditorOp[],
+    viewport: Viewport,
+    search: SearchQuery | null,
+  ): Promise<EditorView>;
+  view(id: number, viewport: Viewport, search: SearchQuery | null): Promise<EditorView>;
+  clipboard(
+    id: number,
+    action: ClipboardAction,
+    viewport: Viewport,
+    search: SearchQuery | null,
+  ): Promise<EditorView>;
 }
 
 export const ipcTransport: EditorTransport = {
@@ -27,6 +37,7 @@ type Job = { kind: "ops"; ops: EditorOp[] } | { kind: "clipboard"; action: Clipb
 export class EditorSession {
   private readonly queue: Job[] = [];
   private viewport: Viewport;
+  private search: SearchQuery | null = null;
   private viewportStale = true;
   private busy = false;
   private disposed = false;
@@ -40,7 +51,9 @@ export class EditorSession {
     private readonly transport: EditorTransport = ipcTransport,
   ) {
     this.viewport = viewport;
-    this.pump();
+    // Start on a microtask so operations dispatched right after construction
+    // (e.g. a selection to restore) go out with the first request.
+    queueMicrotask(() => this.pump());
   }
 
   dispatch(op: EditorOp): void {
@@ -76,6 +89,25 @@ export class EditorSession {
     this.pump();
   }
 
+  /**
+   * Sets the find query whose matches every view should include, or `null`
+   * for none. Fetches a fresh view.
+   */
+  setSearch(search: SearchQuery | null): void {
+    const next = search && search.pattern ? search : null;
+    if (JSON.stringify(next) === JSON.stringify(this.search)) {
+      return;
+    }
+    this.search = next;
+    this.refresh();
+  }
+
+  /** Fetches a fresh view, e.g. after the document changed elsewhere. */
+  refresh(): void {
+    this.viewportStale = true;
+    this.pump();
+  }
+
   /** Resolves once every queued operation has been applied. */
   idle(): Promise<void> {
     if (!this.busy && this.queue.length === 0) {
@@ -99,14 +131,14 @@ export class EditorSession {
       this.resolveIdle();
       return;
     }
-    const viewport = this.viewport;
+    const { viewport, search } = this;
     this.viewportStale = false;
     this.busy = true;
     const request = !job
-      ? this.transport.view(this.documentId, viewport)
+      ? this.transport.view(this.documentId, viewport, search)
       : job.kind === "ops"
-        ? this.transport.apply(this.documentId, job.ops, viewport)
-        : this.transport.clipboard(this.documentId, job.action, viewport);
+        ? this.transport.apply(this.documentId, job.ops, viewport, search)
+        : this.transport.clipboard(this.documentId, job.action, viewport, search);
     request
       .then((view) => {
         if (!this.disposed) {

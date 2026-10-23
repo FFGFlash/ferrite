@@ -82,6 +82,23 @@ impl Editor {
       .ok_or(CoreError::UnknownDocument(id))
   }
 
+  pub fn config(&self) -> &EditorConfig {
+    &self.config
+  }
+
+  /// Replaces the configuration. Indentation settings apply to open
+  /// documents immediately; history limits apply to documents opened later.
+  pub fn set_config(&mut self, config: EditorConfig) {
+    for document in self.documents.values_mut() {
+      document.set_indentation(config.tab_size, config.insert_spaces);
+    }
+    self.config = config;
+  }
+
+  pub fn document_ids(&self) -> Vec<DocumentId> {
+    self.documents.keys().copied().collect()
+  }
+
   /// Open documents in the order they were opened.
   pub fn documents(&self) -> impl Iterator<Item = &Document> {
     self.documents.values()

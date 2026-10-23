@@ -1,9 +1,10 @@
-import { memo } from "react";
+import { memo, useEffect, useRef, useState, type DragEvent } from "react";
 import type { AppInfo } from "../ipc";
 import type { DocumentSummary } from "../ipc/editor";
-import { activate, close, documentsStore } from "../state/documents";
+import { activate, close, documentsStore, moveDocument } from "../state/documents";
 import { useStore } from "../state/store";
 import { EditorView } from "./EditorView";
+import { activeEditor } from "./activeEditor";
 import { WelcomePage } from "./WelcomePage";
 import "./EditorArea.css";
 
@@ -19,8 +20,13 @@ export const EditorArea = memo(function EditorArea({ appInfo }: EditorAreaProps)
     <main className="editor-area">
       {documents.length > 0 && (
         <div className="editor-tabs" role="tablist" aria-label="Open editors">
-          {documents.map((document) => (
-            <EditorTab key={document.id} document={document} active={document.id === activeId} />
+          {documents.map((document, index) => (
+            <EditorTab
+              key={document.id}
+              document={document}
+              index={index}
+              active={document.id === activeId}
+            />
           ))}
         </div>
       )}
@@ -44,14 +50,57 @@ export const EditorArea = memo(function EditorArea({ appInfo }: EditorAreaProps)
 
 interface EditorTabProps {
   document: DocumentSummary;
+  index: number;
   active: boolean;
 }
 
-function EditorTab({ document, active }: EditorTabProps) {
+const TAB_DRAG_TYPE = "application/x-ferrite-tab";
+
+function EditorTab({ document, index, active }: EditorTabProps) {
+  const ref = useRef<HTMLDivElement>(null);
+  const [drop, setDrop] = useState<"before" | "after" | null>(null);
   const label = document.dirty ? `${document.title}, unsaved` : document.title;
+
+  useEffect(() => {
+    if (active) {
+      ref.current?.scrollIntoView({ block: "nearest", inline: "nearest" });
+    }
+  }, [active]);
+
+  const sideOf = (event: DragEvent<HTMLDivElement>) => {
+    const rect = event.currentTarget.getBoundingClientRect();
+    return event.clientX < rect.left + rect.width / 2 ? "before" : "after";
+  };
+
   return (
     <div
+      ref={ref}
       className="editor-tab"
+      draggable
+      data-drop={drop ?? undefined}
+      onDragStart={(event) => {
+        event.dataTransfer.setData(TAB_DRAG_TYPE, String(document.id));
+        event.dataTransfer.effectAllowed = "move";
+      }}
+      onDragOver={(event) => {
+        if (event.dataTransfer.types.includes(TAB_DRAG_TYPE)) {
+          event.preventDefault();
+          setDrop(sideOf(event));
+        }
+      }}
+      onDragLeave={() => setDrop(null)}
+      onDrop={(event) => {
+        setDrop(null);
+        const id = Number(event.dataTransfer.getData(TAB_DRAG_TYPE));
+        if (!Number.isFinite(id) || id === document.id) {
+          return;
+        }
+        event.preventDefault();
+        const { documents } = documentsStore.get();
+        const from = documents.findIndex((d) => d.id === id);
+        const target = sideOf(event) === "before" ? index : index + 1;
+        moveDocument(id, from < target ? target - 1 : target);
+      }}
       role="tab"
       id={`editor-tab-${document.id}`}
       aria-selected={active}
@@ -64,6 +113,9 @@ function EditorTab({ document, active }: EditorTabProps) {
           activate(document.id);
         }
       }}
+      // The browser moves focus to the clicked tab after mousedown; hand it
+      // back to the editor once the click completes.
+      onClick={() => requestAnimationFrame(() => activeEditor.get()?.focus())}
       onAuxClick={(event) => {
         if (event.button === 1) {
           void close(document.id);

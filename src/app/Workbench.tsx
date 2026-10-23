@@ -1,48 +1,54 @@
-import { useCallback, useState } from "react";
+import { useCallback } from "react";
+import { useKeybindings } from "../commands/registry";
 import { ActivityBar } from "../components/ActivityBar";
 import { Notifications } from "../components/Notifications";
+import { Palette } from "../components/Palette";
 import { Sash } from "../components/Sash";
 import { SideBar } from "../components/SideBar";
 import { StatusBar } from "../components/StatusBar";
 import { EditorArea } from "../editor/EditorArea";
 import type { AppInfo } from "../ipc";
-import { useWorkbenchShortcuts } from "./shortcuts";
+import { SIDEBAR_MAX_WIDTH, SIDEBAR_MIN_WIDTH, layoutStore, updateLayout } from "../state/layout";
+import { useStore } from "../state/store";
 import { builtinViews } from "./views";
 import "./Workbench.css";
-
-export const SIDEBAR_DEFAULT_WIDTH = 260;
-export const SIDEBAR_MIN_WIDTH = 170;
-export const SIDEBAR_MAX_WIDTH = 600;
 
 interface WorkbenchProps {
   appInfo: AppInfo | null;
 }
 
 export function Workbench({ appInfo }: WorkbenchProps) {
-  const [activeViewId, setActiveViewId] = useState<string | null>(builtinViews[0]?.id ?? null);
-  const [sidebarWidth, setSidebarWidth] = useState(SIDEBAR_DEFAULT_WIDTH);
-  useWorkbenchShortcuts();
+  const { sidebarVisible, sidebarWidth, activeView } = useStore(layoutStore);
+  useKeybindings();
 
-  // Selecting the active view again collapses the side bar.
+  // Selecting the visible view again collapses the side bar.
   const selectView = useCallback((id: string) => {
-    setActiveViewId((current) => (current === id ? null : id));
+    const layout = layoutStore.get();
+    updateLayout(
+      layout.sidebarVisible && layout.activeView === id
+        ? { sidebarVisible: false }
+        : { sidebarVisible: true, activeView: id },
+    );
   }, []);
+  const resize = useCallback((width: number) => updateLayout({ sidebarWidth: width }), []);
 
-  const activeView = builtinViews.find((view) => view.id === activeViewId);
+  const view = sidebarVisible
+    ? (builtinViews.find((candidate) => candidate.id === activeView) ?? builtinViews[0])
+    : undefined;
 
   return (
     <div className="workbench">
       <div className="workbench__body">
-        <ActivityBar views={builtinViews} activeViewId={activeViewId} onSelect={selectView} />
-        {activeView && (
+        <ActivityBar views={builtinViews} activeViewId={view?.id ?? null} onSelect={selectView} />
+        {view && (
           <>
-            <SideBar view={activeView} width={sidebarWidth} />
+            <SideBar view={view} width={sidebarWidth} />
             <Sash
               label="Resize side bar"
               value={sidebarWidth}
               min={SIDEBAR_MIN_WIDTH}
               max={SIDEBAR_MAX_WIDTH}
-              onChange={setSidebarWidth}
+              onChange={resize}
             />
           </>
         )}
@@ -50,6 +56,7 @@ export function Workbench({ appInfo }: WorkbenchProps) {
       </div>
       <StatusBar appInfo={appInfo} />
       <Notifications />
+      <Palette />
     </div>
   );
 }

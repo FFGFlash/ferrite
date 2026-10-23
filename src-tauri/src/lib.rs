@@ -6,8 +6,15 @@
 //! (see `docs/architecture.md`), not here.
 
 mod commands;
+mod dialogs;
 mod editor;
+mod error;
+mod events;
 mod logging;
+mod paths;
+mod settings;
+mod ui_state;
+mod workspace;
 
 use std::time::Instant;
 
@@ -22,6 +29,8 @@ pub fn run() {
     .plugin(tauri_plugin_dialog::init())
     .plugin(tauri_plugin_clipboard_manager::init())
     .manage(editor::EditorState::default())
+    .manage(events::EventHub::default())
+    .manage(workspace::WorkspaceState::default())
     .setup(move |app| {
       let log_dir = match app.path().app_log_dir() {
         Ok(dir) => Some(dir),
@@ -42,10 +51,34 @@ pub fn run() {
         elapsed_ms = commands::millis(launched_at.elapsed()),
         "backend initialized"
       );
+      let settings = settings::SettingsState::load(app.path().app_config_dir().ok());
+      app
+        .state::<editor::EditorState>()
+        .lock()
+        .set_config(settings.get().editor_config());
+      app.manage(settings);
+      let saved = ui_state::UiStateStore::load(app.path().app_local_data_dir().ok());
+      let previous_files = saved.get().open_files;
+      app.manage(saved);
+
+      workspace::restore(app.handle());
+      let named: Vec<std::path::PathBuf> = std::env::args_os()
+        .skip(1)
+        .map(std::path::PathBuf::from)
+        .filter(|arg| !arg.to_string_lossy().starts_with('-'))
+        .collect();
       editor::open_startup_files(
         &app.state::<editor::EditorState>(),
-        std::env::args_os().skip(1).map(std::path::PathBuf::from),
+        previous_files.into_iter().chain(named.iter().cloned()),
       );
+      ui_state::record_open_files(app.handle());
+      // A file named on the command line becomes the active tab.
+      if let Some(last) = named.last() {
+        let active = paths::normalize(last);
+        app
+          .state::<ui_state::UiStateStore>()
+          .update(|state| state.active_file = Some(active));
+      }
       Ok(())
     })
     .on_window_event(|window, event| {
@@ -69,6 +102,20 @@ pub fn run() {
       editor::editor_view,
       editor::editor_apply,
       editor::editor_clipboard,
+      events::events_subscribe,
+      settings::settings_get,
+      settings::settings_file,
+      settings::settings_set_theme,
+      ui_state::ui_state_get,
+      ui_state::ui_state_save,
+      workspace::workspace_get,
+      workspace::workspace_open,
+      workspace::workspace_open_dialog,
+      workspace::workspace_close,
+      workspace::workspace_list_dir,
+      workspace::workspace_find_files,
+      workspace::workspace_search,
+      workspace::workspace_search_cancel,
     ])
     .build(tauri::generate_context!());
 

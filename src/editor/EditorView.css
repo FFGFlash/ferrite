@@ -1,3 +1,11 @@
+.editor-view-frame {
+  position: relative;
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+}
+
 .editor-view {
   position: relative;
   flex: 1;
@@ -54,7 +62,7 @@
 .editor-view__line {
   height: var(--editor-line-height);
   white-space: pre;
-  tab-size: 4;
+  tab-size: var(--editor-tab-size, 4);
 }
 
 .editor-view__selections,
@@ -68,6 +76,18 @@
   position: absolute;
   height: var(--editor-line-height);
   background: var(--color-editor-selection);
+}
+
+.editor-view__match {
+  position: absolute;
+  height: var(--editor-line-height);
+  border-radius: 2px;
+  background: var(--color-editor-find-match);
+}
+
+.editor-view__match[data-current] {
+  background: var(--color-editor-find-match-current);
+  outline: 1px solid var(--color-editor-find-match-border);
 }
 
 .editor-view__caret {

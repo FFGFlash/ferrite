@@ -1,0 +1,339 @@
+//! User settings, stored as TOML in the platform config directory and edited
+//! in Ferrite itself. Saving the file applies it; invalid files are reported
+//! and the previous settings stay in effect.
+
+use std::path::{Path, PathBuf};
+use std::sync::{PoisonError, RwLock};
+
+use ferrite_core::EditorConfig;
+use ferrite_workspace::ExcludeFilter;
+use serde::{Deserialize, Serialize};
+use tauri::{AppHandle, Manager, State};
+
+use crate::editor::EditorState;
+use crate::error::CommandError;
+use crate::events::{self, AppEvent};
+
+const FILE_NAME: &str = "settings.toml";
+
+/// Written when the settings file does not exist yet. Every setting is shown
+/// with its default value, commented out.
+const TEMPLATE: &str = r#"# Ferrite settings. Uncomment a line to change it; save to apply.
+
+[editor]
+# tab_size = 4
+# insert_spaces = true
+# font_size = 14
+# font_family = ""          # empty: the default monospace font
+
+[workbench]
+# theme = "system"          # "system", "dark", or "light"
+
+[files]
+# Hidden from the explorer, Go to File, and search. Patterns without "/"
+# match names at any depth; others match paths relative to the folder.
+# exclude = [".git", ".DS_Store", "Thumbs.db"]
+
+[search]
+# max_file_bytes = 4194304  # larger files are skipped by find in files
+"#;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum Theme {
+  #[default]
+  System,
+  Dark,
+  Light,
+}
+
+#[derive(Debug, Clone, PartialEq, Deserialize, Default)]
+#[serde(default, deny_unknown_fields)]
+pub struct Settings {
+  pub editor: EditorSettings,
+  pub workbench: WorkbenchSettings,
+  pub files: FilesSettings,
+  pub search: SearchSettings,
+}
+
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct EditorSettings {
+  pub tab_size: usize,
+  pub insert_spaces: bool,
+  pub font_size: u32,
+  pub font_family: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Deserialize, Default)]
+#[serde(default, deny_unknown_fields)]
+pub struct WorkbenchSettings {
+  pub theme: Theme,
+}
+
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct FilesSettings {
+  pub exclude: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct SearchSettings {
+  pub max_file_bytes: u64,
+}
+
+impl Default for EditorSettings {
+  fn default() -> Self {
+    Self {
+      tab_size: 4,
+      insert_spaces: true,
+      font_size: 14,
+      font_family: String::new(),
+    }
+  }
+}
+
+impl Default for FilesSettings {
+  fn default() -> Self {
+    Self {
+      exclude: vec![".git".into(), ".DS_Store".into(), "Thumbs.db".into()],
+    }
+  }
+}
+
+impl Default for SearchSettings {
+  fn default() -> Self {
+    Self {
+      max_file_bytes: 4 * 1024 * 1024,
+    }
+  }
+}
+
+/// Settings the frontend applies itself.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FrontendSettings {
+  pub theme: Theme,
+  pub font_size: u32,
+  pub font_family: String,
+  pub tab_size: usize,
+}
+
+impl Settings {
+  /// Parses and validates a settings file.
+  pub fn parse(text: &str) -> Result<Self, String> {
+    let settings: Self = toml::from_str(text).map_err(|error| error.to_string())?;
+    settings.validate()?;
+    Ok(settings)
+  }
+
+  fn validate(&self) -> Result<(), String> {
+    if !(1..=16).contains(&self.editor.tab_size) {
+      return Err("editor.tab_size must be between 1 and 16".into());
+    }
+    if !(6..=72).contains(&self.editor.font_size) {
+      return Err("editor.font_size must be between 6 and 72".into());
+    }
+    if self.search.max_file_bytes == 0 {
+      return Err("search.max_file_bytes must be greater than 0".into());
+    }
+    ExcludeFilter::new(&self.files.exclude).map_err(|error| format!("files.exclude: {error}"))?;
+    Ok(())
+  }
+
+  pub fn exclude_filter(&self) -> ExcludeFilter {
+    // Validated on load, so building cannot fail; fall back to no exclusions.
+    ExcludeFilter::new(&self.files.exclude).unwrap_or_default()
+  }
+
+  pub fn editor_config(&self) -> EditorConfig {
+    EditorConfig {
+      tab_size: self.editor.tab_size,
+      insert_spaces: self.editor.insert_spaces,
+      ..EditorConfig::default()
+    }
+  }
+
+  pub fn frontend(&self) -> FrontendSettings {
+    FrontendSettings {
+      theme: self.workbench.theme,
+      font_size: self.editor.font_size,
+      font_family: self.editor.font_family.clone(),
+      tab_size: self.editor.tab_size,
+    }
+  }
+}
+
+pub struct SettingsState {
+  path: Option<PathBuf>,
+  current: RwLock<Settings>,
+}
+
+impl SettingsState {
+  /// Loads settings from the config directory. Problems are logged and the
+  /// defaults are used.
+  pub fn load(config_dir: Option<PathBuf>) -> Self {
+    let path = config_dir.map(|dir| dir.join(FILE_NAME));
+    let settings = match path.as_deref().map(std::fs::read_to_string) {
+      Some(Ok(text)) => Settings::parse(&text).unwrap_or_else(|error| {
+        tracing::warn!(%error, "invalid settings file; using defaults");
+        Settings::default()
+      }),
+      Some(Err(error)) if error.kind() != std::io::ErrorKind::NotFound => {
+        tracing::warn!(%error, "could not read settings; using defaults");
+        Settings::default()
+      }
+      _ => Settings::default(),
+    };
+    Self {
+      path,
+      current: RwLock::new(settings),
+    }
+  }
+
+  pub fn get(&self) -> Settings {
+    self
+      .current
+      .read()
+      .unwrap_or_else(PoisonError::into_inner)
+      .clone()
+  }
+
+  pub fn path(&self) -> Option<&Path> {
+    self.path.as_deref()
+  }
+
+  fn replace(&self, settings: Settings) {
+    *self.current.write().unwrap_or_else(PoisonError::into_inner) = settings;
+  }
+}
+
+/// Re-reads the settings file after it was saved and applies it everywhere.
+/// Returns an error message for the user if the file is invalid.
+pub fn reload(app: &AppHandle) -> Result<(), CommandError> {
+  let state = app.state::<SettingsState>();
+  let Some(path) = state.path() else {
+    return Ok(());
+  };
+  let text = std::fs::read_to_string(path)
+    .map_err(|error| CommandError::new("settings", format!("Could not read settings: {error}")))?;
+  let settings = Settings::parse(&text).map_err(|error| {
+    CommandError::new("invalidSettings", format!("Settings not applied: {error}"))
+  })?;
+  let previous = state.get();
+  state.replace(settings.clone());
+  apply(app, &previous, &settings);
+  tracing::info!("settings applied");
+  Ok(())
+}
+
+fn apply(app: &AppHandle, previous: &Settings, settings: &Settings) {
+  app
+    .state::<EditorState>()
+    .lock()
+    .set_config(settings.editor_config());
+  if previous.files.exclude != settings.files.exclude {
+    crate::workspace::exclusions_changed(app);
+  }
+  events::emit(
+    app,
+    AppEvent::SettingsChanged {
+      settings: settings.frontend(),
+    },
+  );
+}
+
+/// Whether `path` is the settings file.
+pub fn is_settings_file(app: &AppHandle, path: &Path) -> bool {
+  app
+    .state::<SettingsState>()
+    .path()
+    .is_some_and(|settings| crate::paths::normalize(settings) == path)
+}
+
+#[tauri::command]
+pub fn settings_get(state: State<'_, SettingsState>) -> FrontendSettings {
+  state.get().frontend()
+}
+
+/// The settings file's path, creating it from the template if needed.
+#[tauri::command]
+pub fn settings_file(state: State<'_, SettingsState>) -> Result<String, CommandError> {
+  let path = state
+    .path()
+    .ok_or_else(|| CommandError::new("settings", "No configuration directory is available."))?;
+  if !path.exists() {
+    if let Some(dir) = path.parent() {
+      std::fs::create_dir_all(dir).map_err(|error| {
+        CommandError::new(
+          "settings",
+          format!("Could not create {}: {error}", dir.display()),
+        )
+      })?;
+    }
+    std::fs::write(path, TEMPLATE).map_err(|error| {
+      CommandError::new("settings", format!("Could not create settings: {error}"))
+    })?;
+  }
+  Ok(path.display().to_string())
+}
+
+/// Sets `workbench.theme` in the settings file, keeping its comments and
+/// formatting, and applies it.
+#[tauri::command]
+pub fn settings_set_theme(app: AppHandle, theme: Theme) -> Result<(), CommandError> {
+  let path = PathBuf::from(settings_file(app.state())?);
+  let text = std::fs::read_to_string(&path)
+    .map_err(|error| CommandError::new("settings", format!("Could not read settings: {error}")))?;
+  let mut document: toml_edit::DocumentMut = text.parse().map_err(|error| {
+    CommandError::new(
+      "invalidSettings",
+      format!("Settings file is invalid: {error}"),
+    )
+  })?;
+  let name = match theme {
+    Theme::System => "system",
+    Theme::Dark => "dark",
+    Theme::Light => "light",
+  };
+  if !document.contains_table("workbench") {
+    document["workbench"] = toml_edit::table();
+  }
+  document["workbench"]["theme"] = toml_edit::value(name);
+  std::fs::write(&path, document.to_string())
+    .map_err(|error| CommandError::new("settings", format!("Could not write settings: {error}")))?;
+  reload(&app)
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+
+  #[test]
+  fn the_template_parses_to_the_defaults() {
+    assert_eq!(Settings::parse(TEMPLATE), Ok(Settings::default()));
+  }
+
+  #[test]
+  fn parses_partial_settings_over_defaults() {
+    let settings =
+      Settings::parse("[editor]\ntab_size = 2\n[workbench]\ntheme = \"light\"\n").expect("valid");
+    assert_eq!(settings.editor.tab_size, 2);
+    assert!(settings.editor.insert_spaces);
+    assert_eq!(settings.workbench.theme, Theme::Light);
+    assert_eq!(settings.files.exclude, FilesSettings::default().exclude);
+  }
+
+  #[test]
+  fn rejects_invalid_settings_with_a_message() {
+    let unknown = Settings::parse("[editor]\ntab_width = 2\n").expect_err("unknown key");
+    assert!(unknown.contains("tab_width"), "{unknown}");
+    let range = Settings::parse("[editor]\ntab_size = 0\n").expect_err("out of range");
+    assert!(range.contains("tab_size"));
+    let theme = Settings::parse("[workbench]\ntheme = \"neon\"\n").expect_err("bad theme");
+    assert!(theme.contains("neon"), "{theme}");
+    let glob = Settings::parse("[files]\nexclude = [\"[x\"]\n").expect_err("bad glob");
+    assert!(glob.contains("files.exclude"));
+  }
+}

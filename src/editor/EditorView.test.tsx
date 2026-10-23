@@ -17,8 +17,9 @@ function makeView(lines: string[], overrides: Partial<View> = {}): View {
     selectionCount: 1,
     primary: { position: { line: 0, column: 0 }, visualColumn: 0 },
     dirty: false,
+    search: null,
     ...overrides,
-  };
+  } as View;
 }
 
 function fakeTransport(initial: View) {
@@ -56,7 +57,7 @@ describe("EditorView", () => {
     await renderEditor(transport);
     expect(screen.getByText("fn main() {")).toBeInTheDocument();
     expect(screen.getByText("2")).toBeInTheDocument();
-    expect(transport.view).toHaveBeenCalledWith(7, expect.objectContaining({ startLine: 0 }));
+    expect(transport.view).toHaveBeenCalledWith(7, expect.objectContaining({ startLine: 0 }), null);
   });
 
   it("sends typed text and keys as operations and renders the result", async () => {

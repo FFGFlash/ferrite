@@ -1,4 +1,4 @@
-use ferrite_text::EditError;
+use ferrite_text::{EditError, SearchError};
 
 use crate::document::DocumentId;
 
@@ -8,4 +8,6 @@ pub enum CoreError {
   UnknownDocument(DocumentId),
   #[error("invalid edit: {0}")]
   Edit(#[from] EditError),
+  #[error(transparent)]
+  Search(#[from] SearchError),
 }

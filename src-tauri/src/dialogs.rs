@@ -23,6 +23,14 @@ pub async fn pick_file_to_open(window: &WebviewWindow) -> Option<PathBuf> {
     .and_then(|path| path.into_path().ok())
 }
 
+pub async fn pick_folder(window: &WebviewWindow) -> Option<PathBuf> {
+  let dialog = window.dialog().file().set_parent(window);
+  run_blocking(move || dialog.blocking_pick_folder())
+    .await
+    .flatten()
+    .and_then(|path| path.into_path().ok())
+}
+
 pub async fn pick_save_path(
   window: &WebviewWindow,
   current: Option<&Path>,

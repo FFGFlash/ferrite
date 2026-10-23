@@ -1,0 +1,80 @@
+//! Backend-to-frontend notifications.
+//!
+//! The frontend subscribes once with a Tauri `Channel`; events are pushed
+//! through it. A channel is part of IPC itself, so no event permissions are
+//! granted to the webview. A new subscription (e.g. after a reload) replaces
+//! the old one.
+
+use std::sync::{Mutex, PoisonError};
+
+use serde::Serialize;
+use tauri::ipc::Channel;
+use tauri::{AppHandle, Manager, State};
+
+use crate::editor::protocol::DocumentSummary;
+use crate::settings::FrontendSettings;
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(
+  tag = "type",
+  rename_all = "camelCase",
+  rename_all_fields = "camelCase"
+)]
+pub enum AppEvent {
+  /// A workspace folder was opened or closed.
+  WorkspaceChanged {
+    workspace: Option<WorkspaceInfo>,
+  },
+  /// Listings of these directories may have changed.
+  FilesChanged {
+    directories: Vec<String>,
+  },
+  /// A clean document was reloaded because its file changed on disk.
+  DocumentReloaded {
+    document: DocumentSummary,
+  },
+  /// A document with unsaved changes was modified on disk by another program.
+  DocumentChangedOnDisk {
+    document: DocumentSummary,
+  },
+  SettingsChanged {
+    settings: FrontendSettings,
+  },
+  /// Progress of the Go to File index.
+  IndexStatus {
+    indexing: bool,
+    files: usize,
+    truncated: bool,
+  },
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceInfo {
+  pub root: String,
+  pub name: String,
+}
+
+#[derive(Default)]
+pub struct EventHub(Mutex<Option<Channel<AppEvent>>>);
+
+impl EventHub {
+  pub fn emit(&self, event: AppEvent) {
+    let channel = self.0.lock().unwrap_or_else(PoisonError::into_inner);
+    if let Some(channel) = channel.as_ref()
+      && let Err(error) = channel.send(event)
+    {
+      tracing::debug!(%error, "event not delivered");
+    }
+  }
+}
+
+/// Sends `event` to the frontend, if it has subscribed.
+pub fn emit(app: &AppHandle, event: AppEvent) {
+  app.state::<EventHub>().emit(event);
+}
+
+#[tauri::command]
+pub fn events_subscribe(hub: State<'_, EventHub>, channel: Channel<AppEvent>) {
+  *hub.0.lock().unwrap_or_else(PoisonError::into_inner) = Some(channel);
+}

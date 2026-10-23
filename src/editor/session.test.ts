@@ -13,6 +13,7 @@ function view(version: number, viewport: Viewport): EditorView {
     selectionCount: 1,
     primary: { position: { line: 0, column: 0 }, visualColumn: 0 },
     dirty: false,
+    search: null,
   };
 }
 
@@ -48,10 +49,36 @@ const drag = (column: number): EditorOp => ({
 });
 
 describe("EditorSession", () => {
-  it("fetches the initial view and then batches operations sent while busy", async () => {
+  it("fetches the initial view", async () => {
+    const { transport, calls, next } = controlledTransport();
+    const onView = vi.fn();
+    new EditorSession(1, { startLine: 0, endLine: 10 }, onView, vi.fn(), transport);
+    await Promise.resolve();
+    expect(calls).toEqual([{ kind: "view", viewport: { startLine: 0, endLine: 10 } }]);
+    await next();
+    expect(onView).toHaveBeenCalledOnce();
+  });
+
+  it("sends operations dispatched right after construction with the first request", async () => {
+    const { transport, calls } = controlledTransport();
+    const session = new EditorSession(
+      1,
+      { startLine: 0, endLine: 10 },
+      vi.fn(),
+      vi.fn(),
+      transport,
+    );
+    session.dispatch(insert("a"));
+    await Promise.resolve();
+    expect(calls).toHaveLength(1);
+    expect(calls[0]).toMatchObject({ kind: "apply", ops: [insert("a")] });
+  });
+
+  it("batches operations sent while a request is in flight", async () => {
     const { transport, calls, next } = controlledTransport();
     const onView = vi.fn();
     const session = new EditorSession(1, { startLine: 0, endLine: 10 }, onView, vi.fn(), transport);
+    await Promise.resolve();
 
     session.dispatch(insert("a"));
     session.dispatch(insert("b"));
@@ -119,6 +146,30 @@ describe("EditorSession", () => {
     expect(onView).toHaveBeenCalledTimes(2);
   });
 
+  it("sends the find query with every request", async () => {
+    const { transport, calls, next } = controlledTransport();
+    const search = { pattern: "x", regex: false, caseSensitive: false, wholeWord: false };
+    const apply = vi.spyOn(transport, "apply");
+    const session = new EditorSession(
+      1,
+      { startLine: 0, endLine: 10 },
+      vi.fn(),
+      vi.fn(),
+      transport,
+    );
+    await Promise.resolve();
+    await next();
+    session.setSearch(search);
+    expect(calls).toHaveLength(2);
+    await next();
+    session.dispatch(insert("a"));
+    await next();
+    expect(apply).toHaveBeenCalledWith(1, [insert("a")], expect.anything(), search);
+    session.setSearch({ ...search, pattern: "" });
+    await next();
+    expect(calls).toHaveLength(4);
+  });
+
   it("resolves idle once queued work is done", async () => {
     const { transport, next } = controlledTransport();
     const session = new EditorSession(
@@ -129,8 +180,10 @@ describe("EditorSession", () => {
       transport,
     );
     session.dispatch(insert("a"));
+    session.dispatch(insert("b"));
     let idle = false;
     void session.idle().then(() => (idle = true));
+    // "a" is in flight and "b" is queued behind it.
     await next();
     expect(idle).toBe(false);
     await next();

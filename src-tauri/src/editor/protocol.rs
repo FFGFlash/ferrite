@@ -7,7 +7,7 @@
 //! to valid positions.
 
 use ferrite_core::{Direction, Document, EditorOp, Motion, Unit, VerticalDirection};
-use ferrite_text::{TextBuffer, Utf16Position};
+use ferrite_text::{SearchQuery, TextBuffer, Utf16Position};
 use serde::{Deserialize, Serialize};
 
 /// Most lines returned in one view, regardless of the requested viewport.
@@ -88,6 +88,29 @@ pub enum MotionDto {
 }
 
 #[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SearchQueryDto {
+  pub pattern: String,
+  #[serde(default)]
+  pub regex: bool,
+  #[serde(default)]
+  pub case_sensitive: bool,
+  #[serde(default)]
+  pub whole_word: bool,
+}
+
+impl From<SearchQueryDto> for SearchQuery {
+  fn from(query: SearchQueryDto) -> Self {
+    Self {
+      pattern: query.pattern,
+      regex: query.regex,
+      case_sensitive: query.case_sensitive,
+      whole_word: query.whole_word,
+    }
+  }
+}
+
+#[derive(Debug, Clone, Deserialize)]
 #[serde(
   tag = "type",
   rename_all = "camelCase",
@@ -126,6 +149,22 @@ pub enum OpDto {
   },
   Undo,
   Redo,
+  FindNext {
+    query: SearchQueryDto,
+    backward: bool,
+  },
+  SelectAllMatches {
+    query: SearchQueryDto,
+  },
+  Replace {
+    query: SearchQueryDto,
+    replacement: String,
+  },
+  ReplaceAll {
+    query: SearchQueryDto,
+    replacement: String,
+  },
+  AddNextMatch,
 }
 
 impl OpDto {
@@ -187,11 +226,27 @@ impl OpDto {
       }),
       Self::Undo => EditorOp::Undo,
       Self::Redo => EditorOp::Redo,
+      Self::FindNext { query, backward } => EditorOp::FindNext {
+        query: query.into(),
+        backward,
+      },
+      Self::SelectAllMatches { query } => EditorOp::SelectAllMatches {
+        query: query.into(),
+      },
+      Self::Replace { query, replacement } => EditorOp::Replace {
+        query: query.into(),
+        replacement,
+      },
+      Self::ReplaceAll { query, replacement } => EditorOp::ReplaceAll {
+        query: query.into(),
+        replacement,
+      },
+      Self::AddNextMatch => EditorOp::AddNextMatch,
     }
   }
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DocumentSummary {
   pub id: u64,
@@ -235,6 +290,58 @@ pub struct CursorDto {
   pub visual_column: usize,
 }
 
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RangeDto {
+  pub start: Position,
+  pub end: Position,
+}
+
+/// Find results for the view's query: highlights for the visible lines and
+/// document-wide counts.
+#[derive(Debug, Serialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct SearchView {
+  pub matches: Vec<RangeDto>,
+  pub total: usize,
+  pub truncated: bool,
+  /// Index of the match the primary selection covers, if any.
+  pub current: Option<usize>,
+  /// Why the query could not be used, e.g. an invalid regular expression.
+  pub error: Option<String>,
+}
+
+impl SearchView {
+  fn of(document: &Document, query: &SearchQuery, start_line: usize, end_line: usize) -> Self {
+    let searcher = match query.compile() {
+      Ok(searcher) => searcher,
+      Err(error) => {
+        return Self {
+          error: Some(error.to_string()),
+          ..Self::default()
+        };
+      }
+    };
+    let buffer = document.buffer();
+    let visible = buffer.line_start(start_line)..buffer.line_end(end_line.saturating_sub(1));
+    let summary = document.match_summary(&searcher, visible);
+    Self {
+      matches: summary
+        .visible
+        .into_iter()
+        .map(|range| RangeDto {
+          start: buffer.offset_to_utf16(range.start).into(),
+          end: buffer.offset_to_utf16(range.end).into(),
+        })
+        .collect(),
+      total: summary.total,
+      truncated: summary.truncated,
+      current: summary.current,
+      error: None,
+    }
+  }
+}
+
 /// What the frontend needs to render one viewport of a document.
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -250,10 +357,12 @@ pub struct EditorView {
   pub selection_count: usize,
   pub primary: CursorDto,
   pub dirty: bool,
+  /// Present when the request included a find query.
+  pub search: Option<SearchView>,
 }
 
 impl EditorView {
-  pub fn of(document: &Document, viewport: Viewport) -> Self {
+  pub fn of(document: &Document, search: Option<&SearchQuery>, viewport: Viewport) -> Self {
     let buffer = document.buffer();
     let line_count = buffer.line_count();
     let start = viewport.start_line.min(line_count - 1);
@@ -293,6 +402,7 @@ impl EditorView {
         visual_column: document.visual_column(head),
       },
       dirty: document.is_dirty(),
+      search: search.map(|query| SearchView::of(document, query, start, end)),
     }
   }
 }
@@ -363,6 +473,7 @@ mod tests {
 
     let view = EditorView::of(
       document,
+      None,
       Viewport {
         start_line: 1,
         end_line: 99,
@@ -376,6 +487,7 @@ mod tests {
 
     let view = EditorView::of(
       document,
+      None,
       Viewport {
         start_line: 50,
         end_line: 10,
@@ -409,6 +521,7 @@ mod tests {
     }
     let view = EditorView::of(
       document,
+      None,
       Viewport {
         start_line: 0,
         end_line: 10,
@@ -430,6 +543,7 @@ mod tests {
       .expect("applies");
     let view = EditorView::of(
       document,
+      None,
       Viewport {
         start_line: 90,
         end_line: 99,

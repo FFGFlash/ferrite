@@ -1,13 +1,15 @@
 import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
 import type { AppInfo } from "../ipc";
 import {
+  DEFAULT_LAYOUT,
   SIDEBAR_DEFAULT_WIDTH,
   SIDEBAR_MAX_WIDTH,
   SIDEBAR_MIN_WIDTH,
-  Workbench,
-} from "./Workbench";
+  layoutStore,
+} from "../state/layout";
+import { Workbench } from "./Workbench";
 
 const appInfo: AppInfo = {
   name: "Ferrite",
@@ -18,6 +20,8 @@ const appInfo: AppInfo = {
 };
 
 describe("Workbench", () => {
+  beforeEach(() => layoutStore.set(DEFAULT_LAYOUT));
+
   it("opens with the explorer and the welcome page", () => {
     render(<Workbench appInfo={null} />);
 

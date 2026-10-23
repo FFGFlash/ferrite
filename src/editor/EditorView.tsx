@@ -10,10 +10,19 @@ import {
   type KeyboardEvent,
   type MouseEvent as ReactMouseEvent,
 } from "react";
-import type { EditorOp, EditorView as View, Position, Viewport } from "../ipc/editor";
-import { registerBeforeSave, setDirty } from "../state/documents";
+import type { EditorOp, EditorView as View, Position, SearchQuery, Viewport } from "../ipc/editor";
+import { appearance } from "../state/appearance";
+import {
+  clearPendingSelection,
+  pendingSelection,
+  registerBeforeSave,
+  setDirty,
+} from "../state/documents";
 import { editorStatus } from "../state/editorStatus";
 import { reportError } from "../state/notifications";
+import { useStore } from "../state/store";
+import { activeEditor, type EditorController } from "./activeEditor";
+import { FindWidget, type FindState } from "./FindWidget";
 import { isMac, keyToCommand } from "./keymap";
 import { columnAt, EMPTY_OVERLAY, measureOverlay, type Overlay } from "./measure";
 import { EditorSession, ipcTransport, type EditorTransport } from "./session";
@@ -21,9 +30,17 @@ import "./EditorView.css";
 
 /** Extra lines fetched above and below the visible area. */
 const OVERSCAN = 20;
-const FALLBACK_LINE_HEIGHT = 20;
 /** A column beyond any line end; the backend clamps it to the line end. */
 const END_OF_LINE = Number.MAX_SAFE_INTEGER;
+const EMPTY_QUERY: SearchQuery = {
+  pattern: "",
+  regex: false,
+  caseSensitive: false,
+  wholeWord: false,
+};
+
+/** Scroll positions of documents whose editor was unmounted (tab switches). */
+const scrollPositions = new Map<number, { top: number; left: number }>();
 
 interface EditorViewProps {
   documentId: number;
@@ -43,31 +60,58 @@ export function EditorView({ documentId, title, transport = ipcTransport }: Edit
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const sessionRef = useRef<EditorSession | null>(null);
   const viewRef = useRef<View | null>(null);
+  const findRef = useRef<FindState | null>(null);
   const composingRef = useRef(false);
   const revealRef = useRef(false);
+  const restoreScrollRef = useRef(scrollPositions.get(documentId) ?? null);
   const frameRef = useRef(0);
 
+  const { lineHeight } = useStore(appearance);
+  const lineHeightRef = useRef(lineHeight);
+  lineHeightRef.current = lineHeight;
   const [view, setView] = useState<View | null>(null);
-  const [lineHeight, setLineHeight] = useState(FALLBACK_LINE_HEIGHT);
   const [overlay, setOverlay] = useState<Overlay>(EMPTY_OVERLAY);
   const [composing, setComposing] = useState(false);
+  const [find, setFind] = useState<FindState | null>(null);
   viewRef.current = view;
+  findRef.current = find;
+
+  const dispatch = (op: EditorOp) => {
+    revealRef.current = true;
+    sessionRef.current?.dispatch(op);
+  };
 
   useEffect(() => {
-    const scroller = scrollRef.current;
-    const height = readLineHeight(scroller);
-    setLineHeight(height);
+    // A selection requested when the document was opened (e.g. from a search
+    // result). It is cleared only once a view reflecting it has arrived, so
+    // a mount that is torn down early (React StrictMode) does not lose it.
+    const pending = pendingSelection(documentId);
     const session = new EditorSession(
       documentId,
-      viewportFor(scroller, height),
-      setView,
+      viewportFor(scrollRef.current, lineHeightRef.current),
+      (next) => {
+        setView(next);
+        if (pending) {
+          clearPendingSelection(documentId, pending);
+        }
+      },
       (error) => reportError("Editing", error),
       transport,
     );
     sessionRef.current = session;
     const unregister = registerBeforeSave(documentId, () => session.idle());
+    if (pending) {
+      restoreScrollRef.current = null;
+      revealRef.current = true;
+      session.dispatch({ type: "setCursor", position: pending.start, extend: false, add: false });
+      session.dispatch({ type: "setCursor", position: pending.end, extend: true, add: false });
+    }
     inputRef.current?.focus();
     return () => {
+      const scroller = scrollRef.current;
+      if (scroller) {
+        scrollPositions.set(documentId, { top: scroller.scrollTop, left: scroller.scrollLeft });
+      }
       unregister();
       session.dispose();
       sessionRef.current = null;
@@ -75,6 +119,37 @@ export function EditorView({ documentId, title, transport = ipcTransport }: Edit
       editorStatus.set(null);
     };
   }, [documentId, transport]);
+
+  // Commands reach this editor through the active-editor handle.
+  useEffect(() => {
+    const controller: EditorController = {
+      documentId,
+      dispatch,
+      openFind: (replace) => openFind(replace),
+      findNext: (backward) => findNext(backward),
+      refresh: () => sessionRef.current?.refresh(),
+      focus: () => inputRef.current?.focus(),
+      lineCount: () => viewRef.current?.lineCount ?? 0,
+    };
+    activeEditor.set(controller);
+    return () => {
+      if (activeEditor.get() === controller) {
+        activeEditor.set(null);
+      }
+    };
+    // The controller reads current state through refs, so it only needs to
+    // change with the document.
+  }, [documentId]);
+
+  // A different font size changes which lines are visible.
+  useEffect(() => {
+    sessionRef.current?.setViewport(viewportFor(scrollRef.current, lineHeight));
+  }, [lineHeight]);
+
+  const findQuery = find?.query ?? null;
+  useEffect(() => {
+    sessionRef.current?.setSearch(findQuery);
+  }, [findQuery]);
 
   useEffect(() => {
     if (!view) {
@@ -90,16 +165,28 @@ export function EditorView({ documentId, title, transport = ipcTransport }: Edit
 
   useLayoutEffect(() => {
     const lines = linesRef.current;
-    if (!view || !lines) {
+    const scroller = scrollRef.current;
+    if (!view || !lines || !scroller) {
       return;
     }
-    const measured = measureOverlay(lines, view.startLine, view.selections, lineHeight);
+    const measured = measureOverlay(
+      lines,
+      view.startLine,
+      view.selections,
+      view.search?.matches ?? [],
+      lineHeight,
+    );
     setOverlay(measured);
-    if (revealRef.current) {
+    const saved = restoreScrollRef.current;
+    if (saved) {
+      restoreScrollRef.current = null;
+      scroller.scrollTop = saved.top;
+      scroller.scrollLeft = saved.left;
+    } else if (revealRef.current) {
       revealRef.current = false;
       const caret = measured.carets.find((c) => c.primary);
       reveal(
-        scrollRef.current,
+        scroller,
         view.primary.position.line * lineHeight,
         lineHeight,
         caret?.left,
@@ -108,9 +195,63 @@ export function EditorView({ documentId, title, transport = ipcTransport }: Edit
     }
   }, [view, lineHeight]);
 
-  const dispatch = (op: EditorOp) => {
-    revealRef.current = true;
-    sessionRef.current?.dispatch(op);
+  const primarySelection = () => viewRef.current?.selections.find((s) => s.primary);
+
+  const openFind = (replace: boolean) => {
+    const current = viewRef.current;
+    const primary = primarySelection();
+    let prefill: string | null = null;
+    if (current && primary && primary.anchor.line === primary.head.line) {
+      const text = current.lines[primary.head.line - current.startLine];
+      const from = Math.min(primary.anchor.column, primary.head.column);
+      const to = Math.max(primary.anchor.column, primary.head.column);
+      if (text !== undefined && to > from) {
+        prefill = text.slice(from, to);
+      }
+    }
+    setFind((state) => ({
+      query: {
+        ...(state?.query ?? EMPTY_QUERY),
+        ...(prefill !== null ? { pattern: prefill } : {}),
+      },
+      replacement: state?.replacement ?? "",
+      showReplace: replace || (state?.showReplace ?? false),
+      focusRequest: (state?.focusRequest ?? 0) + 1,
+    }));
+  };
+
+  const findNext = (backward: boolean) => {
+    const state = findRef.current;
+    if (!state?.query.pattern) {
+      openFind(false);
+      return;
+    }
+    dispatch({ type: "findNext", query: state.query, backward });
+  };
+
+  const onFindQueryChange = (change: Partial<SearchQuery>) => {
+    const state = findRef.current;
+    if (!state) {
+      return;
+    }
+    const query = { ...state.query, ...change };
+    setFind({ ...state, query });
+    // Find as you type: jump to the first match at or after the selection start.
+    const primary = primarySelection();
+    if (query.pattern && primary) {
+      dispatch({
+        type: "setCursor",
+        position: earlier(primary.anchor, primary.head),
+        extend: false,
+        add: false,
+      });
+      dispatch({ type: "findNext", query, backward: false });
+    }
+  };
+
+  const closeFind = () => {
+    setFind(null);
+    inputRef.current?.focus();
   };
 
   const onScroll = () => {
@@ -120,8 +261,7 @@ export function EditorView({ documentId, title, transport = ipcTransport }: Edit
     frameRef.current = requestAnimationFrame(() => {
       frameRef.current = 0;
       const scroller = scrollRef.current;
-      const current = viewRef.current;
-      if (scroller && !covers(current, scroller, lineHeight)) {
+      if (scroller && !covers(viewRef.current, scroller, lineHeight)) {
         sessionRef.current?.setViewport(viewportFor(scroller, lineHeight));
       }
     });
@@ -129,6 +269,11 @@ export function EditorView({ documentId, title, transport = ipcTransport }: Edit
 
   const onKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
     if (event.nativeEvent.isComposing || composingRef.current) {
+      return;
+    }
+    if (event.key === "Escape" && findRef.current) {
+      event.preventDefault();
+      closeFind();
       return;
     }
     const pageLines = Math.max(
@@ -243,71 +388,99 @@ export function EditorView({ documentId, title, transport = ipcTransport }: Edit
   const layerStyle = { transform: `translateY(${startLine * lineHeight}px)` };
 
   return (
-    <div className="editor-view" ref={scrollRef} onScroll={onScroll}>
-      <div className="editor-view__sizer" style={{ minHeight: lineCount * lineHeight }}>
-        <div
-          className="editor-view__gutter"
-          ref={gutterRef}
-          style={{ width: `calc(${String(lineCount).length}ch + 32px)` }}
-          aria-hidden="true"
-        >
-          <div style={layerStyle}>
-            {view?.lines.map((_, index) => (
-              <div
-                key={startLine + index}
-                className="editor-view__line-number"
-                data-active={startLine + index === activeLine || undefined}
-              >
-                {startLine + index + 1}
-              </div>
-            ))}
+    <div className="editor-view-frame">
+      {find && (
+        <FindWidget
+          state={find}
+          result={view?.search ?? null}
+          onQueryChange={onFindQueryChange}
+          onReplacementChange={(replacement) => setFind({ ...find, replacement })}
+          onToggleReplace={() => setFind({ ...find, showReplace: !find.showReplace })}
+          onNext={findNext}
+          onReplace={() =>
+            dispatch({ type: "replace", query: find.query, replacement: find.replacement })
+          }
+          onReplaceAll={() =>
+            dispatch({ type: "replaceAll", query: find.query, replacement: find.replacement })
+          }
+          onClose={closeFind}
+        />
+      )}
+      <div className="editor-view" ref={scrollRef} onScroll={onScroll}>
+        <div className="editor-view__sizer" style={{ minHeight: lineCount * lineHeight }}>
+          <div
+            className="editor-view__gutter"
+            ref={gutterRef}
+            style={{ width: `calc(${String(lineCount).length}ch + 32px)` }}
+            aria-hidden="true"
+          >
+            <div style={layerStyle}>
+              {view?.lines.map((_, index) => (
+                <div
+                  key={startLine + index}
+                  className="editor-view__line-number"
+                  data-active={startLine + index === activeLine || undefined}
+                >
+                  {startLine + index + 1}
+                </div>
+              ))}
+            </div>
           </div>
-        </div>
-        <div className="editor-view__content" onMouseDown={onMouseDown}>
-          <div className="editor-view__layer" style={layerStyle}>
-            <div className="editor-view__selections" aria-hidden="true">
-              {overlay.selections.map((rect, index) => (
-                <div
-                  key={index}
-                  className="editor-view__selection"
-                  style={{ top: rect.top, left: rect.left, width: rect.width }}
-                />
-              ))}
+          <div className="editor-view__content" onMouseDown={onMouseDown}>
+            <div className="editor-view__layer" style={layerStyle}>
+              <div className="editor-view__selections" aria-hidden="true">
+                {overlay.matches.map((rect, index) => (
+                  <div
+                    key={`m${index}`}
+                    className="editor-view__match"
+                    data-current={rect.current || undefined}
+                    style={{ top: rect.top, left: rect.left, width: rect.width }}
+                  />
+                ))}
+                {overlay.selections.map((rect, index) => (
+                  <div
+                    key={index}
+                    className="editor-view__selection"
+                    style={{ top: rect.top, left: rect.left, width: rect.width }}
+                  />
+                ))}
+              </div>
+              <div className="editor-view__lines" ref={linesRef}>
+                {view?.lines.map((text, index) => (
+                  <Line key={startLine + index} text={text} />
+                ))}
+              </div>
+              <div className="editor-view__carets" aria-hidden="true">
+                {overlay.carets.map((caret, index) => (
+                  <div
+                    key={index}
+                    className="editor-view__caret"
+                    style={{ top: caret.top, left: caret.left }}
+                  />
+                ))}
+              </div>
+              <textarea
+                ref={inputRef}
+                className="editor-view__input"
+                data-editor-input=""
+                data-composing={composing || undefined}
+                style={{ top: primary?.top ?? 0, left: primary?.left ?? 0 }}
+                aria-label={`Editor for ${title}`}
+                aria-multiline="true"
+                autoComplete="off"
+                autoCorrect="off"
+                autoCapitalize="off"
+                spellCheck={false}
+                wrap="off"
+                onKeyDown={onKeyDown}
+                onInput={onInput}
+                onCompositionStart={onCompositionStart}
+                onCompositionEnd={onCompositionEnd}
+                onPaste={onPaste}
+                onCopy={onClipboardEvent}
+                onCut={onClipboardEvent}
+              />
             </div>
-            <div className="editor-view__lines" ref={linesRef}>
-              {view?.lines.map((text, index) => (
-                <Line key={startLine + index} text={text} />
-              ))}
-            </div>
-            <div className="editor-view__carets" aria-hidden="true">
-              {overlay.carets.map((caret, index) => (
-                <div
-                  key={index}
-                  className="editor-view__caret"
-                  style={{ top: caret.top, left: caret.left }}
-                />
-              ))}
-            </div>
-            <textarea
-              ref={inputRef}
-              className="editor-view__input"
-              data-composing={composing || undefined}
-              style={{ top: primary?.top ?? 0, left: primary?.left ?? 0 }}
-              aria-label={`Editor for ${title}`}
-              aria-multiline="true"
-              autoComplete="off"
-              autoCorrect="off"
-              autoCapitalize="off"
-              spellCheck={false}
-              wrap="off"
-              onKeyDown={onKeyDown}
-              onInput={onInput}
-              onCompositionStart={onCompositionStart}
-              onCompositionEnd={onCompositionEnd}
-              onPaste={onPaste}
-              onCopy={onClipboardEvent}
-              onCut={onClipboardEvent}
-            />
           </div>
         </div>
       </div>
@@ -315,17 +488,13 @@ export function EditorView({ documentId, title, transport = ipcTransport }: Edit
   );
 }
 
+function earlier(a: Position, b: Position): Position {
+  return a.line < b.line || (a.line === b.line && a.column <= b.column) ? a : b;
+}
+
 const Line = memo(function Line({ text }: { text: string }) {
   return <div className="editor-view__line">{text}</div>;
 });
-
-function readLineHeight(element: HTMLElement | null): number {
-  if (!element) {
-    return FALLBACK_LINE_HEIGHT;
-  }
-  const value = parseFloat(getComputedStyle(element).getPropertyValue("--editor-line-height"));
-  return Number.isFinite(value) && value > 0 ? value : FALLBACK_LINE_HEIGHT;
-}
 
 function visibleRange(scroller: HTMLElement, lineHeight: number): [number, number] {
   const first = Math.floor(scroller.scrollTop / lineHeight);
@@ -354,15 +523,12 @@ function covers(view: View | null, scroller: HTMLElement, lineHeight: number): b
 
 /** Scrolls just enough to show the primary caret. */
 function reveal(
-  scroller: HTMLElement | null,
+  scroller: HTMLElement,
   top: number,
   lineHeight: number,
   left: number | undefined,
   gutterWidth: number,
 ): void {
-  if (!scroller) {
-    return;
-  }
   if (top < scroller.scrollTop) {
     scroller.scrollTop = top;
   } else if (top + lineHeight > scroller.scrollTop + scroller.clientHeight) {

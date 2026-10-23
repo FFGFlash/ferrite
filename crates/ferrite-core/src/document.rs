@@ -1,11 +1,12 @@
 use std::fmt;
 use std::path::{Path, PathBuf};
 
-use ferrite_text::{LineEnding, TextBuffer, TextSnapshot, Version};
+use ferrite_text::{Bias, ChangeSet, Edit, LineEnding, TextBuffer, TextSnapshot, Version};
 use ferrite_workspace::FileStamp;
 
-use crate::history::{History, HistoryLimits, StateId};
-use crate::selection::Selections;
+use crate::error::CoreError;
+use crate::history::{EditKind, History, HistoryLimits, StateId};
+use crate::selection::{Selection, Selections};
 
 /// Stable identifier of an open document. Never reused within a process.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -186,6 +187,52 @@ impl Document {
     self.history.seal();
   }
 
+  /// The disk stamp recorded when the file was last loaded or saved.
+  pub fn disk_stamp(&self) -> Option<&FileStamp> {
+    self.file.as_ref().and_then(|file| file.stamp.as_ref())
+  }
+
+  /// Replaces the text with a newer version read from disk and marks the
+  /// document saved. Only the differing middle section is replaced, so
+  /// cursors before and after it stay put, and the reload can be undone.
+  /// Returns whether the text changed.
+  pub fn reload(&mut self, text: &str, has_bom: bool, stamp: FileStamp) -> Result<bool, CoreError> {
+    let current = self.buffer.contents();
+    let changed = current != text;
+    if changed {
+      let (prefix, suffix) = common_affixes(&current, text);
+      let edit = Edit::new(
+        prefix..current.len() - suffix,
+        &text[prefix..text.len() - suffix],
+      );
+      let changes = ChangeSet::single(edit)?;
+      let before = self.selections.clone();
+      let inverse = self.buffer.apply(&changes)?;
+      let after = before.map(|s| {
+        Selection::new(
+          changes.map_offset(s.anchor, Bias::Before),
+          changes.map_offset(s.head, Bias::Before),
+        )
+      });
+      self.selections = after.clone();
+      self
+        .history
+        .record(changes, inverse, before, after, EditKind::Other, false);
+    }
+    self.saved_state = self.history.current_state();
+    if let Some(file) = &mut self.file {
+      file.has_bom = has_bom;
+      file.stamp = Some(stamp);
+    }
+    self.history.seal();
+    Ok(changed)
+  }
+
+  pub(crate) fn set_indentation(&mut self, tab_size: usize, insert_spaces: bool) {
+    self.tab_size = tab_size.max(1);
+    self.insert_spaces = insert_spaces;
+  }
+
   /// The selected text of every non-empty selection, joined by the
   /// document's line ending, or `None` if nothing is selected.
   pub fn selected_text(&self) -> Option<String> {
@@ -233,5 +280,109 @@ impl Document {
     } else {
       column + 1
     }
+  }
+}
+
+/// Lengths of the longest common prefix and suffix of `a` and `b`, on
+/// character boundaries and not overlapping.
+fn common_affixes(a: &str, b: &str) -> (usize, usize) {
+  let mut prefix = a.bytes().zip(b.bytes()).take_while(|(x, y)| x == y).count();
+  while !a.is_char_boundary(prefix) || !b.is_char_boundary(prefix) {
+    prefix -= 1;
+  }
+  let max_suffix = a.len().min(b.len()) - prefix;
+  let mut suffix = a
+    .bytes()
+    .rev()
+    .zip(b.bytes().rev())
+    .take(max_suffix)
+    .take_while(|(x, y)| x == y)
+    .count();
+  while !a.is_char_boundary(a.len() - suffix) || !b.is_char_boundary(b.len() - suffix) {
+    suffix -= 1;
+  }
+  (prefix, suffix)
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+
+  #[test]
+  fn common_affixes_respect_character_boundaries() {
+    assert_eq!(common_affixes("abcXdef", "abcYYdef"), (3, 3));
+    assert_eq!(common_affixes("same", "same"), (4, 0));
+    // "é" (C3 A9) and "è" (C3 A8) share a first byte that must not be split.
+    assert_eq!(common_affixes("aé", "aè"), (1, 0));
+    assert_eq!(common_affixes("éa", "èa"), (0, 1));
+    assert_eq!(common_affixes("aa", "aaa"), (2, 0));
+  }
+
+  #[test]
+  fn reload_replaces_text_keeps_cursors_and_is_clean() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let path = dir.path().join("f.txt");
+    std::fs::write(&path, "x").expect("write");
+    let stamp = FileStamp::read(&path).expect("stat").expect("exists");
+
+    let mut document = Document::new(
+      DocumentId(1),
+      "head
+old middle
+tail",
+      Some((path, false, stamp.clone())),
+      0,
+      &EditorConfig::default(),
+    );
+    document.selections = Selections::new(vec![Selection::cursor(2), Selection::cursor(19)], 0);
+    assert!(
+      document
+        .reload(
+          "head
+new
+tail",
+          false,
+          stamp.clone()
+        )
+        .expect("reloads")
+    );
+    assert_eq!(
+      document.buffer().contents(),
+      "head
+new
+tail"
+    );
+    let heads: Vec<_> = document.selections().iter().map(|s| s.head).collect();
+    assert_eq!(
+      heads,
+      vec![2, 12],
+      "cursors before and after the change stay on their text"
+    );
+    assert!(!document.is_dirty());
+
+    document.apply(crate::ops::EditorOp::Undo).expect("undo");
+    assert_eq!(
+      document.buffer().contents(),
+      "head
+old middle
+tail"
+    );
+    assert!(
+      document.is_dirty(),
+      "undoing a reload differs from the disk contents"
+    );
+
+    assert!(
+      !document
+        .reload(
+          "head
+old middle
+tail",
+          false,
+          stamp
+        )
+        .expect("reloads")
+    );
+    assert!(!document.is_dirty());
   }
 }

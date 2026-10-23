@@ -8,17 +8,21 @@
 
 use std::path::Path;
 
-use ferrite_core::{DocumentId, EditorOp};
+use ferrite_core::{CoreError, DocumentId, EditorOp};
+use ferrite_text::SearchQuery;
 use ferrite_workspace::{FileError, load_text_file, save_text_file};
 use serde::Deserialize;
 use tauri::{AppHandle, Manager, State, WebviewWindow};
 use tauri_plugin_clipboard_manager::ClipboardExt;
 
 use super::EditorState;
-use super::dialogs::{self, UnsavedChoice};
-use super::error::CommandError;
-use super::paths;
-use super::protocol::{DocumentSummary, EditorView, MAX_OPS_PER_BATCH, OpDto, Viewport};
+use super::protocol::{
+  DocumentSummary, EditorView, MAX_OPS_PER_BATCH, OpDto, SearchQueryDto, Viewport,
+};
+use crate::dialogs::{self, UnsavedChoice};
+use crate::error::CommandError;
+use crate::paths;
+use crate::{settings, ui_state};
 
 #[tauri::command]
 pub fn document_list(state: State<'_, EditorState>) -> Vec<DocumentSummary> {
@@ -93,27 +97,34 @@ pub async fn document_close(window: WebviewWindow, id: u64) -> Result<bool, Comm
   }
   window.state::<EditorState>().lock().close(id)?;
   tracing::info!(document = %id, "closed document");
+  ui_state::record_open_files(window.app_handle());
   Ok(true)
 }
 
+/// The view for `viewport`. With `search`, the view includes find matches.
 #[tauri::command]
 pub fn editor_view(
   state: State<'_, EditorState>,
   id: u64,
   viewport: Viewport,
+  search: Option<SearchQueryDto>,
 ) -> Result<EditorView, CommandError> {
+  let search = search.map(SearchQuery::from);
   let editor = state.lock();
   let document = editor.document(DocumentId::from_raw(id))?;
-  Ok(EditorView::of(document, viewport))
+  Ok(EditorView::of(document, search.as_ref(), viewport))
 }
 
 /// Applies a batch of operations in order and returns the resulting view.
+/// Find operations with an invalid pattern are skipped; the view's search
+/// section reports the problem.
 #[tauri::command]
 pub fn editor_apply(
   state: State<'_, EditorState>,
   id: u64,
   ops: Vec<OpDto>,
   viewport: Viewport,
+  search: Option<SearchQueryDto>,
 ) -> Result<EditorView, CommandError> {
   if ops.len() > MAX_OPS_PER_BATCH {
     return Err(CommandError::new(
@@ -125,9 +136,13 @@ pub fn editor_apply(
   let document = editor.document_mut(DocumentId::from_raw(id))?;
   for op in ops {
     let op = op.into_core(document.buffer());
-    document.apply(op)?;
+    match document.apply(op) {
+      Ok(_) | Err(CoreError::Search(_)) => {}
+      Err(error) => return Err(error.into()),
+    }
   }
-  Ok(EditorView::of(document, viewport))
+  let search = search.map(SearchQuery::from);
+  Ok(EditorView::of(document, search.as_ref(), viewport))
 }
 
 #[derive(Debug, Clone, Copy, Deserialize)]
@@ -146,6 +161,7 @@ pub fn editor_clipboard(
   id: u64,
   action: ClipboardAction,
   viewport: Viewport,
+  search: Option<SearchQueryDto>,
 ) -> Result<EditorView, CommandError> {
   let mut editor = state.lock();
   let document = editor.document_mut(DocumentId::from_raw(id))?;
@@ -158,7 +174,8 @@ pub fn editor_clipboard(
       document.apply(EditorOp::DeleteSelection)?;
     }
   }
-  Ok(EditorView::of(document, viewport))
+  let search = search.map(SearchQuery::from);
+  Ok(EditorView::of(document, search.as_ref(), viewport))
 }
 
 /// Asks whether to save unsaved documents before the window closes, saving
@@ -213,7 +230,10 @@ async fn open_path(app: &AppHandle, path: &Path) -> Result<DocumentSummary, Comm
   let bytes = loaded.text.len();
   let id = editor.open(path.clone(), loaded);
   tracing::info!(document = %id, path = %path.display(), bytes, "opened file");
-  Ok(DocumentSummary::of(editor.document(id)?))
+  let summary = DocumentSummary::of(editor.document(id)?);
+  drop(editor);
+  ui_state::record_open_files(app);
+  Ok(summary)
 }
 
 fn find_open(state: &EditorState, path: &Path) -> Option<DocumentSummary> {
@@ -284,11 +304,23 @@ async fn save(
     }
   };
 
-  let mut editor = state.lock();
-  let document = editor.document_mut(id)?;
-  document.mark_saved(&point, paths::normalize(&path), stamp);
-  tracing::info!(document = %id, path = %path.display(), bytes = point.snapshot.len(), "saved file");
-  Ok(Some(DocumentSummary::of(document)))
+  let saved_path = paths::normalize(&path);
+  let summary = {
+    let mut editor = state.lock();
+    let document = editor.document_mut(id)?;
+    document.mark_saved(&point, saved_path.clone(), stamp);
+    tracing::info!(document = %id, path = %path.display(), bytes = point.snapshot.len(), "saved file");
+    DocumentSummary::of(document)
+  };
+  let app = window.app_handle();
+  if !same_file {
+    ui_state::record_open_files(app);
+  }
+  if settings::is_settings_file(app, &saved_path) {
+    // The file is saved either way; report invalid settings to the user.
+    settings::reload(app)?;
+  }
+  Ok(Some(summary))
 }
 
 async fn blocking<T: Send + 'static>(
