@@ -3,9 +3,10 @@
 A fast, memory-efficient, extensible code editor built with Rust, Tauri, React, and a sandboxed
 WebAssembly extension system.
 
-> **Status:** Milestone 1 (application skeleton) is complete. The app launches into a workbench
-> shell; text editing arrives in Milestone 2. See [`docs/DESIGN.md`](docs/DESIGN.md) for the full
-> brief and milestone plan.
+> **Status:** Milestone 2 (text editing foundation) is complete. Ferrite opens, edits, and saves
+> UTF-8 files with multiple cursors, undo/redo, and unsaved-changes protection. The file explorer,
+> command palette, and search arrive in Milestone 3. See [`docs/DESIGN.md`](docs/DESIGN.md) for the
+> full brief and milestone plan.
 
 ## Prerequisites
 
@@ -30,6 +31,33 @@ pnpm tauri dev
 
 `pnpm tauri dev` starts the Vite dev server on port 1420, builds the Rust backend, and opens the
 desktop window. Frontend changes hot-reload; Rust changes trigger a rebuild and restart.
+
+Files passed on the command line open as tabs, for example
+`target/debug/ferrite path/to/file.rs` (the debug binary needs `pnpm dev` running).
+
+## Editing
+
+Ferrite currently opens UTF-8 text files of up to 256 MiB. Line endings and a UTF-8 BOM are
+preserved exactly, and new lines use the file's existing line ending.
+
+| Action                          | Windows / Linux               | macOS                |
+| ------------------------------- | ----------------------------- | -------------------- |
+| New file / Open / Close tab     | Ctrl+N / Ctrl+O / Ctrl+W      | ⌘N / ⌘O / ⌘W         |
+| Save / Save As                  | Ctrl+S / Ctrl+Shift+S         | ⌘S / ⌘⇧S             |
+| Undo / Redo                     | Ctrl+Z / Ctrl+Y, Ctrl+Shift+Z | ⌘Z / ⌘⇧Z             |
+| Cut / Copy / Paste / Select all | Ctrl+X / C / V / A            | ⌘X / C / V / A       |
+| Move by word                    | Ctrl+←/→                      | ⌥←/→                 |
+| Line start (smart) / end        | Home / End                    | ⌘← / ⌘→              |
+| Document start / end            | Ctrl+Home / Ctrl+End          | ⌘↑ / ⌘↓              |
+| Delete word                     | Ctrl+Backspace / Ctrl+Delete  | ⌥Backspace / ⌥Delete |
+| Add cursor above / below        | Ctrl+Alt+↑ / ↓                | ⌘⌥↑ / ↓              |
+| Add cursor at click             | Alt+click                     | ⌥click               |
+| Select word                     | Double-click                  | Double-click         |
+| Back to one cursor              | Escape                        | Escape               |
+
+Hold Shift with any movement key to extend the selection. Closing a tab or the window with
+unsaved changes asks whether to save them. If another program changed a file since it was
+opened, saving asks before overwriting it.
 
 ## Commands
 
@@ -73,12 +101,17 @@ measured from the start of `ferrite_app::run`.
 ```text
 Cargo.toml            Cargo workspace
 package.json          Frontend package and scripts
-src-tauri/            ferrite-app crate: Tauri shell, lifecycle, IPC commands, logging
+crates/
+  ferrite-text/       Rope-backed text buffer, change sets, positions, Unicode boundaries
+  ferrite-workspace/  Loading and safely saving files
+  ferrite-core/       Documents, selections, editing operations, undo, dirty state
+src-tauri/            ferrite-app crate: Tauri shell, lifecycle, IPC commands, dialogs, logging
 src/                  React + TypeScript workbench
-  app/                Root component, workbench layout, view registry
-  components/         Workbench chrome (activity bar, side bar, sash, status bar)
-  editor/             Editor area and tabs
+  app/                Root component, workbench layout, view registry, shortcuts
+  components/         Workbench chrome (activity bar, side bar, sash, status bar, notifications)
+  editor/             Editor view, tabs, input keymap, backend session
   panels/             Side bar views
+  state/              Small observable stores (documents, editor status, notifications)
   ipc/                Typed wrappers for Tauri commands (the only place that calls invoke)
   themes/             Theme selection
   styles/             Design tokens and base styles

@@ -29,6 +29,7 @@
   --size-sidebar-header: 36px;
   --size-sash: 4px;
   --radius-control: 4px;
+  --editor-line-height: 20px;
 }
 
 :root,
@@ -42,6 +43,13 @@
   --color-text-muted: #8b919c;
 
   --color-workbench-background: #1b1d21;
+  --color-link: #8fb8de;
+  --color-control-hover-background: rgb(255 255 255 / 0.08);
+  --color-error: #f07c6c;
+
+  --color-notification-background: #25282e;
+  --color-notification-foreground: var(--color-text);
+  --color-notification-border: #363a42;
 
   --color-activitybar-background: #141619;
   --color-activitybar-foreground: #8b919c;
@@ -88,6 +96,12 @@
   --color-text-muted: #646b77;
 
   --color-workbench-background: #f6f7f9;
+  --color-link: #2a5f94;
+  --color-control-hover-background: rgb(0 0 0 / 0.06);
+  --color-error: #b3261e;
+
+  --color-notification-background: #ffffff;
+  --color-notification-border: #d3d6dc;
 
   --color-activitybar-background: #eceef1;
   --color-activitybar-foreground: #6b717d;

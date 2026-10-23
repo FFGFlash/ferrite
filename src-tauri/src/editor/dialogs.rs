@@ -1,0 +1,103 @@
+//! Native dialogs, shown from the backend so the frontend needs no dialog
+//! permissions. Blocking dialog calls run on the blocking thread pool.
+
+use std::path::{Path, PathBuf};
+
+use tauri::WebviewWindow;
+use tauri_plugin_dialog::{
+  DialogExt, MessageDialogButtons, MessageDialogKind, MessageDialogResult,
+};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum UnsavedChoice {
+  Save,
+  Discard,
+  Cancel,
+}
+
+pub async fn pick_file_to_open(window: &WebviewWindow) -> Option<PathBuf> {
+  let dialog = window.dialog().file().set_parent(window);
+  run_blocking(move || dialog.blocking_pick_file())
+    .await
+    .flatten()
+    .and_then(|path| path.into_path().ok())
+}
+
+pub async fn pick_save_path(
+  window: &WebviewWindow,
+  current: Option<&Path>,
+  title: &str,
+) -> Option<PathBuf> {
+  let mut dialog = window.dialog().file().set_parent(window);
+  match current {
+    Some(path) => {
+      if let Some(directory) = path.parent() {
+        dialog = dialog.set_directory(directory);
+      }
+      if let Some(name) = path.file_name() {
+        dialog = dialog.set_file_name(name.to_string_lossy());
+      }
+    }
+    None => dialog = dialog.set_file_name(format!("{title}.txt")),
+  }
+  run_blocking(move || dialog.blocking_save_file())
+    .await
+    .flatten()
+    .and_then(|path| path.into_path().ok())
+}
+
+pub async fn ask_unsaved(
+  window: &WebviewWindow,
+  message: String,
+  save_label: &str,
+) -> UnsavedChoice {
+  let save_label = save_label.to_owned();
+  let dialog = window
+    .dialog()
+    .message(format!(
+      "{message}\n\nYour changes will be lost if you don't save them."
+    ))
+    .kind(MessageDialogKind::Warning)
+    .buttons(MessageDialogButtons::YesNoCancelCustom(
+      save_label.clone(),
+      "Don't Save".into(),
+      "Cancel".into(),
+    ))
+    .parent(window);
+  match run_blocking(move || dialog.blocking_show_with_result()).await {
+    Some(MessageDialogResult::Yes) => UnsavedChoice::Save,
+    Some(MessageDialogResult::No) => UnsavedChoice::Discard,
+    Some(MessageDialogResult::Custom(label)) if label == save_label => UnsavedChoice::Save,
+    Some(MessageDialogResult::Custom(label)) if label == "Don't Save" => UnsavedChoice::Discard,
+    _ => UnsavedChoice::Cancel,
+  }
+}
+
+pub async fn confirm_overwrite(window: &WebviewWindow, title: &str) -> bool {
+  let dialog = window
+    .dialog()
+    .message(format!(
+      "{title} was changed on disk by another program since you opened it.\n\nDo you want to overwrite it with your version?"
+    ))
+    .kind(MessageDialogKind::Warning)
+    .buttons(MessageDialogButtons::OkCancelCustom(
+      "Overwrite".into(),
+      "Cancel".into(),
+    ))
+    .parent(window);
+  match run_blocking(move || dialog.blocking_show_with_result()).await {
+    Some(MessageDialogResult::Ok) => true,
+    Some(MessageDialogResult::Custom(label)) => label == "Overwrite",
+    _ => false,
+  }
+}
+
+async fn run_blocking<T: Send + 'static>(f: impl FnOnce() -> T + Send + 'static) -> Option<T> {
+  match tauri::async_runtime::spawn_blocking(f).await {
+    Ok(value) => Some(value),
+    Err(error) => {
+      tracing::error!(%error, "dialog task failed");
+      None
+    }
+  }
+}

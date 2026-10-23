@@ -20,10 +20,12 @@
 .editor-tab {
   display: flex;
   align-items: center;
-  padding: 0 var(--space-4);
+  gap: var(--space-1);
+  padding: 0 var(--space-1) 0 var(--space-3);
   color: var(--color-tab-inactive-foreground);
   border-right: 1px solid var(--color-border);
   white-space: nowrap;
+  cursor: pointer;
 }
 
 .editor-tab[aria-selected="true"] {
@@ -32,8 +34,59 @@
   box-shadow: inset 0 1px 0 var(--color-tab-active-indicator);
 }
 
+.editor-tab__close {
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-control);
+  background: none;
+  color: inherit;
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.editor-tab__close:hover {
+  background: var(--color-control-hover-background);
+}
+
+/* The close button shows × on hover or for the active tab, and a dot for
+   unsaved changes otherwise. */
+.editor-tab__x,
+.editor-tab__dirty {
+  grid-area: 1 / 1;
+}
+
+.editor-tab__dirty {
+  display: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.editor-tab:not(:hover, [aria-selected="true"]) .editor-tab__x {
+  visibility: hidden;
+}
+
+.editor-tab[data-dirty] .editor-tab__close:not(:hover) .editor-tab__dirty {
+  display: block;
+}
+
+.editor-tab[data-dirty] .editor-tab__close:not(:hover) .editor-tab__x {
+  visibility: hidden;
+}
+
 .editor-area__content {
+  display: flex;
   flex: 1;
   min-height: 0;
+}
+
+.editor-area__content--scroll {
+  display: block;
   overflow: auto;
 }

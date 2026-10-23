@@ -6,11 +6,12 @@
 //! (see `docs/architecture.md`), not here.
 
 mod commands;
+mod editor;
 mod logging;
 
 use std::time::Instant;
 
-use tauri::{Manager, RunEvent};
+use tauri::{Manager, RunEvent, WindowEvent};
 
 /// Builds and runs the application. Returns only if startup fails; the process
 /// exits when the event loop ends.
@@ -18,6 +19,9 @@ pub fn run() {
   let launched_at = Instant::now();
 
   let app = tauri::Builder::default()
+    .plugin(tauri_plugin_dialog::init())
+    .plugin(tauri_plugin_clipboard_manager::init())
+    .manage(editor::EditorState::default())
     .setup(move |app| {
       let log_dir = match app.path().app_log_dir() {
         Ok(dir) => Some(dir),
@@ -38,12 +42,33 @@ pub fn run() {
         elapsed_ms = commands::millis(launched_at.elapsed()),
         "backend initialized"
       );
+      editor::open_startup_files(
+        &app.state::<editor::EditorState>(),
+        std::env::args_os().skip(1).map(std::path::PathBuf::from),
+      );
       Ok(())
+    })
+    .on_window_event(|window, event| {
+      if let WindowEvent::CloseRequested { api, .. } = event
+        && let Some(window) = window.app_handle().get_webview_window(window.label())
+      {
+        editor::on_close_requested(&window, api);
+      }
     })
     .invoke_handler(tauri::generate_handler![
       commands::app_info,
       commands::frontend_log,
       commands::frontend_ready,
+      editor::document_list,
+      editor::document_new,
+      editor::document_open,
+      editor::document_open_dialog,
+      editor::document_save,
+      editor::document_save_as,
+      editor::document_close,
+      editor::editor_view,
+      editor::editor_apply,
+      editor::editor_clipboard,
     ])
     .build(tauri::generate_context!());
 

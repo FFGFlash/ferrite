@@ -18,7 +18,7 @@ const appInfo: AppInfo = {
 };
 
 describe("Workbench", () => {
-  it("opens with the explorer and the welcome tab", () => {
+  it("opens with the explorer and the welcome page", () => {
     render(<Workbench appInfo={null} />);
 
     expect(screen.getByRole("complementary", { name: "Explorer" })).toBeInTheDocument();
@@ -26,8 +26,10 @@ describe("Workbench", () => {
       "aria-pressed",
       "true",
     );
-    expect(screen.getByRole("tab", { name: "Welcome" })).toHaveAttribute("aria-selected", "true");
+    expect(screen.queryByRole("tab")).not.toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Ferrite" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /New File/ })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Open File/ })).toBeInTheDocument();
   });
 
   it("switches views and collapses the side bar when the active view is selected again", async () => {
@@ -74,7 +76,7 @@ describe("Workbench", () => {
 
     rerender(<Workbench appInfo={appInfo} />);
     expect(within(statusBar).getByText("Ferrite 0.1.0")).toBeInTheDocument();
-    expect(within(statusBar).getByText("Windows x86_64")).toBeInTheDocument();
+    expect(screen.getByText("Windows x86_64")).toBeInTheDocument();
     expect(screen.getByText("2.12.5")).toBeInTheDocument();
   });
 });

@@ -1,10 +1,12 @@
 import { useCallback, useState } from "react";
 import { ActivityBar } from "../components/ActivityBar";
+import { Notifications } from "../components/Notifications";
 import { Sash } from "../components/Sash";
 import { SideBar } from "../components/SideBar";
 import { StatusBar } from "../components/StatusBar";
 import { EditorArea } from "../editor/EditorArea";
 import type { AppInfo } from "../ipc";
+import { useWorkbenchShortcuts } from "./shortcuts";
 import { builtinViews } from "./views";
 import "./Workbench.css";
 
@@ -19,6 +21,7 @@ interface WorkbenchProps {
 export function Workbench({ appInfo }: WorkbenchProps) {
   const [activeViewId, setActiveViewId] = useState<string | null>(builtinViews[0]?.id ?? null);
   const [sidebarWidth, setSidebarWidth] = useState(SIDEBAR_DEFAULT_WIDTH);
+  useWorkbenchShortcuts();
 
   // Selecting the active view again collapses the side bar.
   const selectView = useCallback((id: string) => {
@@ -46,6 +49,7 @@ export function Workbench({ appInfo }: WorkbenchProps) {
         <EditorArea appInfo={appInfo} />
       </div>
       <StatusBar appInfo={appInfo} />
+      <Notifications />
     </div>
   );
 }

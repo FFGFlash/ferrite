@@ -18,12 +18,21 @@ name = "ferrite_app"
 tauri-build = { workspace = true }
 
 [dependencies]
+ferrite-core = { workspace = true }
+ferrite-text = { workspace = true }
+ferrite-workspace = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 tauri = { workspace = true }
+tauri-plugin-clipboard-manager = { workspace = true }
+tauri-plugin-dialog = { workspace = true }
+thiserror = { workspace = true }
 tracing = { workspace = true }
 tracing-appender = { workspace = true }
 tracing-subscriber = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }
 
 [lints]
 workspace = true

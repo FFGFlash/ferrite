@@ -1,0 +1,112 @@
+.editor-view {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  background: var(--color-editor-background);
+  color: var(--color-editor-foreground);
+  font-family: var(--font-mono);
+  font-size: var(--font-size-editor);
+  line-height: var(--editor-line-height);
+  cursor: text;
+}
+
+.editor-view__sizer {
+  display: flex;
+  width: max-content;
+  min-width: 100%;
+}
+
+.editor-view__gutter {
+  position: sticky;
+  left: 0;
+  z-index: 2;
+  flex: none;
+  padding-right: var(--space-4);
+  background: var(--color-editor-background);
+  color: var(--color-editor-line-number);
+  text-align: right;
+  cursor: default;
+}
+
+.editor-view__line-number {
+  height: var(--editor-line-height);
+}
+
+.editor-view__line-number[data-active] {
+  color: var(--color-editor-line-number-active);
+}
+
+.editor-view__content {
+  position: relative;
+  flex: 1;
+  padding-right: var(--space-8);
+}
+
+.editor-view__layer {
+  position: relative;
+}
+
+.editor-view__lines {
+  position: relative;
+}
+
+.editor-view__line {
+  height: var(--editor-line-height);
+  white-space: pre;
+  tab-size: 4;
+}
+
+.editor-view__selections,
+.editor-view__carets {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.editor-view__selection {
+  position: absolute;
+  height: var(--editor-line-height);
+  background: var(--color-editor-selection);
+}
+
+.editor-view__caret {
+  position: absolute;
+  width: 2px;
+  height: var(--editor-line-height);
+  margin-left: -1px;
+  background: var(--color-editor-cursor);
+}
+
+.editor-view:not(:focus-within) .editor-view__caret {
+  opacity: 0.4;
+}
+
+/* Receives keyboard, IME, and clipboard input. Invisible except while
+   composing, when it shows the IME's in-progress text at the caret. */
+.editor-view__input {
+  position: absolute;
+  z-index: 1;
+  width: 1px;
+  height: var(--editor-line-height);
+  padding: 0;
+  border: none;
+  outline: none;
+  resize: none;
+  overflow: hidden;
+  opacity: 0;
+  background: var(--color-editor-background);
+  color: var(--color-editor-foreground);
+  font: inherit;
+  line-height: inherit;
+  white-space: pre;
+  pointer-events: none;
+}
+
+.editor-view__input[data-composing] {
+  width: auto;
+  min-width: 1ch;
+  field-sizing: content;
+  opacity: 1;
+  text-decoration: underline;
+}
