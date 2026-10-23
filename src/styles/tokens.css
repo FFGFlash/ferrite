@@ -1,0 +1,117 @@
+/*
+ * Semantic design tokens. Components reference only these variables, never
+ * concrete colors, so themes (including future extension-contributed themes)
+ * can restyle the workbench by redefining tokens.
+ */
+
+:root {
+  /* Typography */
+  --font-ui: system-ui, -apple-system, "Segoe UI", Roboto, Ubuntu, Cantarell, sans-serif;
+  --font-mono:
+    ui-monospace, "Cascadia Code", "SF Mono", Menlo, Consolas, "DejaVu Sans Mono", monospace;
+  --font-size-ui: 13px;
+  --font-size-ui-small: 12px;
+  --font-size-editor: 14px;
+  --line-height-editor: 1.5;
+
+  /* Spacing */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-6: 24px;
+  --space-8: 32px;
+
+  /* Workbench dimensions */
+  --size-activitybar: 48px;
+  --size-statusbar: 24px;
+  --size-tabs: 36px;
+  --size-sidebar-header: 36px;
+  --size-sash: 4px;
+  --radius-control: 4px;
+}
+
+:root,
+[data-theme="dark"] {
+  color-scheme: dark;
+
+  --color-accent: #f08a4b;
+  --color-focus-ring: #8fb8de;
+  --color-border: #2b2e35;
+  --color-text: #d4d7dd;
+  --color-text-muted: #8b919c;
+
+  --color-workbench-background: #1b1d21;
+
+  --color-activitybar-background: #141619;
+  --color-activitybar-foreground: #8b919c;
+  --color-activitybar-active-foreground: #e6e8ec;
+  --color-activitybar-active-indicator: var(--color-accent);
+
+  --color-sidebar-background: #181a1e;
+  --color-sidebar-foreground: var(--color-text);
+  --color-sidebar-header-foreground: var(--color-text-muted);
+
+  --color-sash-hover: var(--color-focus-ring);
+
+  --color-tabs-background: #16181c;
+  --color-tab-active-background: #1e2025;
+  --color-tab-active-foreground: #e6e8ec;
+  --color-tab-active-indicator: var(--color-accent);
+  --color-tab-inactive-foreground: var(--color-text-muted);
+
+  --color-editor-background: #1e2025;
+  --color-editor-foreground: #d4d7dd;
+  --color-editor-line-number: #5c626d;
+  --color-editor-line-number-active: #b4b9c2;
+  --color-editor-cursor: var(--color-accent);
+  --color-editor-selection: rgb(143 184 222 / 0.25);
+
+  --color-statusbar-background: #a8461f;
+  --color-statusbar-foreground: #ffffff;
+
+  --color-syntax-comment: #6f7785;
+  --color-syntax-keyword: #e48a5c;
+  --color-syntax-string: #a8c98a;
+  --color-syntax-number: #d8b26a;
+  --color-syntax-function: #8fb8de;
+  --color-syntax-type: #c6a0e0;
+}
+
+[data-theme="light"] {
+  color-scheme: light;
+
+  --color-accent: #b9501f;
+  --color-focus-ring: #2f6ea8;
+  --color-border: #dcdfe4;
+  --color-text: #2a2d33;
+  --color-text-muted: #646b77;
+
+  --color-workbench-background: #f6f7f9;
+
+  --color-activitybar-background: #eceef1;
+  --color-activitybar-foreground: #6b717d;
+  --color-activitybar-active-foreground: #1f2227;
+
+  --color-sidebar-background: #f1f2f5;
+
+  --color-tabs-background: #eceef1;
+  --color-tab-active-background: #ffffff;
+  --color-tab-active-foreground: #1f2227;
+
+  --color-editor-background: #ffffff;
+  --color-editor-foreground: #24272d;
+  --color-editor-line-number: #a3a8b1;
+  --color-editor-line-number-active: #4b515c;
+  --color-editor-selection: rgb(47 110 168 / 0.2);
+
+  --color-statusbar-background: #a8461f;
+  --color-statusbar-foreground: #ffffff;
+
+  --color-syntax-comment: #7d8490;
+  --color-syntax-keyword: #a8461f;
+  --color-syntax-string: #3f7a2a;
+  --color-syntax-number: #8a5f00;
+  --color-syntax-function: #2a5f94;
+  --color-syntax-type: #7a3fa0;
+}

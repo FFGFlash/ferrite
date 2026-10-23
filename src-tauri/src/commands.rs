@@ -1,0 +1,156 @@
+//! Tauri commands: the IPC boundary between the workbench frontend and the
+//! backend.
+//!
+//! Payloads are plain serializable structs with camelCase fields, so the
+//! frontend depends only on this documented shape and never on internal Rust
+//! types. Each command validates its own input.
+
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::{Duration, Instant};
+
+use serde::{Deserialize, Serialize};
+use tauri::{AppHandle, State};
+
+/// Largest frontend log message accepted, in bytes. Longer messages are
+/// truncated at a character boundary.
+pub const MAX_FRONTEND_LOG_BYTES: usize = 8 * 1024;
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AppInfo {
+    pub name: String,
+    pub version: String,
+    pub os: &'static str,
+    pub arch: &'static str,
+    pub tauri_version: &'static str,
+}
+
+#[tauri::command]
+pub fn app_info(app: AppHandle) -> AppInfo {
+    let package = app.package_info();
+    AppInfo {
+        name: package.name.clone(),
+        version: package.version.to_string(),
+        os: std::env::consts::OS,
+        arch: std::env::consts::ARCH,
+        tauri_version: tauri::VERSION,
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum FrontendLogLevel {
+    Error,
+    Warn,
+    Info,
+    Debug,
+    Trace,
+}
+
+/// Records a frontend log message under the `frontend` target.
+#[tauri::command]
+pub fn frontend_log(level: FrontendLogLevel, message: String) {
+    let (message, truncated) = truncate_at_char_boundary(&message, MAX_FRONTEND_LOG_BYTES);
+    match level {
+        FrontendLogLevel::Error => tracing::error!(target: "frontend", truncated, "{message}"),
+        FrontendLogLevel::Warn => tracing::warn!(target: "frontend", truncated, "{message}"),
+        FrontendLogLevel::Info => tracing::info!(target: "frontend", truncated, "{message}"),
+        FrontendLogLevel::Debug => tracing::debug!(target: "frontend", truncated, "{message}"),
+        FrontendLogLevel::Trace => tracing::trace!(target: "frontend", truncated, "{message}"),
+    }
+}
+
+/// Startup timing shared between `run` and the `frontend_ready` command.
+pub struct StartupState {
+    launched_at: Instant,
+    frontend_ready: AtomicBool,
+}
+
+impl StartupState {
+    pub fn new(launched_at: Instant) -> Self {
+        Self {
+            launched_at,
+            frontend_ready: AtomicBool::new(false),
+        }
+    }
+}
+
+/// Called by the frontend after its first render. The first call logs the
+/// time from backend launch to an interactive workbench; later calls (webview
+/// reloads) are logged at debug level.
+#[tauri::command]
+pub fn frontend_ready(startup: State<'_, StartupState>) {
+    let elapsed_ms = millis(startup.launched_at.elapsed());
+    if startup.frontend_ready.swap(true, Ordering::Relaxed) {
+        tracing::debug!(elapsed_ms, "frontend reloaded");
+    } else {
+        tracing::info!(elapsed_ms, "frontend ready");
+    }
+}
+
+pub fn millis(duration: Duration) -> u64 {
+    u64::try_from(duration.as_millis()).unwrap_or(u64::MAX)
+}
+
+/// Returns the longest prefix of `text` that fits in `max_bytes` without
+/// splitting a UTF-8 sequence, and whether anything was removed.
+fn truncate_at_char_boundary(text: &str, max_bytes: usize) -> (&str, bool) {
+    if text.len() <= max_bytes {
+        return (text, false);
+    }
+    let mut end = max_bytes;
+    while !text.is_char_boundary(end) {
+        end -= 1;
+    }
+    (&text[..end], true)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn short_text_is_not_truncated() {
+        assert_eq!(truncate_at_char_boundary("hello", 5), ("hello", false));
+        assert_eq!(truncate_at_char_boundary("", 0), ("", false));
+    }
+
+    #[test]
+    fn long_ascii_is_truncated_to_limit() {
+        assert_eq!(truncate_at_char_boundary("hello world", 5), ("hello", true));
+    }
+
+    #[test]
+    fn truncation_never_splits_multibyte_characters() {
+        // "é" is 2 bytes and "🦀" is 4 bytes in UTF-8.
+        assert_eq!(truncate_at_char_boundary("aé", 2), ("a", true));
+        assert_eq!(truncate_at_char_boundary("🦀🦀", 5), ("🦀", true));
+        assert_eq!(truncate_at_char_boundary("🦀", 3), ("", true));
+    }
+
+    #[test]
+    fn log_levels_deserialize_from_lowercase_names() {
+        let level: FrontendLogLevel = serde_json::from_str("\"warn\"").expect("valid level");
+        assert_eq!(level, FrontendLogLevel::Warn);
+    }
+
+    #[test]
+    fn unknown_log_levels_are_rejected() {
+        assert!(serde_json::from_str::<FrontendLogLevel>("\"fatal\"").is_err());
+        assert!(serde_json::from_str::<FrontendLogLevel>("\"WARN\"").is_err());
+    }
+
+    #[test]
+    fn app_info_serializes_with_camel_case_fields() {
+        let info = AppInfo {
+            name: "Ferrite".into(),
+            version: "0.1.0".into(),
+            os: "windows",
+            arch: "x86_64",
+            tauri_version: "2.0.0",
+        };
+        let json = serde_json::to_value(&info).expect("serializable");
+        assert_eq!(json["tauriVersion"], "2.0.0");
+        assert_eq!(json["name"], "Ferrite");
+    }
+}

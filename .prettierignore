@@ -1,0 +1,8 @@
+target/
+dist/
+coverage/
+src-tauri/gen/
+src-tauri/icons/
+pnpm-lock.yaml
+# The original design brief is kept verbatim.
+docs/DESIGN.md

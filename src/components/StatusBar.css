@@ -1,0 +1,21 @@
+.statusbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex: none;
+  height: var(--size-statusbar);
+  padding: 0 var(--space-2);
+  background: var(--color-statusbar-background);
+  color: var(--color-statusbar-foreground);
+  font-size: var(--font-size-ui-small);
+}
+
+.statusbar__group {
+  display: flex;
+  gap: var(--space-1);
+}
+
+.statusbar__item {
+  padding: 0 var(--space-2);
+  white-space: nowrap;
+}

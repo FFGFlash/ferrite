@@ -1,0 +1,21 @@
+# Rust
+/target/
+
+# Tauri generated files
+/src-tauri/gen/
+
+# Frontend
+/node_modules/
+/dist/
+*.tsbuildinfo
+/coverage/
+
+# Logs
+*.log
+
+# Editors and OS
+.vscode/*
+!.vscode/extensions.json
+.idea/
+.DS_Store
+Thumbs.db

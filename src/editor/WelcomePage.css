@@ -1,0 +1,39 @@
+.welcome {
+  max-width: 560px;
+  margin: 0 auto;
+  padding: 12vh var(--space-8) var(--space-8);
+}
+
+.welcome__title {
+  margin: 0;
+  font-size: 32px;
+  font-weight: 600;
+}
+
+.welcome__title::after {
+  content: ".";
+  color: var(--color-accent);
+}
+
+.welcome__tagline {
+  margin: var(--space-2) 0 var(--space-8);
+  color: var(--color-text-muted);
+  font-size: 16px;
+}
+
+.welcome__facts {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: var(--space-2) var(--space-6);
+  margin: 0;
+  user-select: text;
+}
+
+.welcome__facts dt {
+  color: var(--color-text-muted);
+}
+
+.welcome__facts dd {
+  margin: 0;
+  font-family: var(--font-mono);
+}
