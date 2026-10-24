@@ -234,3 +234,10 @@
 .tok-module {
   color: var(--color-syntax-module);
 }
+
+/* Ctrl/⌘ + pointer over a symbol that has a definition (see segments.ts). */
+.editor-view__line .editor-view__link {
+  color: var(--color-link);
+  text-decoration: underline;
+  cursor: pointer;
+}

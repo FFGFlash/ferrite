@@ -12,7 +12,6 @@ import {
   type ReactNode,
 } from "react";
 import {
-  TOKEN_KINDS,
   type DisplayLine,
   type EditorOp,
   type EditorView as View,
@@ -34,7 +33,7 @@ import { notify, reportError } from "../state/notifications";
 import { notifyPainted, recordTiming } from "../state/perf";
 import { useStore } from "../state/store";
 import { activeEditor, type EditorController } from "./activeEditor";
-import { isWordChar, visibleCompletions } from "./completion";
+import { isWordChar, visibleCompletions, wordAround } from "./completion";
 import { FindWidget, type FindState } from "./FindWidget";
 import { isMac, keyToCommand } from "./keymap";
 import {
@@ -55,6 +54,7 @@ import {
   type Overlay,
   type Rect,
 } from "./measure";
+import { segments } from "./segments";
 import { EditorSession, ipcTransport, type EditorTransport } from "./session";
 import "./EditorView.css";
 
@@ -85,6 +85,29 @@ interface CompletionState {
   items: lsp.CompletionItem[];
   incomplete: boolean;
   selected: number;
+}
+
+/** A word under the pointer, as UTF-16 columns `[from, to)` of `line`. */
+interface Word {
+  line: number;
+  from: number;
+  to: number;
+}
+
+/** The symbol drawn as a link while the go-to-definition modifier is held. */
+interface LinkState extends Word {
+  /** The document version it was found in; edits hide it. */
+  version: number;
+}
+
+/** Whether `event` holds the go-to-definition modifier (Ctrl, or ⌘ on macOS) alone. */
+function definitionModifier(event: {
+  ctrlKey: boolean;
+  metaKey: boolean;
+  shiftKey: boolean;
+  altKey: boolean;
+}) {
+  return (isMac() ? event.metaKey : event.ctrlKey) && !event.shiftKey && !event.altKey;
 }
 
 /** Scroll positions of documents whose editor was unmounted (tab switches). */
@@ -137,6 +160,12 @@ export function EditorView({ documentId, title, transport = ipcTransport }: Edit
   const completionSeqRef = useRef(0);
   /** Completion to request once the view reflects the latest typing. */
   const completionPendingRef = useRef<{ trigger: string | null } | null>(null);
+  const [link, setLink] = useState<LinkState | null>(null);
+  /** The last pointer position over the text; `null` once it leaves. */
+  const pointerRef = useRef<{ x: number; y: number } | null>(null);
+  /** The word whose definition was last asked for, to ask once per word. */
+  const linkKeyRef = useRef<string | null>(null);
+  const linkSeqRef = useRef(0);
   /** When the view being rendered arrived, and when the oldest unpainted input happened. */
   const receivedAtRef = useRef(0);
   const inputStartRef = useRef<number | null>(null);
@@ -360,6 +389,8 @@ export function EditorView({ documentId, title, transport = ipcTransport }: Edit
     if (hoverRef.current) {
       setHover(null);
     }
+    // The text moved under the pointer; the next pointer move looks again.
+    clearLink();
     if (completionRef.current) {
       setScrollTick((tick) => tick + 1);
     }
@@ -500,9 +531,7 @@ export function EditorView({ documentId, title, transport = ipcTransport }: Edit
     if (!position) {
       return;
     }
-    const definitionClick =
-      (isMac() ? event.metaKey : event.ctrlKey) && !event.shiftKey && !event.altKey;
-    if (definitionClick) {
+    if (definitionModifier(event)) {
       dispatch({ type: "setCursor", position, extend: false, add: false });
       void goToDefinition(position);
       return;
@@ -583,10 +612,12 @@ export function EditorView({ documentId, title, transport = ipcTransport }: Edit
   };
 
   const onContentMouseMove = (event: ReactMouseEvent<HTMLDivElement>) => {
+    const { clientX, clientY } = event;
+    pointerRef.current = { x: clientX, y: clientY };
+    updateLink(event.buttons === 0 && definitionModifier(event));
     if (event.buttons !== 0) {
       return;
     }
-    const { clientX, clientY } = event;
     const position = positionAt(clientX, clientY);
     const shown = hoverRef.current;
     if (shown && position?.line === shown.line && Math.abs(clientX - shown.x) < HOVER_SLACK) {
@@ -611,6 +642,8 @@ export function EditorView({ documentId, title, transport = ipcTransport }: Edit
   };
 
   const onContentMouseLeave = (event: ReactMouseEvent<HTMLDivElement>) => {
+    pointerRef.current = null;
+    clearLink();
     const to = event.relatedTarget;
     const card = frameRef.current?.querySelector(".hover-card");
     if (!(to instanceof Node && card?.contains(to))) {
@@ -634,6 +667,81 @@ export function EditorView({ documentId, title, transport = ipcTransport }: Edit
       reportError("Going to the definition", error);
     }
   };
+
+  /** The word under a point of the text, if any. */
+  const wordAt = (clientX: number, clientY: number): Word | null => {
+    const position = positionAt(clientX, clientY);
+    const lines = linesRef.current;
+    const current = viewRef.current;
+    if (!position || !lines || !current) {
+      return null;
+    }
+    const element = lines.children[position.line - current.startLine];
+    const text = current.lines[position.line - current.startLine]?.text;
+    if (!element || text === undefined) {
+      return null;
+    }
+    // `positionAt` finds the nearest caret boundary; left of it, the
+    // pointer is over the character before it.
+    const boundary = lines.getBoundingClientRect().left + columnX(element, position.column);
+    const index = clientX < boundary ? position.column - 1 : position.column;
+    const word = wordAround(text, index);
+    return word && { line: position.line, from: word[0], to: word[1] };
+  };
+
+  const clearLink = () => {
+    linkSeqRef.current++;
+    linkKeyRef.current = null;
+    setLink(null);
+  };
+
+  /**
+   * Draws the word under the pointer as a link while `held` (the
+   * go-to-definition modifier is down), once the server confirms it has a
+   * definition, as VS Code does.
+   */
+  const updateLink = (held: boolean) => {
+    const pointer = pointerRef.current;
+    const current = viewRef.current;
+    const word = held && pointer && current?.language ? wordAt(pointer.x, pointer.y) : null;
+    const key = word && current ? `${current.version}:${word.line}:${word.from}` : null;
+    if (key === linkKeyRef.current) {
+      return;
+    }
+    clearLink();
+    if (!word || !current) {
+      return;
+    }
+    linkKeyRef.current = key;
+    const seq = linkSeqRef.current;
+    const version = current.version;
+    lsp.definition(documentId, { line: word.line, column: word.from }).then(
+      (location) => {
+        if (location && seq === linkSeqRef.current) {
+          setLink({ ...word, version });
+        }
+      },
+      (error) => console.debug("definition lookup failed", error),
+    );
+  };
+  const updateLinkRef = useRef(updateLink);
+  updateLinkRef.current = updateLink;
+
+  // Pressing or releasing the modifier with the pointer over a symbol shows
+  // or hides its link, wherever focus is.
+  useEffect(() => {
+    const onKey = (event: globalThis.KeyboardEvent) =>
+      updateLinkRef.current(definitionModifier(event));
+    const onBlur = () => updateLinkRef.current(false);
+    window.addEventListener("keydown", onKey);
+    window.addEventListener("keyup", onKey);
+    window.addEventListener("blur", onBlur);
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      window.removeEventListener("keyup", onKey);
+      window.removeEventListener("blur", onBlur);
+    };
+  }, []);
 
   const closeCompletion = () => {
     completionSeqRef.current++;
@@ -806,7 +914,15 @@ export function EditorView({ documentId, title, transport = ipcTransport }: Edit
               </div>
               <div className="editor-view__lines" ref={linesRef}>
                 {view?.lines.map((line, index) => (
-                  <Line key={startLine + index} line={line} />
+                  <Line
+                    key={startLine + index}
+                    line={line}
+                    link={
+                      link?.line === startLine + index && link.version === view.version
+                        ? link
+                        : null
+                    }
+                  />
                 ))}
               </div>
               <div className="editor-view__carets" aria-hidden="true">
@@ -862,8 +978,9 @@ function earlier(a: Position, b: Position): Position {
   return a.line < b.line || (a.line === b.line && a.column <= b.column) ? a : b;
 }
 
-const Line = memo(function Line({ line }: { line: DisplayLine }) {
-  const text = line.spans.length === 0 ? line.text : highlighted(line.text, line.spans);
+const Line = memo(function Line({ line, link }: { line: DisplayLine; link: Word | null }) {
+  const text =
+    line.spans.length === 0 && !link ? line.text : highlighted(line.text, line.spans, link);
   if (line.fullLength === null) {
     return <div className="editor-view__line">{text}</div>;
   }
@@ -881,30 +998,17 @@ const Line = memo(function Line({ line }: { line: DisplayLine }) {
   );
 });
 
-/** `text` split into plain and highlighted runs (see `measure.ts`). */
-function highlighted(text: string, spans: readonly number[]): ReactNode[] {
-  const parts: ReactNode[] = [];
-  let at = 0;
-  for (let i = 0; i + 2 < spans.length; i += 3) {
-    const start = spans[i]!;
-    const end = Math.min(spans[i + 1]!, text.length);
-    if (start < at || start >= end) {
-      continue;
-    }
-    if (start > at) {
-      parts.push(text.slice(at, start));
-    }
-    parts.push(
-      <span key={start} className={`tok-${TOKEN_KINDS[spans[i + 2]! - 1] ?? "none"}`}>
+/** `text` split into plain, highlighted, and linked runs (see `measure.ts`). */
+function highlighted(text: string, spans: readonly number[], link: Word | null): ReactNode[] {
+  return segments(text, spans, link && [link.from, link.to]).map(({ start, end, className }) =>
+    className ? (
+      <span key={start} className={className}>
         {text.slice(start, end)}
-      </span>,
-    );
-    at = end;
-  }
-  if (at < text.length) {
-    parts.push(text.slice(at));
-  }
-  return parts;
+      </span>
+    ) : (
+      text.slice(start, end)
+    ),
+  );
 }
 
 function visibleRange(scroller: HTMLElement, lineHeight: number): [number, number] {

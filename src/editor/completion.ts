@@ -36,6 +36,22 @@ export function isWordChar(ch: string): boolean {
   return /^[\p{L}\p{N}_$]$/u.test(ch);
 }
 
+/** The word containing the character at `index` of `text`, as `[from, to)`; `null` off a word. */
+export function wordAround(text: string, index: number): [number, number] | null {
+  if (!isWordChar(text.charAt(index))) {
+    return null;
+  }
+  let from = index;
+  let to = index + 1;
+  while (from > 0 && isWordChar(text.charAt(from - 1))) {
+    from--;
+  }
+  while (to < text.length && isWordChar(text.charAt(to))) {
+    to++;
+  }
+  return [from, to];
+}
+
 /**
  * The items matching what was typed between each item's start and the
  * cursor on `lineText`, best first; `null` if the cursor left the range the

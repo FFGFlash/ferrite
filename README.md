@@ -81,8 +81,9 @@ Tree-sitter grammars built into Ferrite.
 
 With a language server installed, Ferrite also shows errors and warnings as you type (squiggles,
 plus counts in the status bar), shows type information and documentation when the pointer rests
-on a symbol, goes to definitions (F12 or Ctrl/⌘+click), and offers completions (as you type, after
-`.` and similar characters, or with Ctrl+Space). Servers start when you open a file that needs one:
+on a symbol, goes to definitions (F12 or Ctrl/⌘+click; holding Ctrl/⌘ underlines the symbol under
+the pointer when it has one), and offers completions (as you type, after `.` and similar
+characters, or with Ctrl+Space). Servers start when you open a file that needs one:
 
 | Language                | Server                       | Install                                                |
 | ----------------------- | ---------------------------- | ------------------------------------------------------ |

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { CompletionItem } from "../ipc/lsp";
-import { isWordChar, matchTier, visibleCompletions } from "./completion";
+import { isWordChar, matchTier, visibleCompletions, wordAround } from "./completion";
 
 const item = (label: string, column = 4): CompletionItem => ({
   label,
@@ -37,5 +37,15 @@ describe("completion", () => {
   it("treats letters, digits, underscores and dollars as word characters", () => {
     expect(["a", "Z", "é", "7", "_", "$"].every(isWordChar)).toBe(true);
     expect([".", " ", "(", ":"].some(isWordChar)).toBe(false);
+  });
+
+  it("finds the word around a character", () => {
+    const text = "let p = point.distance(q);";
+    expect(wordAround(text, 8)).toEqual([8, 13]);
+    expect(wordAround(text, 12)).toEqual([8, 13]);
+    expect(wordAround(text, 14)).toEqual([14, 22]);
+    expect(wordAround(text, 13)).toBeNull();
+    expect(wordAround(text, -1)).toBeNull();
+    expect(wordAround(text, text.length)).toBeNull();
   });
 });
