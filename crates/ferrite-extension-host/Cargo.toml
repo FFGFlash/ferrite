@@ -7,6 +7,7 @@ license.workspace = true
 publish = false
 
 [dependencies]
+base64 = { workspace = true }
 ferrite-core = { workspace = true }
 ferrite-text = { workspace = true }
 ferrite-workspace = { workspace = true }

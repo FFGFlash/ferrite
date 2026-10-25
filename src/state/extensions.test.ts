@@ -7,8 +7,10 @@ vi.mock('../ipc/extensions', () => ({
   setExtensionPermissions: vi.fn(),
   restartExtension: vi.fn(),
 }))
+vi.mock('../ipc/workspace', () => ({ setTheme: vi.fn(), setIconTheme: vi.fn() }))
 
 const ipc = await import('../ipc/extensions')
+const workspaceIpc = await import('../ipc/workspace')
 const { getCommand, executeCommand } = await import('../commands/registry')
 const { activeEditor } = await import('../editor/activeEditor')
 const { notifications } = await import('./notifications')
@@ -34,7 +36,14 @@ function extension(overrides: Partial<ExtensionStatus> = {}): ExtensionStatus {
     ],
     commands: [{ id: 'example.tidy.trim', title: 'Trim', category: 'Tidy', hidden: false }],
     configErrors: [],
-    contributions: { themes: [], keybindings: [], menus: [], views: [], decorations: [] },
+    contributions: {
+      themes: [],
+      iconThemes: [],
+      keybindings: [],
+      menus: [],
+      views: [],
+      decorations: [],
+    },
     usage: {
       busyMs: 0,
       calls: 0,
@@ -67,6 +76,21 @@ describe('extensions state', () => {
 
     applyStatuses([extension({ state: 'disabled' })])
     expect(getCommand('example.tidy.trim')).toBeUndefined()
+  })
+
+  it('offers contributed icon themes in the palette', async () => {
+    applyStatuses([
+      extension({
+        contributions: {
+          ...extension().contributions,
+          iconThemes: [{ id: 'example.tidy.colorful', label: 'Colorful' }],
+        },
+      }),
+    ])
+    const command = getCommand('preferences.iconTheme.example.tidy.colorful')
+    expect(command).toMatchObject({ title: 'File Icon Theme: Colorful', category: 'Preferences' })
+    await executeCommand('preferences.iconTheme.example.tidy.colorful')
+    expect(workspaceIpc.setIconTheme).toHaveBeenCalledWith('example.tidy.colorful')
   })
 
   it('asks once for permissions an extension is waiting for', async () => {

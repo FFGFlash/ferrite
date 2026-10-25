@@ -1250,6 +1250,7 @@ dependencies = [
 name = "ferrite-extension-host"
 version = "0.1.0"
 dependencies = [
+ "base64 0.23.1",
  "ferrite-core",
  "ferrite-text",
  "ferrite-workspace",

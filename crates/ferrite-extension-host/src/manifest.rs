@@ -78,7 +78,7 @@ pub struct Manifest {
   /// The folder the manifest is in.
   pub dir: PathBuf,
   /// The component or module to load, resolved against `dir`. Extensions
-  /// that only contribute themes have none.
+  /// that only contribute themes and icon themes have none.
   pub entrypoint: Option<PathBuf>,
   pub activation: Vec<Activation>,
   pub permissions: Vec<Permission>,
@@ -133,6 +133,8 @@ struct RawManifest {
   configuration: BTreeMap<String, RawProperty>,
   #[serde(default)]
   themes: Vec<contributions::RawTheme>,
+  #[serde(default)]
+  icon_themes: Vec<contributions::RawIconTheme>,
   #[serde(default)]
   keybindings: Vec<contributions::RawKeybinding>,
   #[serde(default)]
@@ -221,6 +223,9 @@ pub fn load(
   }
   for theme in &mut manifest.contributions.themes {
     contributions::load_theme_colors(dir, theme)?;
+  }
+  for theme in &mut manifest.contributions.icon_themes {
+    contributions::load_icon_theme(dir, theme)?;
   }
   Ok(manifest)
 }
@@ -374,6 +379,7 @@ pub fn parse(
   let contributions = contributions::parse(
     RawContributions {
       themes: raw.themes,
+      icon_themes: raw.icon_themes,
       keybindings: raw.keybindings,
       menus: raw.menus,
       status_items: raw.status_items,
@@ -391,7 +397,7 @@ pub fn parse(
       || contributions.needs_code())
   {
     return Err(invalid(
-      "entrypoint is required unless the extension only contributes themes",
+      "entrypoint is required unless the extension only contributes themes and icon themes",
     ));
   }
 
@@ -676,6 +682,37 @@ background = "#98680122"
     assert!(with("underline = \"dotted\"", "underline = \"zigzag\"").contains("underline"));
     let view = VALID.replace("\"on-startup\"", "\"on-view:missing\"");
     assert!(error_of(&view).contains("view that is not declared"));
+  }
+
+  #[test]
+  fn icon_theme_extensions_may_omit_the_entrypoint() {
+    let icons = r#"
+id = "example.icons"
+name = "Icons"
+version = "1.0.0"
+api_version = "1"
+
+[[icon_themes]]
+id = "colorful"
+label = "Colorful"
+path = "icons/theme.toml"
+"#;
+    let manifest = parse_text(icons).expect("valid");
+    assert!(manifest.entrypoint.is_none());
+    let theme = &manifest.contributions.icon_themes[0];
+    assert_eq!(theme.id, "example.icons.colorful");
+    assert_eq!(theme.label, "Colorful");
+    let escaping = icons.replace("icons/theme.toml", "../theme.toml");
+    assert!(error_of(&escaping).contains("inside the extension's folder"));
+    let twice = format!(
+      "{icons}
+[[icon_themes]]
+id = \"colorful\"
+label = \"Again\"
+path = \"a.toml\"
+"
+    );
+    assert!(error_of(&twice).contains("declared twice"));
   }
 
   #[test]

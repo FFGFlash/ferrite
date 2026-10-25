@@ -260,7 +260,8 @@ next read.
 ## Workbench contributions
 
 Contributions are declared in the manifest, and the workbench draws them itself. An extension
-never supplies markup or CSS: it supplies text, and colors that must be hex colors.
+never supplies markup or CSS: it supplies text, colors that must be hex colors, and icons that
+are shown as images.
 
 - **Ids.** Contribution ids are local to the extension (`list`, `count`). In the workbench they
   become `<extension id>.<id>`.
@@ -294,6 +295,74 @@ syntax-keyword = "#bb9af7"
   `workbench.theme = "example.themes.midnight"`.
 - **User colors.** `[workbench.colors]` in the settings overrides individual tokens on top of
   any theme.
+
+### File icon themes
+
+An icon theme replaces the icons the explorer and Go to File show for files and folders
+([ADR 0009](adr/0009-file-icon-themes.md)). [`extensions/icons`](../extensions/icons/) is a
+complete example.
+
+```toml
+[[icon_themes]]
+id = "colorful"                   # used as "example.icons.colorful"
+label = "Colorful"
+path = "icons/theme.toml"         # inside the extension's folder
+```
+
+The theme file names its icons, then says which icon goes with what. Icon paths are relative to
+the theme file.
+
+```toml
+file = "file"                     # files nothing below matches
+folder = "folder"                 # folders nothing below matches
+folder_expanded = "folder-open"
+
+[icons]                           # icon id = SVG or PNG file
+file = "file.svg"
+folder = "folder.svg"
+folder-open = "folder-open.svg"
+rust = "rust.svg"
+typescript = "typescript.svg"
+typescript-def = "typescript-def.svg"
+folder-src = "folder-src.svg"
+folder-src-open = "folder-src-open.svg"
+folder-dark-ink = "folder-dark-ink.svg"
+rust-dark-ink = "rust-dark-ink.svg"
+
+[file_extensions]                 # without the leading dot
+rs = "rust"
+ts = "typescript"
+"d.ts" = "typescript-def"         # the longest match wins
+
+[file_names]                      # exact names; these beat extensions
+"cargo.toml" = "rust"
+
+[folder_names]
+src = "folder-src"
+
+[folder_names_expanded]           # open folders; falls back to folder_names
+src = "folder-src-open"
+
+[light]                           # looked up first with a light color theme
+folder = "folder-dark-ink"
+file_extensions = { rs = "rust-dark-ink" }
+```
+
+- **Matching.** Names and extensions are matched ignoring case. A leading dot starts a name, not
+  an extension: `.eslintrc.json` matches the extension `json`.
+- **Fallback.** Anything the theme doesn't match uses its `file`, `folder`, and
+  `folder_expanded` icons. If it doesn't set those either, Ferrite's built-in icons are used, so
+  a theme can change just a few file types.
+- **Icons.** Icons are SVG or PNG files, shown at 16 × 16 pixels. They are shown as images, so
+  they can't use theme colors. Provide light variants under `[light]` if an icon needs one.
+  Scripts and external references in an SVG are ignored.
+- **Validation.** Icons outside the theme's folder, files that aren't SVG or PNG, and
+  associations that name an undeclared icon make the extension invalid.
+- **No code needed.** An extension that only contributes themes and icon themes needs no
+  entrypoint.
+- **Selecting.** Users pick an icon theme with **Preferences: File Icon Theme: …** or
+  `workbench.icon_theme = "example.icons.colorful"`. **File Icon Theme: Default** returns to
+  the built-in icons.
 
 ### Keybindings
 
@@ -399,6 +468,9 @@ document active. TODOs uses it when a view item is chosen. It also needs `docume
 | Item                               | Limit                                   |
 | ---------------------------------- | --------------------------------------- |
 | Themes / keybindings / menus       | 20 / 100 / 50 per extension             |
+| Icon themes                        | 5 per extension                         |
+| Icons                              | 2,000 per theme, 64 KiB each, 8 MiB all |
+| Icon associations                  | 10,000 per theme                        |
 | Status items / views / decorations | 20 / 10 / 20 types per extension        |
 | Status text / tooltip              | 100 / 500 characters (cut, not refused) |
 | View items                         | 5,000 per view                          |

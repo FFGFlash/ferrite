@@ -797,6 +797,40 @@ fn theme_only_extensions_need_no_code() {
 }
 
 #[test]
+fn the_icons_example_contributes_an_icon_theme() {
+  let example = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../extensions/icons");
+  let fake = Arc::new(Fake::default());
+  let options = HostOptions {
+    editor_version: semver::Version::new(0, 1, 0),
+    extensions_dir: None,
+    development: vec![example],
+    permissions_file: None,
+    settings: BTreeMap::new(),
+    limits: limits(),
+  };
+  let host = ExtensionHost::new(fake, options);
+  host.load();
+  let status = &host.statuses()[0];
+  assert_eq!(status.state, ExtensionState::Ready, "{:?}", status.error);
+  assert_eq!(
+    status.contributions.icon_themes[0].id,
+    "example.icons.colorful"
+  );
+
+  let theme = host
+    .icon_theme("example.icons.colorful")
+    .expect("an icon theme");
+  assert_eq!(theme.associations.file_extensions["rs"], "rust");
+  assert_eq!(theme.associations.folder_names["src"], "folder-src");
+  assert_eq!(theme.light.folder.as_deref(), Some("folder-light"));
+  assert!(theme.icons["rust"].starts_with("data:image/svg+xml;base64,"));
+  assert!(host.icon_theme("example.icons.missing").is_none());
+
+  host.set_enabled("example.icons", false);
+  assert!(host.icon_theme("example.icons.colorful").is_none());
+}
+
+#[test]
 fn todos_example_highlights_lists_and_counts_markers() {
   let s = setup("todos", "todos", Some(ALL), "", |m| m);
   let id = s.fake.open(

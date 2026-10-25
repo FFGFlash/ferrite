@@ -102,21 +102,22 @@ Servers can be changed, added, or turned off in the `[lsp]` section of the setti
 Extensions are WebAssembly modules that run in a sandbox: they can only use Ferrite's
 [extension API](crates/ferrite-extension-api/wit/extension.wit). With it they add commands to
 the palette, read open documents, edit them, and show problems as squiggles. They can also
-customize the workbench: color themes, keybindings, context menu items, status bar items, side
-bar views, and highlights in the text. They have no access to files, the network, or anything
+customize the workbench: color themes, file icon themes, keybindings, context menu items, status
+bar items, side bar views, and highlights in the text. They have no access to files, the network, or anything
 else on your computer. Before an extension starts, Ferrite
 asks you to allow the permissions it requests (reading or editing open documents). The
 Extensions view (`Ctrl+Shift+X`) shows each extension's state and permissions, and lets you
 change them, restart an extension, or turn it off. An extension that crashes, loops, or uses too
 much memory is stopped without affecting the editor.
 
-Three example extensions are included:
+Four example extensions are included:
 
 - [Tidy](extensions/tidy/) flags trailing whitespace and long lines, and can trim them.
 - [TODOs](extensions/todos/) highlights TODO and FIXME comments and lists them in a side bar
   view. It shows the count in the status bar, jumps to the next one with `Ctrl+Alt+T`, and adds
   **Insert TODO Comment** to the editor's context menu.
 - [Example Themes](extensions/themes/) adds the Midnight and Paper color themes, with no code.
+- [Example File Icons](extensions/icons/) adds the Colorful file icon theme, with no code.
 
 To try them:
 
@@ -134,6 +135,8 @@ an extension, copy its folder (manifest and `.wasm`) into the `extensions` folde
 
 - **Themes.** **Preferences: Color Theme: …** in the command palette switches between Dark, Light,
   Follow System, and themes from extensions. You can override any theme color in the settings.
+- **File icons.** **Preferences: File Icon Theme: …** switches the file icons in the explorer
+  and Go to File between the built-in ones and icon themes from extensions.
 - **Keybindings.** Set keybindings in the settings by command id. **Preferences: Keyboard
   Shortcuts** lists every command with its id and keys. Your keybindings take precedence over the
   built-in ones, which take precedence over extensions'.
@@ -141,6 +144,7 @@ an extension, copy its folder (manifest and `.wasm`) into the `extensions` folde
 ```toml
 [workbench]
 theme = "example.themes.midnight"
+icon_theme = "example.icons.colorful"
 
 [workbench.colors]
 editor-background = "#101018"            # any token in src/themes/tokens.json
@@ -200,6 +204,7 @@ font_size = 15
 
 [workbench]
 theme = "light"   # "system", "dark", "light", or an extension's theme id
+icon_theme = "default"   # or an extension's file icon theme id
 
 [files]
 exclude = [".git", "dist"]
@@ -289,7 +294,7 @@ src/                  React + TypeScript workbench
   ipc/                Typed wrappers for Tauri commands (the only place that calls invoke)
   themes/             Theme selection
   styles/             Design tokens and base styles
-extensions/           Extensions built to WebAssembly: examples (tidy, todos, themes) and test fixtures
+extensions/           Extensions built to WebAssembly: examples (tidy, todos, themes, icons) and test fixtures
 docs/                 Architecture notes, ADRs, extension guide, troubleshooting
 ```
 

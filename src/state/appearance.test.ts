@@ -6,6 +6,7 @@ import { extensionsStore } from './extensions'
 
 const settings = (theme: string, colors: Record<string, string> = {}): FrontendSettings => ({
   theme,
+  iconTheme: 'default',
   colors,
   keybindings: {},
   fontSize: 14,
@@ -29,6 +30,7 @@ const themes = {
     themes: [
       { id: 'example.themes.paper', label: 'Paper', kind: 'light', colors: { text: '#111111' } },
     ],
+    iconThemes: [],
     keybindings: [],
     menus: [],
     views: [],

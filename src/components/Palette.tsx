@@ -4,8 +4,12 @@ import { commandLabel, executeCommand, primaryKeybinding, useCommands } from '..
 import { activeEditor, selectRange } from '../editor/activeEditor'
 import { findFiles, type FileResult } from '../ipc/workspace'
 import { openPath } from '../state/documents'
+import { iconThemeStore } from '../state/iconTheme'
 import { useStore } from '../state/store'
 import { workspaceStore } from '../state/workspace'
+import { themeKind } from '../themes/theme'
+import { entryIcon, type EntryIcon } from './fileIcons'
+import { FileIcon } from './FileIcon'
 import { closePalette, paletteStore } from './paletteState'
 import './Palette.css'
 
@@ -14,6 +18,8 @@ interface Item {
   label: ReactNode
   detail?: ReactNode
   hint?: string | null
+  /** Shown before the label (files). */
+  icon?: EntryIcon
   run: () => void
 }
 
@@ -123,6 +129,7 @@ function PaletteDialog({ initial }: { initial: string }) {
                 choose(item)
               }}
             >
+              {item.icon && <FileIcon icon={item.icon} kind="file" className="palette__icon" />}
               <span className="palette__label">{item.label}</span>
               {item.detail && <span className="palette__detail">{item.detail}</span>}
               {item.hint && <kbd className="palette__hint">{item.hint}</kbd>}
@@ -148,6 +155,8 @@ function emptyMessage(value: string): string {
 function usePaletteItems(value: string): Item[] {
   const commands = useCommands()
   const files = useFileResults(value.startsWith('>') || value.startsWith(':') ? null : value)
+  const iconTheme = useStore(iconThemeStore)
+  const light = useStore(themeKind) === 'light'
 
   return useMemo(() => {
     if (value.startsWith('>')) {
@@ -168,14 +177,16 @@ function usePaletteItems(value: string): Item[] {
     }
     return files.map(file => {
       const slash = file.relative.lastIndexOf('/')
+      const name = file.relative.slice(slash + 1)
       return {
         key: file.path,
-        label: highlight(file.relative.slice(slash + 1), shift(file.indices, slash + 1)),
+        icon: entryIcon(name, null, iconTheme, light),
+        label: highlight(name, shift(file.indices, slash + 1)),
         detail: slash > 0 ? highlight(file.relative.slice(0, slash), file.indices) : null,
         run: () => void openPath(file.path),
       }
     })
-  }, [value, commands, files])
+  }, [value, commands, files, iconTheme, light])
 }
 
 function goToLineItems(text: string): Item[] {

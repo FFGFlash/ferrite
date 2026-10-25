@@ -10,6 +10,7 @@ use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 
 use ferrite_core::{Document, DocumentId, Editor};
+use ferrite_extension_host::icons::IconTheme;
 use ferrite_extension_host::{
   Embedder, ExtensionHost, ExtensionStatus, HostOptions, Limits, MANIFEST_FILE, Notification,
   Permission, StatusItem, ViewContent,
@@ -277,6 +278,16 @@ pub async fn extension_run_command(
     .await
     .map_err(CommandError::internal)?
     .map_err(|message| CommandError::new("extension", message))
+}
+
+/// A file icon theme with its icons, or `None` if no enabled extension
+/// contributes it.
+#[tauri::command]
+pub fn extensions_icon_theme(state: State<'_, ExtensionsState>, id: String) -> Option<IconTheme> {
+  state
+    .host()
+    .and_then(|host| host.icon_theme(&id))
+    .map(|theme| (*theme).clone())
 }
 
 #[tauri::command]

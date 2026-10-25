@@ -13,7 +13,8 @@ import {
   save,
 } from '../state/documents'
 import { addDevelopmentExtension, reloadExtensions } from '../ipc/extensions'
-import { setTheme, settingsFilePath } from '../ipc/workspace'
+import { setIconTheme, setTheme, settingsFilePath } from '../ipc/workspace'
+import { DEFAULT_ICON_THEME } from '../state/iconTheme'
 import { layoutStore, updateLayout } from '../state/layout'
 import { notify } from '../state/notifications'
 import { closeFolder, collapseAll, openFolder, workspaceStore } from '../state/workspace'
@@ -318,6 +319,12 @@ export const builtinCommands: Command[] = [
     category: 'Preferences',
     title: 'Color Theme: Follow System',
     run: () => setTheme('system'),
+  },
+  {
+    id: 'preferences.iconThemeDefault',
+    category: 'Preferences',
+    title: 'File Icon Theme: Default',
+    run: () => setIconTheme(DEFAULT_ICON_THEME),
   },
   {
     id: 'preferences.keyboardShortcuts',

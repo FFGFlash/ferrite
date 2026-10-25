@@ -1,18 +1,21 @@
-//! Workbench contributions declared in a manifest: themes, keybindings,
-//! menu items, status bar items, side bar views, and decoration types.
+//! Workbench contributions declared in a manifest: themes, file icon themes,
+//! keybindings, menu items, status bar items, side bar views, and decoration
+//! types.
 //!
 //! Contributions are data: the workbench renders them, and extensions only
 //! fill in content (status text, view items, decorated ranges) through the
 //! `workbench` interface. Every value is validated here, so nothing an
 //! extension declares reaches the frontend as markup or arbitrary CSS:
-//! colors must be hex colors and theme keys must be known tokens.
+//! colors must be hex colors and theme keys must be known tokens, and icons
+//! are images (see [`crate::icons`]).
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Component, Path, PathBuf};
-use std::sync::LazyLock;
+use std::sync::{Arc, LazyLock};
 
 use serde::{Deserialize, Serialize};
 
+use crate::icons::{self, IconTheme};
 use crate::keys;
 use crate::manifest::{CommandContribution, ManifestError};
 
@@ -50,6 +53,20 @@ pub struct ThemeContribution {
   pub colors: BTreeMap<String, String>,
   #[serde(skip)]
   pub path: PathBuf,
+}
+
+/// A file icon theme. Its icons are loaded with the manifest but only sent
+/// to the frontend on request (see `ExtensionHost::icon_theme`).
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct IconThemeContribution {
+  /// `<extension id>.<icon theme id>`, as written in `workbench.icon_theme`.
+  pub id: String,
+  pub label: String,
+  #[serde(skip)]
+  pub path: PathBuf,
+  #[serde(skip)]
+  pub theme: Arc<IconTheme>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -150,6 +167,7 @@ pub struct DecorationType {
 #[serde(rename_all = "camelCase")]
 pub struct Contributions {
   pub themes: Vec<ThemeContribution>,
+  pub icon_themes: Vec<IconThemeContribution>,
   pub keybindings: Vec<KeybindingContribution>,
   pub menus: Vec<MenuContribution>,
   pub status_items: Vec<StatusItemContribution>,
@@ -189,6 +207,14 @@ pub struct RawTheme {
   id: String,
   label: String,
   kind: String,
+  path: String,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RawIconTheme {
+  id: String,
+  label: String,
   path: String,
 }
 
@@ -256,6 +282,7 @@ pub struct RawDecoration {
 #[derive(Default)]
 pub struct RawContributions {
   pub themes: Vec<RawTheme>,
+  pub icon_themes: Vec<RawIconTheme>,
   pub keybindings: Vec<RawKeybinding>,
   pub menus: Vec<RawMenu>,
   pub status_items: Vec<RawStatusItem>,
@@ -263,8 +290,8 @@ pub struct RawContributions {
   pub decorations: BTreeMap<String, RawDecoration>,
 }
 
-/// Validates contributions. Theme colors are read later, by
-/// [`load_theme_colors`].
+/// Validates contributions. Theme colors and icons are read later, by
+/// [`load_theme_colors`] and [`load_icon_theme`].
 pub fn parse(
   raw: RawContributions,
   extension: &str,
@@ -287,6 +314,7 @@ pub fn parse(
     }
   };
   limit("themes", raw.themes.len(), 20)?;
+  limit("icon_themes", raw.icon_themes.len(), 5)?;
   limit("keybindings", raw.keybindings.len(), 100)?;
   limit("menus", raw.menus.len(), 50)?;
   limit("status_items", raw.status_items.len(), 20)?;
@@ -315,6 +343,24 @@ pub fn parse(
       kind,
       colors: BTreeMap::new(),
       path,
+    });
+  }
+
+  for theme in raw.icon_themes {
+    local_id("icon_themes", &theme.id)?;
+    let label = text("icon_themes", "label", &theme.label, 64)?;
+    let path = inside("icon_themes", &theme.path)?;
+    let id = format!("{extension}.{}", theme.id);
+    unique(
+      "icon_themes",
+      contributions.icon_themes.iter().map(|t| &t.id),
+      &id,
+    )?;
+    contributions.icon_themes.push(IconThemeContribution {
+      id,
+      label,
+      path,
+      theme: Arc::default(),
     });
   }
 
@@ -488,6 +534,14 @@ pub fn load_theme_colors(dir: &Path, theme: &mut ThemeContribution) -> Result<()
     .map_err(|error| invalid(format!("theme {}: {error}", theme.path.display())))?;
   theme.colors = check_theme_colors(&file.colors)
     .map_err(|error| invalid(format!("theme {}: {error}", theme.path.display())))?;
+  Ok(())
+}
+
+/// Reads an icon theme's file and icons.
+pub fn load_icon_theme(dir: &Path, theme: &mut IconThemeContribution) -> Result<(), ManifestError> {
+  let loaded = icons::load(dir, &theme.path)
+    .map_err(|error| invalid(format!("icon theme {}: {error}", theme.path.display())))?;
+  theme.theme = Arc::new(loaded);
   Ok(())
 }
 

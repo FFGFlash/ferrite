@@ -40,6 +40,7 @@ const tidy: ExtensionStatus = {
   configErrors: ['width must be at least 0; using the default'],
   contributions: {
     themes: [{ id: 'example.tidy.night', label: 'Night', kind: 'dark', colors: {} }],
+    iconThemes: [],
     keybindings: [],
     menus: [],
     views: [],

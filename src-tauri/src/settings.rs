@@ -32,6 +32,7 @@ const TEMPLATE: &str = r##"# Ferrite settings. Uncomment a line to change it; sa
 
 [workbench]
 # theme = "system"          # "system", "dark", "light", or an extension's theme id
+# icon_theme = "default"    # file icons: "default" or an extension's icon theme id
 #
 # Override theme colors (hex), e.g. the editor background:
 # [workbench.colors]
@@ -86,6 +87,9 @@ const TEMPLATE: &str = r##"# Ferrite settings. Uncomment a line to change it; sa
 /// Built-in theme names; other values name a theme contributed by an
 /// extension (`<extension id>.<theme id>`).
 pub const BUILTIN_THEMES: &[&str] = &["system", "dark", "light"];
+/// The built-in file icon theme; other values name one contributed by an
+/// extension (`<extension id>.<icon theme id>`).
+pub const DEFAULT_ICON_THEME: &str = "default";
 
 #[derive(Debug, Clone, PartialEq, Deserialize, Default)]
 #[serde(default, deny_unknown_fields)]
@@ -151,6 +155,7 @@ pub struct EditorSettings {
 #[serde(default, deny_unknown_fields)]
 pub struct WorkbenchSettings {
   pub theme: String,
+  pub icon_theme: String,
   /// Theme color overrides: token to hex color.
   pub colors: BTreeMap<String, String>,
 }
@@ -159,6 +164,7 @@ impl Default for WorkbenchSettings {
   fn default() -> Self {
     Self {
       theme: "system".into(),
+      icon_theme: DEFAULT_ICON_THEME.into(),
       colors: BTreeMap::new(),
     }
   }
@@ -236,6 +242,7 @@ impl Default for SearchSettings {
 #[serde(rename_all = "camelCase")]
 pub struct FrontendSettings {
   pub theme: String,
+  pub icon_theme: String,
   pub colors: BTreeMap<String, String>,
   /// Command id to normalized keys; empty removes the defaults.
   pub keybindings: BTreeMap<String, Vec<String>>,
@@ -288,6 +295,12 @@ impl Settings {
       return Err(format!(
         "workbench.theme must be one of {}, or an extension's theme id",
         BUILTIN_THEMES.join(", ")
+      ));
+    }
+    let icon_theme = self.workbench.icon_theme.trim();
+    if icon_theme.is_empty() || icon_theme.len() > 128 {
+      return Err(format!(
+        "workbench.icon_theme must be \"{DEFAULT_ICON_THEME}\" or an extension's icon theme id"
       ));
     }
     check_theme_colors(&self.workbench.colors)
@@ -358,6 +371,7 @@ impl Settings {
   pub fn frontend(&self) -> FrontendSettings {
     FrontendSettings {
       theme: self.workbench.theme.trim().to_owned(),
+      icon_theme: self.workbench.icon_theme.trim().to_owned(),
       // Validated on load.
       colors: check_theme_colors(&self.workbench.colors).unwrap_or_default(),
       keybindings: self
@@ -511,6 +525,20 @@ pub fn settings_set_theme(app: AppHandle, theme: String) -> Result<(), CommandEr
   })
 }
 
+/// Sets `workbench.icon_theme` in the settings file, keeping its comments
+/// and formatting, and applies it.
+#[tauri::command]
+pub fn settings_set_icon_theme(app: AppHandle, icon_theme: String) -> Result<(), CommandError> {
+  let name = icon_theme.as_str();
+  edit(&app, |document| {
+    if !document.contains_table("workbench") {
+      document["workbench"] = toml_edit::table();
+    }
+    document["workbench"]["icon_theme"] = toml_edit::value(name);
+    Ok(())
+  })
+}
+
 /// Changes the settings file with `change`, keeping its comments and
 /// formatting, and applies the result.
 pub fn edit(
@@ -559,6 +587,8 @@ mod tests {
     assert!(range.contains("tab_size"));
     let theme = Settings::parse("[workbench]\ntheme = \"\"\n").expect_err("empty theme");
     assert!(theme.contains("workbench.theme"), "{theme}");
+    let icons = Settings::parse("[workbench]\nicon_theme = \" \"\n").expect_err("empty");
+    assert!(icons.contains("workbench.icon_theme"), "{icons}");
     let color = Settings::parse("[workbench.colors]\ntext = \"red\"\n").expect_err("bad color");
     assert!(color.contains("workbench.colors"), "{color}");
     let key = Settings::parse("[keybindings]\n\"file.save\" = \"hyper+s\"\n").expect_err("bad key");
@@ -576,6 +606,7 @@ mod tests {
       r##"
 [workbench]
 theme = "example.themes.night"
+icon_theme = " example.icons.colorful "
 [workbench.colors]
 editor-background = "#ABCDEF"
 [keybindings]
@@ -586,6 +617,7 @@ editor-background = "#ABCDEF"
     .expect("valid");
     let frontend = settings.frontend();
     assert_eq!(frontend.theme, "example.themes.night");
+    assert_eq!(frontend.icon_theme, "example.icons.colorful");
     assert_eq!(frontend.colors["editor-background"], "#abcdef");
     assert_eq!(frontend.keybindings["file.save"], ["ctrl+s", "f2"]);
     assert!(frontend.keybindings["workbench.showSearch"].is_empty());

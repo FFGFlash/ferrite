@@ -57,6 +57,12 @@
   background: var(--color-list-active-background);
 }
 
+.palette__icon {
+  flex: none;
+  align-self: center;
+  color: var(--color-explorer-file-icon);
+}
+
 .palette__label {
   color: var(--color-text);
 }

@@ -1,0 +1,53 @@
+# Colorful: an example file icon theme. Icon paths are relative to this
+# file. Files and folders this theme doesn't match use its `file` and
+# `folder` icons; without those, Ferrite's built-in icons.
+
+file = "file"
+folder = "folder"
+folder_expanded = "folder-open"
+
+[icons]
+file = "file.svg"
+folder = "folder.svg"
+folder-open = "folder-open.svg"
+folder-light = "folder-light.svg"
+folder-open-light = "folder-open-light.svg"
+folder-src = "folder-src.svg"
+folder-src-open = "folder-src-open.svg"
+rust = "rust.svg"
+typescript = "typescript.svg"
+javascript = "javascript.svg"
+json = "json.svg"
+markdown = "markdown.svg"
+toml = "toml.svg"
+git = "git.svg"
+
+# Without the leading dot. The longest match wins, so "d.ts" beats "ts".
+[file_extensions]
+rs = "rust"
+ts = "typescript"
+tsx = "typescript"
+js = "javascript"
+mjs = "javascript"
+jsx = "javascript"
+json = "json"
+md = "markdown"
+toml = "toml"
+
+# Exact names, ignoring case. These beat extensions.
+[file_names]
+".gitignore" = "git"
+".gitattributes" = "git"
+"cargo.toml" = "rust"
+"cargo.lock" = "rust"
+
+[folder_names]
+src = "folder-src"
+
+[folder_names_expanded]
+src = "folder-src-open"
+
+# With light color themes, these are looked up first.
+[light]
+folder = "folder-light"
+folder_expanded = "folder-open-light"

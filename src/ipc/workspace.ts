@@ -64,6 +64,8 @@ export type Theme = string
 
 export interface FrontendSettings {
   theme: Theme
+  /** `default` or a contributed icon theme's id. */
+  iconTheme: string
   /** Theme color overrides: token (without `--color-`) to hex color. */
   colors: Record<string, string>
   /** Command id to keys, replacing the defaults; empty removes them. */
@@ -125,6 +127,8 @@ export function searchWorkspace(
 export const getSettings = () => call<FrontendSettings>('settings_get')
 export const settingsFilePath = () => call<string>('settings_file')
 export const setTheme = (theme: Theme) => call<void>('settings_set_theme', { theme })
+export const setIconTheme = (iconTheme: string) =>
+  call<void>('settings_set_icon_theme', { iconTheme })
 
 export const getSavedUi = () => call<SavedUi>('ui_state_get')
 export const saveUi = (layout: Record<string, unknown>, activeFile: string | null) =>

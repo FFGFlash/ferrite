@@ -378,6 +378,7 @@ EditorView = { version, lineCount, startLine, endLine,
 | `workspace_find_files`                                        | Fuzzy Go to File over the index                        |
 | `workspace_search`, `workspace_search_cancel`                 | Streaming find in files                                |
 | `settings_get`, `settings_file`, `settings_set_theme`         | Frontend settings, the settings file path, theme       |
+| `settings_set_icon_theme`                                     | File icon theme                                        |
 | `ui_state_get`, `ui_state_save`                               | Saved layout and active file                           |
 | `events_subscribe`                                            | Register the backend event channel                     |
 | `perf_stats`                                                  | Backend timings, scheduler statistics, memory          |
@@ -528,6 +529,7 @@ them. Extensions fill in content through the `workbench` interface (API 1.1).
 | Contribution     | Declared                               | Filled in by the extension                        | Rendered by                        |
 | ---------------- | -------------------------------------- | ------------------------------------------------- | ---------------------------------- |
 | Themes           | base kind + theme file of token colors | (nothing: no code needed)                         | `themes/theme.ts`, `appearance.ts` |
+| File icon themes | theme file of icons and associations   | (nothing: no code needed)                         | `components/fileIcons.ts`          |
 | Keybindings      | key, macOS key, `editorFocus`          | —                                                 | the command registry               |
 | Menu items       | location, command, group               | — (explorer items get the path as argument)       | `components/ContextMenu`           |
 | Status bar items | alignment, priority, initial text      | `set-status-item`                                 | `StatusBar`                        |
@@ -543,6 +545,11 @@ them. Extensions fill in content through the `workbench` interface (API 1.1).
   styled runs. Colors are validated hex colors, applied through CSS variables and inline styles.
 - **Themes** apply after their extension loads. The frontend re-resolves `workbench.theme`
   whenever the extension list changes, falling back to the system theme while it isn't loaded.
+- **File icon themes** ([ADR 0009](adr/0009-file-icon-themes.md)) are loaded and checked with
+  the manifest (`ferrite-extension-host/src/icons.rs`). They're left out of the extension list,
+  and the frontend fetches the one named by `workbench.icon_theme` with `extensions_icon_theme`
+  (`state/iconTheme.ts`). Icons arrive as `data:` URLs and are drawn with `<img>`. Until the
+  theme loads, and for anything it doesn't match, the explorer and Go to File use the built-in Lucide icons.
 - **Command arguments.** View items and explorer menu items run their command with an argument,
   which the extension reads with `workbench::command-argument()` during that command.
 - **`reveal`** asks the frontend to activate a document and select a range; **`show-view`** opens

@@ -1,13 +1,15 @@
 import { useMemo, useRef, useState, type KeyboardEvent, type RefObject } from 'react'
-import { CopyMinus, FilePlus, Folder, FolderOpen, FolderPlus } from 'lucide-react'
+import { CopyMinus, FilePlus, FolderOpen, FolderPlus } from 'lucide-react'
 import { executeCommand, primaryKeybinding, getCommand } from '../commands/registry'
 import type { DirectoryEntry } from '../ipc/workspace'
 import { openContextMenu, type MenuEntry } from '../components/contextMenuState'
 import { documentsStore, openPath } from '../state/documents'
+import { iconThemeStore, type LoadedIconTheme } from '../state/iconTheme'
 import { contributedMenuItems, runContributed } from '../state/extensions'
 import { layoutStore } from '../state/layout'
 import { reportError } from '../state/notifications'
 import { useStore } from '../state/store'
+import { themeKind } from '../themes/theme'
 import {
   createEntry,
   openFolder,
@@ -22,7 +24,8 @@ import {
   setFocused,
   type PendingCreate,
 } from './explorerState'
-import { fileIcon } from './fileIcons'
+import { FileIcon } from '../components/FileIcon'
+import { entryIcon } from '../components/fileIcons'
 import './ExplorerPanel.css'
 
 const createEntries = (target: string): MenuEntry[] => [
@@ -63,6 +66,8 @@ export function ExplorerPanel() {
   const { expanded } = useStore(layoutStore)
   const { documents, activeId } = useStore(documentsStore)
   const { focused, creating } = useStore(explorerStore)
+  const iconTheme = useStore(iconThemeStore)
+  const light = useStore(themeKind) === 'light'
   const treeRef = useRef<HTMLUListElement>(null)
   const activePath = documents.find(document => document.id === activeId)?.path ?? null
 
@@ -117,6 +122,8 @@ export function ExplorerPanel() {
       pending={creating}
       depth={inputDepth}
       siblings={listings.get(creating.parent)}
+      iconTheme={iconTheme}
+      light={light}
       treeRef={treeRef}
     />
   )
@@ -201,11 +208,8 @@ export function ExplorerPanel() {
       >
         {inputIndex === 0 && nameInput}
         {rows.map((row, index) => {
-          const Icon = row.entry.directory
-            ? row.expanded
-              ? FolderOpen
-              : Folder
-            : fileIcon(row.entry.name)
+          const folder = row.entry.directory ? { expanded: row.expanded } : null
+          const icon = entryIcon(row.entry.name, folder, iconTheme, light)
           return [
             <li
               key={row.entry.path}
@@ -229,12 +233,10 @@ export function ExplorerPanel() {
               <span className="explorer-tree__chevron" aria-hidden="true">
                 {row.entry.directory ? (row.expanded ? '▾' : '▸') : ''}
               </span>
-              <Icon
+              <FileIcon
+                icon={icon}
+                kind={folder ? 'folder' : 'file'}
                 className="explorer-tree__icon"
-                data-kind={row.entry.directory ? 'folder' : 'file'}
-                size={16}
-                strokeWidth={1.5}
-                aria-hidden="true"
               />
               <span className="explorer-tree__name">{row.entry.name}</span>
             </li>,
@@ -267,6 +269,8 @@ interface NameInputProps {
   /** The parent's listing, to warn about a name that is taken. */
   siblings: Listing | undefined
   treeRef: RefObject<HTMLUListElement | null>
+  iconTheme: LoadedIconTheme | null
+  light: boolean
 }
 
 /**
@@ -274,7 +278,7 @@ interface NameInputProps {
  * field open if that fails; Escape cancels. Leaving the field creates it if
  * a name was typed.
  */
-function NameInput({ pending, depth, siblings, treeRef }: NameInputProps) {
+function NameInput({ pending, depth, siblings, treeRef, iconTheme, light }: NameInputProps) {
   const [name, setName] = useState('')
   const [error, setError] = useState<string | null>(null)
   // Set once the field has been submitted or cancelled, so a blur as it
@@ -319,7 +323,8 @@ function NameInput({ pending, depth, siblings, treeRef }: NameInputProps) {
       }
     }
   }
-  const Icon = pending.directory ? Folder : fileIcon(name.trim())
+  const folder = pending.directory ? { expanded: false } : null
+  const icon = entryIcon(name.trim(), folder, iconTheme, light)
   return (
     <li
       className="explorer-tree__row explorer-tree__row--input"
@@ -330,13 +335,7 @@ function NameInput({ pending, depth, siblings, treeRef }: NameInputProps) {
       style={indent(depth)}
     >
       <span className="explorer-tree__chevron" aria-hidden="true" />
-      <Icon
-        className="explorer-tree__icon"
-        data-kind={kind}
-        size={16}
-        strokeWidth={1.5}
-        aria-hidden="true"
-      />
+      <FileIcon icon={icon} kind={kind} className="explorer-tree__icon" />
       <input
         className="explorer-tree__input"
         aria-label={`${pending.directory ? 'Folder' : 'File'} name`}

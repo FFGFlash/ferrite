@@ -1,6 +1,6 @@
 /**
  * Settings from `settings.toml` that the frontend applies: theme (built-in
- * or contributed by an extension) and color overrides, editor font, and
+ * or contributed by an extension) and color overrides, file icon theme, editor font, and
  * keybinding overrides. The editor's line height derives from the font
  * size.
  */
@@ -8,6 +8,7 @@ import { setKeybindingOverrides } from '../commands/registry'
 import type { FrontendSettings, Theme } from '../ipc/workspace'
 import { applyTheme, followSystemTheme, type ThemeKind } from '../themes/theme'
 import { extensionsStore, usableExtensions } from './extensions'
+import { setActiveIconTheme } from './iconTheme'
 import { createStore } from './store'
 
 export interface Appearance {
@@ -69,6 +70,7 @@ export function applySettings(settings: FrontendSettings): void {
     lineHeight: lineHeightFor(settings.fontSize),
   })
   applyColors(settings)
+  setActiveIconTheme(settings.iconTheme)
   setKeybindingOverrides(settings.keybindings)
 
   const root = document.documentElement.style

@@ -25,6 +25,7 @@ mod api;
 mod config;
 pub mod contributions;
 mod host;
+pub mod icons;
 pub mod keys;
 pub mod manifest;
 mod permissions;

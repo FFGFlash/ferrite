@@ -65,7 +65,14 @@ describe('accessibility (axe)', () => {
         ],
         commands: [{ id: 'example.tidy.trim', title: 'Trim', category: 'Tidy', hidden: false }],
         configErrors: ['max_line_length: expected an integer'],
-        contributions: { themes: [], keybindings: [], menus: [], views: [], decorations: [] },
+        contributions: {
+          themes: [],
+          iconThemes: [],
+          keybindings: [],
+          menus: [],
+          views: [],
+          decorations: [],
+        },
         usage: {
           busyMs: 12,
           calls: 3,

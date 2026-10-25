@@ -18,6 +18,8 @@ const { CommandError } = await import('../ipc/index')
 const { setWorkspace } = await import('../state/workspace')
 const { DEFAULT_LAYOUT, layoutStore } = await import('../state/layout')
 const { notifications } = await import('../state/notifications')
+const { iconThemeStore } = await import('../state/iconTheme')
+const { themeKind } = await import('../themes/theme')
 const { ExplorerActions, ExplorerPanel } = await import('./ExplorerPanel')
 const { explorerStore } = await import('./explorerState')
 const { contextMenuStore } = await import('../components/contextMenuState')
@@ -122,6 +124,48 @@ describe('ExplorerPanel', () => {
       .getAllByRole('treeitem')
       .map(item => item.querySelector('svg')?.dataset.kind)
     expect(kinds).toEqual(['folder', 'folder', 'file'])
+  })
+
+  it("shows the icon theme's images where it has them", async () => {
+    const none = {
+      file: null,
+      folder: null,
+      folderExpanded: null,
+      fileExtensions: new Map<string, string>(),
+      fileNames: new Map<string, string>(),
+      folderNames: new Map<string, string>(),
+      folderNamesExpanded: new Map<string, string>(),
+    }
+    iconThemeStore.set({
+      id: 'example.icons.colorful',
+      icons: new Map([
+        ['src', 'data:image/svg+xml;base64,c3Jj'],
+        ['md', 'data:image/svg+xml;base64,bWQ='],
+      ]),
+      associations: { ...none, folderNames: new Map([['src', 'src']]) },
+      light: { ...none, fileExtensions: new Map([['md', 'md']]) },
+    })
+    try {
+      const tree = await renderTree()
+      const icons = within(tree)
+        .getAllByRole('treeitem')
+        .map(item => item.querySelector('.explorer-tree__icon'))
+      expect(icons[0]).toHaveAttribute('src', 'data:image/svg+xml;base64,c3Jj')
+      expect(icons[0]).toHaveAttribute('alt', '')
+      expect(icons[1]?.tagName).toBe('svg')
+      // The light section only applies with a light color theme.
+      expect(icons[2]?.tagName).toBe('svg')
+      act(() => themeKind.set('light'))
+      expect(within(tree).getByText('README.md').previousElementSibling).toHaveAttribute(
+        'src',
+        'data:image/svg+xml;base64,bWQ=',
+      )
+    } finally {
+      act(() => {
+        iconThemeStore.set(null)
+        themeKind.set('dark')
+      })
+    }
   })
 
   it('creates a file at the root from the header and opens it', async () => {

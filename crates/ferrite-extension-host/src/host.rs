@@ -24,6 +24,7 @@ use crate::bindings::ferrite::extension::types::{
   ApiError, CommandContext, DocumentInfo, Range as WitRange, TextChange,
 };
 use crate::config::{self, ConfigValue};
+use crate::icons::IconTheme;
 use crate::manifest::{self, MANIFEST_FILE, Manifest};
 use crate::permissions::{Decision, Decisions, Permission};
 use crate::runtime::{MemoryPool, Runtime};
@@ -876,6 +877,19 @@ impl ExtensionHost {
       }
     }));
     statuses
+  }
+
+  /// An icon theme (`<extension id>.<icon theme id>`) from an extension that
+  /// isn't turned off.
+  pub fn icon_theme(&self, id: &str) -> Option<Arc<IconTheme>> {
+    let state = self.shared.lock();
+    state
+      .extensions
+      .iter()
+      .filter(|entry| !state.decisions.get(&entry.manifest.id).disabled)
+      .flat_map(|entry| &entry.manifest.contributions.icon_themes)
+      .find(|theme| theme.id == id)
+      .map(|theme| theme.theme.clone())
   }
 
   /// Runs an extension command, starting the extension if needed.

@@ -1,7 +1,7 @@
 /**
  * Extensions as the workbench sees them: their status (for the Extensions
- * view), their contributions (commands with keybindings, themes, menu
- * items, views, decoration types, status bar items), permission prompts,
+ * view), their contributions (commands with keybindings, themes, icon
+ * themes, menu items, views, decoration types, status bar items), permission prompts,
  * and their messages and failures.
  */
 import { useEffect, useState } from 'react'
@@ -20,7 +20,7 @@ import {
   type ResourceUsage,
   type StatusItem,
 } from '../ipc/extensions'
-import { setTheme } from '../ipc/workspace'
+import { setIconTheme, setTheme } from '../ipc/workspace'
 import { updateLayout } from './layout'
 import { notify, reportError } from './notifications'
 import { createStore } from './store'
@@ -154,7 +154,16 @@ function registerContributedCommands(statuses: readonly ExtensionStatus[]): void
       run: () => setTheme(theme.id),
     })),
   )
-  unregisterCommands = registerCommands([...commands, ...themes])
+  const iconThemes: Command[] = usable.flatMap(extension =>
+    extension.contributions.iconThemes.map(theme => ({
+      id: `preferences.iconTheme.${theme.id}`,
+      category: 'Preferences',
+      title: `File Icon Theme: ${theme.label}`,
+      source: 'extension' as const,
+      run: () => setIconTheme(theme.id),
+    })),
+  )
+  unregisterCommands = registerCommands([...commands, ...themes, ...iconThemes])
 }
 
 /** A menu item contributed for `location`. */

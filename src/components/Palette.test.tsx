@@ -3,8 +3,16 @@ import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { registerCommands } from '../commands/registry'
 import { activeEditor, type EditorController } from '../editor/activeEditor'
+import { findFiles } from '../ipc/workspace'
+import { iconThemeStore } from '../state/iconTheme'
+import { workspaceStore } from '../state/workspace'
 import { Palette } from './Palette'
 import { openPalette, paletteStore } from './paletteState'
+
+vi.mock('../ipc/workspace', async importOriginal => ({
+  ...(await importOriginal<typeof import('../ipc/workspace')>()),
+  findFiles: vi.fn(),
+}))
 
 describe('Palette', () => {
   let unregister = () => {}
@@ -81,6 +89,52 @@ describe('Palette', () => {
     act(() => openPalette('>'))
     await user.keyboard('{Escape}')
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+  })
+
+  it('shows file results with their icons', async () => {
+    vi.mocked(findFiles).mockResolvedValue({
+      files: [
+        { path: '/w/src/main.rs', relative: 'src/main.rs', indices: [4] },
+        { path: '/w/README.md', relative: 'README.md', indices: [] },
+      ],
+      indexing: false,
+      truncated: false,
+    })
+    const none = {
+      file: null,
+      folder: null,
+      folderExpanded: null,
+      fileExtensions: new Map<string, string>(),
+      fileNames: new Map<string, string>(),
+      folderNames: new Map<string, string>(),
+      folderNamesExpanded: new Map<string, string>(),
+    }
+    workspaceStore.set({ info: { root: '/w', name: 'w' }, listings: new Map(), indexing: false })
+    try {
+      render(<Palette />)
+      act(() => openPalette(''))
+      const options = await screen.findAllByRole('option')
+      expect(options.map(option => option.textContent)).toEqual(['main.rssrc', 'README.md'])
+      const icons = options.map(option => option.querySelector('.palette__icon'))
+      expect(icons.map(icon => icon?.tagName)).toEqual(['svg', 'svg'])
+
+      act(() =>
+        iconThemeStore.set({
+          id: 'example.icons.colorful',
+          icons: new Map([['rust', 'data:image/svg+xml;base64,cnM=']]),
+          associations: { ...none, fileExtensions: new Map([['rs', 'rust']]) },
+          light: none,
+        }),
+      )
+      const rust = screen.getAllByRole('option')[0]?.querySelector('.palette__icon')
+      expect(rust).toHaveAttribute('src', 'data:image/svg+xml;base64,cnM=')
+      expect(rust).toHaveAttribute('alt', '')
+    } finally {
+      act(() => {
+        iconThemeStore.set(null)
+        workspaceStore.set({ info: null, listings: new Map(), indexing: false })
+      })
+    }
   })
 
   it('explains that files need an open folder', () => {

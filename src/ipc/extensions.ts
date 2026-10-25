@@ -39,6 +39,33 @@ export interface ThemeContribution {
   colors: Record<string, string>
 }
 
+export interface IconThemeContribution {
+  /** `<extension id>.<icon theme id>`. */
+  id: string
+  label: string
+}
+
+/** Icon ids by what they are for. Names and extensions are lowercase. */
+export interface IconAssociations {
+  file: string | null
+  folder: string | null
+  folderExpanded: string | null
+  /** Without the leading dot, e.g. `rs` or `d.ts`. */
+  fileExtensions: Record<string, string>
+  fileNames: Record<string, string>
+  folderNames: Record<string, string>
+  folderNamesExpanded: Record<string, string>
+}
+
+/** A file icon theme (`extensions_icon_theme`). */
+export interface IconTheme {
+  /** Icon id to a `data:` URL. */
+  icons: Record<string, string>
+  associations: IconAssociations
+  /** Looked up before `associations` with a light color theme. */
+  light: IconAssociations
+}
+
 export interface KeybindingContribution {
   command: string
   key: string
@@ -82,6 +109,7 @@ export interface DecorationType {
 
 export interface Contributions {
   themes: ThemeContribution[]
+  iconThemes: IconThemeContribution[]
   keybindings: KeybindingContribution[]
   menus: MenuContribution[]
   views: ViewContribution[]
@@ -157,6 +185,8 @@ export const runExtensionCommand = (
   documentId: number | null,
   argument: string | null = null,
 ) => call<void>('extension_run_command', { command, documentId, argument })
+/** A file icon theme with its icons; `null` if no enabled extension has it. */
+export const getIconTheme = (id: string) => call<IconTheme | null>('extensions_icon_theme', { id })
 export const listStatusItems = () => call<StatusItem[]>('extension_status_items')
 export const getViewContent = (view: string) => call<ViewContent>('extension_view', { view })
 /** Tells the backend a view is shown, which may start its extension. */

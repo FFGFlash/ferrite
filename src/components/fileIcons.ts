@@ -1,4 +1,7 @@
-/** Which icon the explorer shows for a file, from its name. */
+/**
+ * Which icon the explorer shows for a file or folder: from the active icon
+ * theme if it has one, otherwise built in.
+ */
 import {
   File,
   FileArchive,
@@ -15,8 +18,11 @@ import {
   FileText,
   FileType,
   FileVideoCamera,
+  Folder,
+  FolderOpen,
   type LucideIcon,
 } from 'lucide-react'
+import type { Associations, LoadedIconTheme } from '../state/iconTheme'
 
 const byExtension = new Map<string, LucideIcon>()
 const byName = new Map<string, LucideIcon>()
@@ -56,7 +62,68 @@ add(
 add(byName, FileLock, 'package-lock.json pnpm-lock.yaml yarn.lock')
 add(byName, FileText, 'readme license licence changelog authors contributing')
 
-/** The icon for a file called `name`. */
+/** An image from an icon theme, or a built-in icon. */
+export type EntryIcon = { src: string } | { Icon: LucideIcon }
+
+/**
+ * The icon for a file or folder called `name`. The theme's matches come
+ * first, then its default file or folder icon, then the built-in icons.
+ */
+export function entryIcon(
+  name: string,
+  folder: { expanded: boolean } | null,
+  theme: LoadedIconTheme | null,
+  light: boolean,
+): EntryIcon {
+  const id = theme && themedIcon(theme, name.toLowerCase(), folder, light)
+  const src = id ? theme?.icons.get(id) : undefined
+  if (src) {
+    return { src }
+  }
+  return { Icon: folder ? (folder.expanded ? FolderOpen : Folder) : fileIcon(name) }
+}
+
+function themedIcon(
+  theme: LoadedIconTheme,
+  name: string,
+  folder: { expanded: boolean } | null,
+  light: boolean,
+): string | null {
+  const sections = light ? [theme.light, theme.associations] : [theme.associations]
+  const first = (pick: (associations: Associations) => string | null | undefined) => {
+    for (const section of sections) {
+      const id = pick(section)
+      if (id) {
+        return id
+      }
+    }
+    return null
+  }
+  if (folder) {
+    return (
+      (folder.expanded ? first(a => a.folderNamesExpanded.get(name)) : null) ??
+      first(a => a.folderNames.get(name)) ??
+      (folder.expanded ? first(a => a.folderExpanded) : null) ??
+      first(a => a.folder)
+    )
+  }
+  const byFileName = first(a => a.fileNames.get(name))
+  if (byFileName) {
+    return byFileName
+  }
+  // Longest extension first: `d.ts`, then `ts`. A leading dot starts a
+  // name (`.eslintrc.json`), not an extension.
+  for (let dot = name.indexOf('.', 1); dot >= 0; dot = name.indexOf('.', dot + 1)) {
+    const extension = name.slice(dot + 1)
+    const id = first(a => a.fileExtensions.get(extension))
+    if (id) {
+      return id
+    }
+  }
+  return first(a => a.file)
+}
+
+/** The built-in icon for a file called `name`. */
 export function fileIcon(name: string): LucideIcon {
   const lower = name.toLowerCase()
   const dot = lower.lastIndexOf('.')
