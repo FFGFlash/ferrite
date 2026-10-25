@@ -86,6 +86,8 @@
   --color-list-active-background: rgb(143 184 222 / 0.18);
   --color-list-focus-outline: var(--color-focus-ring);
   --color-text-ignored: #6b717d;
+  --color-explorer-folder-icon: #d2a865;
+  --color-explorer-file-icon: var(--color-text-muted);
   --color-text-highlight: var(--color-accent);
   --color-overlay-backdrop: rgb(0 0 0 / 0.3);
   --color-button-background: #2f6ea8;
@@ -162,6 +164,7 @@
   --color-list-hover-background: rgb(0 0 0 / 0.04);
   --color-list-active-background: rgb(47 110 168 / 0.14);
   --color-text-ignored: #9aa0aa;
+  --color-explorer-folder-icon: #9a6b1f;
   --color-overlay-backdrop: rgb(0 0 0 / 0.15);
   --color-button-background: #2f6ea8;
   --color-button-foreground: #ffffff;

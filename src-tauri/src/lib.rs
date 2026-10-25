@@ -148,6 +148,7 @@ pub fn run() {
       workspace::workspace_open_dialog,
       workspace::workspace_close,
       workspace::workspace_list_dir,
+      workspace::workspace_create,
       workspace::workspace_find_files,
       workspace::workspace_search,
       workspace::workspace_search_cancel,

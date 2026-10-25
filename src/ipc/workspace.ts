@@ -20,6 +20,12 @@ export interface DirectoryEntry {
   ignored: boolean
 }
 
+export interface CreatedEntry {
+  path: string
+  /** Folders whose listings gained an entry, outermost first. */
+  directories: string[]
+}
+
 export interface FileResult {
   path: string
   relative: string
@@ -100,6 +106,9 @@ export const openWorkspaceDialog = () => call<WorkspaceInfo | null>('workspace_o
 export const closeWorkspace = () => call<void>('workspace_close')
 export const listDirectory = (path: string) =>
   call<DirectoryEntry[]>('workspace_list_dir', { path })
+/** Creates an empty file or a folder; `name` may include subfolders (`src/lib.rs`). */
+export const createEntry = (parent: string, name: string, directory: boolean) =>
+  call<CreatedEntry>('workspace_create', { parent, name, directory })
 export const findFiles = (query: string) => call<FindFilesResult>('workspace_find_files', { query })
 export const cancelSearch = () => call<void>('workspace_search_cancel')
 

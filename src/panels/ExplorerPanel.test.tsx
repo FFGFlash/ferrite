@@ -5,6 +5,7 @@ import type { DirectoryEntry } from '../ipc/workspace'
 
 vi.mock('../ipc/workspace', () => ({
   listDirectory: vi.fn(),
+  createEntry: vi.fn(),
   getWorkspace: vi.fn(),
   openWorkspaceDialog: vi.fn(),
   closeWorkspace: vi.fn(),
@@ -13,9 +14,12 @@ vi.mock('../ipc/editor', () => ({ openDocument: vi.fn() }))
 
 const ipc = await import('../ipc/workspace')
 const editorIpc = await import('../ipc/editor')
+const { CommandError } = await import('../ipc/index')
 const { setWorkspace } = await import('../state/workspace')
 const { DEFAULT_LAYOUT, layoutStore } = await import('../state/layout')
-const { ExplorerPanel } = await import('./ExplorerPanel')
+const { notifications } = await import('../state/notifications')
+const { ExplorerActions, ExplorerPanel } = await import('./ExplorerPanel')
+const { explorerStore } = await import('./explorerState')
 const { contextMenuStore } = await import('../components/contextMenuState')
 
 const entry = (path: string, directory = false, ignored = false): DirectoryEntry => ({
@@ -25,16 +29,24 @@ const entry = (path: string, directory = false, ignored = false): DirectoryEntry
   ignored,
 })
 
-const listings: Record<string, DirectoryEntry[]> = {
-  '/w': [entry('/w/src', true), entry('/w/target', true, true), entry('/w/README.md')],
-  '/w/src': [entry('/w/src/main.rs')],
-}
+let listings: Record<string, DirectoryEntry[]>
 
 describe('ExplorerPanel', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     layoutStore.set(DEFAULT_LAYOUT)
+    explorerStore.set({ focused: null, creating: null })
+    notifications.set([])
+    listings = {
+      '/w': [entry('/w/src', true), entry('/w/target', true, true), entry('/w/README.md')],
+      '/w/src': [entry('/w/src/main.rs')],
+    }
     vi.mocked(ipc.listDirectory).mockImplementation(async path => listings[path] ?? [])
+    vi.mocked(ipc.createEntry).mockImplementation(async (parent, name, directory) => {
+      const path = `${parent}/${name}`
+      listings[parent] = [...(listings[parent] ?? []), entry(path, directory)]
+      return { path, directories: [parent] }
+    })
     vi.mocked(editorIpc.openDocument).mockResolvedValue({
       id: 1,
       title: 'README.md',
@@ -46,7 +58,12 @@ describe('ExplorerPanel', () => {
   })
 
   async function renderTree() {
-    render(<ExplorerPanel />)
+    render(
+      <>
+        <ExplorerActions />
+        <ExplorerPanel />
+      </>,
+    )
     await act(async () => setWorkspace({ root: '/w', name: 'w' }))
     return screen.getByRole('tree', { name: 'w' })
   }
@@ -97,5 +114,125 @@ describe('ExplorerPanel', () => {
     await user.keyboard('{End}')
     fireEvent.contextMenu(tree)
     expect(contextMenuStore.get()?.entries[0]).toMatchObject({ label: 'Open' })
+  })
+
+  it('shows folder and file icons', async () => {
+    const tree = await renderTree()
+    const kinds = within(tree)
+      .getAllByRole('treeitem')
+      .map(item => item.querySelector('svg')?.dataset.kind)
+    expect(kinds).toEqual(['folder', 'folder', 'file'])
+  })
+
+  it('creates a file at the root from the header and opens it', async () => {
+    const user = userEvent.setup()
+    const tree = await renderTree()
+    await user.click(screen.getByRole('button', { name: 'New File' }))
+    const input = within(tree).getByRole('textbox', { name: 'File name' })
+    expect(input).toHaveFocus()
+    expect(input.closest('li')).toHaveAttribute('aria-level', '1')
+
+    await user.type(input, 'notes.md{Enter}')
+    expect(ipc.createEntry).toHaveBeenCalledWith('/w', 'notes.md', false)
+    expect(await within(tree).findByText('notes.md')).toBeInTheDocument()
+    expect(within(tree).queryByRole('textbox')).not.toBeInTheDocument()
+    expect(within(tree).getByText('notes.md').closest('li')).toHaveAttribute('data-focused')
+    expect(editorIpc.openDocument).toHaveBeenCalledWith('/w/notes.md')
+  })
+
+  it("creates a folder inside a folder from the folder's menu", async () => {
+    const user = userEvent.setup()
+    const tree = await renderTree()
+    fireEvent.contextMenu(within(tree).getByText('src'))
+    const menu = contextMenuStore.get()
+    expect(menu?.entries.map(item => item?.label)).toEqual(['New File…', 'New Folder…'])
+    await act(async () => menu?.entries[1]?.run())
+
+    expect(layoutStore.get().expanded).toEqual(['/w/src'])
+    const input = await within(tree).findByRole('textbox', { name: 'Folder name' })
+    expect(input.closest('li')).toHaveAttribute('aria-level', '2')
+    await user.type(input, 'net{Enter}')
+    expect(ipc.createEntry).toHaveBeenCalledWith('/w/src', 'net', true)
+    expect(await within(tree).findByText('net')).toBeInTheDocument()
+    expect(tree).toHaveFocus()
+    expect(editorIpc.openDocument).not.toHaveBeenCalled()
+  })
+
+  it("creates beside the focused file and offers creation in a file's menu", async () => {
+    const user = userEvent.setup()
+    const tree = await renderTree()
+    await user.click(within(tree).getByText('src'))
+    fireEvent.contextMenu(await within(tree).findByText('main.rs'))
+    expect(contextMenuStore.get()?.entries.map(item => item?.label ?? null)).toEqual([
+      'Open',
+      null,
+      'New File…',
+      'New Folder…',
+    ])
+    act(() => contextMenuStore.set(null))
+
+    await user.click(screen.getByRole('button', { name: 'New File' }))
+    await user.type(within(tree).getByRole('textbox'), 'lib.rs{Enter}')
+    expect(ipc.createEntry).toHaveBeenCalledWith('/w/src', 'lib.rs', false)
+  })
+
+  it('creates at the top level from the space below the rows', async () => {
+    const user = userEvent.setup()
+    const tree = await renderTree()
+    await user.click(within(tree).getByText('src'))
+    await user.click(await within(tree).findByText('main.rs'))
+    const blank = document.querySelector('.explorer__blank')
+    expect(blank).not.toBeNull()
+    fireEvent.contextMenu(blank as Element)
+    const menu = contextMenuStore.get()
+    expect(menu?.entries.map(item => item?.label)).toEqual(['New File…', 'New Folder…'])
+    await act(async () => menu?.entries[0]?.run())
+
+    const input = within(tree).getByRole('textbox', { name: 'File name' })
+    expect(input.closest('li')).toHaveAttribute('aria-level', '1')
+    await user.type(input, 'top.txt{Enter}')
+    expect(ipc.createEntry).toHaveBeenCalledWith('/w', 'top.txt', false)
+  })
+
+  it('keeps the field open with the problem when creating fails', async () => {
+    const user = userEvent.setup()
+    const tree = await renderTree()
+    vi.mocked(ipc.createEntry).mockRejectedValueOnce(
+      new CommandError('invalidName', `".." can't be used as a name.`),
+    )
+    await user.click(screen.getByRole('button', { name: 'New Folder' }))
+    const input = within(tree).getByRole('textbox')
+    await user.type(input, '..{Enter}')
+    expect(await within(tree).findByRole('alert')).toHaveTextContent("can't be used as a name")
+    expect(input).toHaveAttribute('aria-invalid', 'true')
+    expect(input).toHaveFocus()
+
+    await user.keyboard('{Escape}')
+    expect(within(tree).queryByRole('textbox')).not.toBeInTheDocument()
+    expect(tree).toHaveFocus()
+    expect(notifications.get()).toEqual([])
+  })
+
+  it('warns about a name that is taken and cancels when left', async () => {
+    const user = userEvent.setup()
+    const tree = await renderTree()
+    await user.click(screen.getByRole('button', { name: 'New File' }))
+    await user.type(within(tree).getByRole('textbox'), 'readme.md')
+    expect(within(tree).getByRole('alert')).toHaveTextContent(
+      'A file or folder named README.md already exists here.',
+    )
+    await user.click(document.body)
+    expect(within(tree).queryByRole('textbox')).not.toBeInTheDocument()
+    expect(ipc.createEntry).not.toHaveBeenCalled()
+  })
+
+  it('creates the entry when the field is left with a new name', async () => {
+    const user = userEvent.setup()
+    const tree = await renderTree()
+    await user.click(screen.getByRole('button', { name: 'New File' }))
+    await user.type(within(tree).getByRole('textbox'), 'todo.txt')
+    await user.click(document.body)
+    expect(ipc.createEntry).toHaveBeenCalledWith('/w', 'todo.txt', false)
+    expect(await within(tree).findByText('todo.txt')).toBeInTheDocument()
   })
 })

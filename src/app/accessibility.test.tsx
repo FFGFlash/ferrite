@@ -10,6 +10,8 @@ import type { WireView } from '../ipc/editor'
 import { extensionsStore } from '../state/extensions'
 import { DEFAULT_LAYOUT, layoutStore } from '../state/layout'
 import { notifications, notify } from '../state/notifications'
+import { workspaceStore } from '../state/workspace'
+import { explorerStore } from '../panels/explorerState'
 import { axeViolations } from '../test/axe'
 import { Workbench } from './Workbench'
 
@@ -82,6 +84,30 @@ describe('accessibility (axe)', () => {
       await user.click(screen.getByRole('button', { name }))
       expect(await axeViolations(), name).toEqual([])
     }
+  })
+
+  it('finds no problems in the explorer while naming a new file', async () => {
+    const user = userEvent.setup()
+    const entry = (name: string, directory: boolean) => ({
+      name,
+      path: `/w/${name}`,
+      directory,
+      ignored: false,
+    })
+    workspaceStore.set({
+      info: { root: '/w', name: 'w' },
+      listings: new Map([['/w', [entry('src', true), entry('README.md', false)]]]),
+      indexing: false,
+    })
+    explorerStore.set({ focused: null, creating: { parent: '/w', directory: false } })
+    render(<Workbench appInfo={null} />)
+    await user.type(screen.getByRole('textbox', { name: 'File name' }), 'readme.md')
+    expect(screen.getByRole('alert')).toBeInTheDocument()
+    expect(await axeViolations()).toEqual([])
+    act(() => {
+      explorerStore.set({ focused: null, creating: null })
+      workspaceStore.set({ info: null, listings: new Map(), indexing: false })
+    })
   })
 
   it('finds no problems in the palette, menus, and notifications', async () => {

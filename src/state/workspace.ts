@@ -100,6 +100,29 @@ export function toggleFolder(path: string): void {
   updateLayout({ expanded: [...open] })
 }
 
+/**
+ * Creates a file or folder in `parent` and expands the folders down to it,
+ * returning its path. Failures are thrown for the caller to show.
+ */
+export async function createEntry(
+  parent: string,
+  name: string,
+  directory: boolean,
+): Promise<string> {
+  const created = await ipc.createEntry(parent, name, directory)
+  const root = workspaceStore.get().info?.root
+  const open = expanded()
+  for (const path of created.directories) {
+    if (path !== root) {
+      open.add(path)
+    }
+  }
+  updateLayout({ expanded: [...open] })
+  // Re-list now rather than waiting for the file watcher.
+  await Promise.all(created.directories.map(load))
+  return created.path
+}
+
 export function collapseAll(): void {
   updateLayout({ expanded: [] })
 }

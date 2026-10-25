@@ -1,9 +1,10 @@
-//! Filesystem access for Ferrite: loading and saving files, listing
-//! directories for the explorer, the Go to File index, find in files,
+//! Filesystem access for Ferrite: loading and saving files, listing and
+//! creating entries for the explorer, the Go to File index, find in files,
 //! change notifications, and backups of unsaved documents. This crate holds
 //! no editor state.
 
 mod backup;
+mod create;
 mod file;
 mod filters;
 mod index;
@@ -12,6 +13,7 @@ mod tree;
 mod watcher;
 
 pub use backup::{Abandoned, BackupMeta, BackupSession, RecoveredBackup};
+pub use create::{CreateError, Created, create_entry};
 pub use file::{
   FileError, FileStamp, LoadedFile, MAX_FILE_BYTES, load_text_file, save_text_file,
   write_file_atomically,

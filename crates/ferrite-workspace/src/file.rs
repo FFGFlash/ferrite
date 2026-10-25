@@ -60,6 +60,8 @@ pub enum FileError {
   PermissionDenied { path: PathBuf },
   #[error("{} is a directory", .path.display())]
   IsDirectory { path: PathBuf },
+  #[error("{} already exists", .path.display())]
+  AlreadyExists { path: PathBuf },
   #[error("{} is too large to open ({size} bytes; the limit is {limit} bytes)", .path.display())]
   TooLarge {
     path: PathBuf,
@@ -85,6 +87,7 @@ impl FileError {
       io::ErrorKind::NotFound => Self::NotFound { path },
       io::ErrorKind::PermissionDenied => Self::PermissionDenied { path },
       io::ErrorKind::IsADirectory => Self::IsDirectory { path },
+      io::ErrorKind::AlreadyExists => Self::AlreadyExists { path },
       _ => Self::Io { path, source },
     }
   }
@@ -94,6 +97,7 @@ impl FileError {
       Self::NotFound { path }
       | Self::PermissionDenied { path }
       | Self::IsDirectory { path }
+      | Self::AlreadyExists { path }
       | Self::TooLarge { path, .. }
       | Self::NotUtf8 { path, .. }
       | Self::ModifiedOnDisk { path }

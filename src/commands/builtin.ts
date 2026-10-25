@@ -18,6 +18,7 @@ import { layoutStore, updateLayout } from '../state/layout'
 import { notify } from '../state/notifications'
 import { closeFolder, collapseAll, openFolder, workspaceStore } from '../state/workspace'
 import { isMac } from '../editor/keymap'
+import { beginCreate } from '../panels/explorerState'
 import { bindingsOf, commandLabel, formatKeybinding, listCommands, type Command } from './registry'
 
 const hasEditor = () => activeEditor.get() !== null
@@ -142,6 +143,26 @@ export const builtinCommands: Command[] = [
       if (await addDevelopmentExtension()) {
         showView('extensions')
       }
+    },
+  },
+  {
+    id: 'explorer.newFile',
+    category: 'Explorer',
+    title: 'New File…',
+    enabled: hasWorkspace,
+    run: () => {
+      showView('explorer')
+      beginCreate(false)
+    },
+  },
+  {
+    id: 'explorer.newFolder',
+    category: 'Explorer',
+    title: 'New Folder…',
+    enabled: hasWorkspace,
+    run: () => {
+      showView('explorer')
+      beginCreate(true)
     },
   },
   {

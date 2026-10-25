@@ -15,8 +15,8 @@ describe('themes', () => {
     }
     const defined = (css: string) =>
       new Set([...css.matchAll(/--color-([a-z0-9-]+):/g)].map(match => match[1]))
-    const dark = defined(block('[data-theme="dark"]'))
-    const light = defined(block('[data-theme="light"]'))
+    const dark = defined(block("[data-theme='dark']"))
+    const light = defined(block("[data-theme='light']"))
     expect([...THEME_TOKENS].sort()).toEqual([...dark].sort())
     expect([...light].every(token => dark.has(token))).toBe(true)
   })

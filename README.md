@@ -177,7 +177,14 @@ Reloading keeps open documents and unsaved changes. See
 ## Workspace
 
 Open a folder with **File: Open Folder…** (command palette or the Explorer). The explorer shows
-`.gitignore`d entries dimmed. Go to File and find in files skip them, along with paths matching
+`.gitignore`d entries dimmed.
+
+To add a file or folder, use the **New File** and **New Folder** buttons in the Explorer header,
+right-click a folder or file, or run **Explorer: New File…** / **Explorer: New Folder…**. The new
+entry goes inside the selected folder, or beside the selected file. Right-clicking the empty space
+below the files creates at the top level. Type a name and press
+`Enter` (or `Escape` to cancel); a name like `src/net/http.rs` creates the missing folders too.
+New files open in the editor. Go to File and find in files skip them, along with paths matching
 `files.exclude`. The folder, open files, and layout are restored on the next launch.
 
 ## Settings

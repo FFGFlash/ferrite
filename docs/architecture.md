@@ -175,6 +175,12 @@ timestamp granularity and with the same length isn't detected.
 - **Explorer listings** are fetched one directory at a time when a folder is expanded, never by
   walking the whole tree. Directories are listed first, sorted case-insensitively. Listing
   requests outside the workspace root are refused.
+- **Creating files and folders** (`workspace_create`, `ferrite-workspace/src/create.rs`) takes a
+  parent folder inside the workspace and a typed name, which may contain `/` or `\` to create
+  subfolders on the way. Names that would leave the parent (`..`) or that the platform can't
+  store (on Windows: `<>:"|?*`, trailing periods or spaces, device names like `nul`) are refused,
+  and nothing existing is ever replaced. The frontend re-lists the changed folders right away
+  instead of waiting for the watcher.
 - **The Go to File index** is built on the scheduler (`workspace-index`) and is cancelled if
   the workspace changes. It holds relative paths only, up to 200,000 files (beyond that it's
   marked truncated). Queries are fuzzy-matched with `nucleo-matcher` and return the best 100,
@@ -368,6 +374,7 @@ EditorView = { version, lineCount, startLine, endLine,
 | `editor_clipboard`                                            | Copy or cut the selection to the system clipboard      |
 | `workspace_get`, `workspace_open[_dialog]`, `workspace_close` | The open folder                                        |
 | `workspace_list_dir`                                          | One explorer directory listing                         |
+| `workspace_create`                                            | New empty file or folder from the explorer             |
 | `workspace_find_files`                                        | Fuzzy Go to File over the index                        |
 | `workspace_search`, `workspace_search_cancel`                 | Streaming find in files                                |
 | `settings_get`, `settings_file`, `settings_set_theme`         | Frontend settings, the settings file path, theme       |
@@ -687,7 +694,7 @@ These are tracked for later milestones:
 - Files load completely into memory (up to 256 MiB); there's no lazy or partial loading.
 - Replace across files, include/exclude globs in the search panel, and search-result context
   lines aren't implemented.
-- The explorer can't create, rename, move, or delete files yet. Large directories aren't
+- The explorer can't rename, move, or delete files yet. Large directories aren't
   virtualized.
 - Only files inside the open folder are watched. Open files outside it don't reload on external
   changes, but saving still detects conflicts.

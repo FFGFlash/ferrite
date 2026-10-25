@@ -43,6 +43,7 @@ impl From<FileError> for CommandError {
       FileError::NotFound { .. } => "notFound",
       FileError::PermissionDenied { .. } => "permissionDenied",
       FileError::IsDirectory { .. } => "isDirectory",
+      FileError::AlreadyExists { .. } => "alreadyExists",
       FileError::TooLarge { .. } => "tooLarge",
       FileError::NotUtf8 { .. } => "notUtf8",
       FileError::ModifiedOnDisk { .. } => "modifiedOnDisk",

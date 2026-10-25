@@ -1,5 +1,5 @@
-//! The open workspace folder: explorer listings, the Go to File index, find
-//! in files, and reacting to changes on disk.
+//! The open workspace folder: explorer listings, creating files and folders,
+//! the Go to File index, find in files, and reacting to changes on disk.
 //!
 //! Indexing and searching run on background threads and can be cancelled;
 //! the editor stays responsive while they run. File-change notifications
@@ -14,8 +14,8 @@ use std::sync::{Arc, Mutex, MutexGuard, PoisonError, RwLock};
 use ferrite_tasks::{Priority, TaskHandle};
 use ferrite_text::{SearchQuery, TextSnapshot};
 use ferrite_workspace::{
-  DirEntry, EntryKind, FileIndex, FileMatches, FileStamp, SearchLimits, SearchSummary,
-  WorkspaceWatcher, list_directory, load_text_file, scan_files, search_workspace,
+  CreateError, DirEntry, EntryKind, FileIndex, FileMatches, FileStamp, SearchLimits, SearchSummary,
+  WorkspaceWatcher, create_entry, list_directory, load_text_file, scan_files, search_workspace,
 };
 use serde::Serialize;
 use tauri::ipc::Channel;
@@ -325,6 +325,14 @@ impl From<DirEntry> for EntryDto {
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct CreatedDto {
+  pub path: String,
+  /// Folders whose listings gained an entry, outermost first.
+  pub directories: Vec<String>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct FileResult {
   pub path: String,
   pub relative: String,
@@ -459,6 +467,50 @@ pub async fn workspace_list_dir(
     .await
     .map_err(CommandError::internal)??;
   Ok(entries.into_iter().map(EntryDto::from).collect())
+}
+
+/// Creates an empty file or a folder called `name` (which may include
+/// subfolders) in `parent`, a folder inside the workspace.
+#[tauri::command]
+pub async fn workspace_create(
+  app: AppHandle,
+  parent: String,
+  name: String,
+  directory: bool,
+) -> Result<CreatedDto, CommandError> {
+  let root = app
+    .state::<WorkspaceState>()
+    .root()
+    .ok_or_else(|| CommandError::new("noWorkspace", "No folder is open."))?;
+  let parent = PathBuf::from(parent);
+  if !parent.starts_with(&root) {
+    return Err(CommandError::new(
+      "outsideWorkspace",
+      "Files can only be created inside the workspace.",
+    ));
+  }
+  let kind = if directory {
+    EntryKind::Directory
+  } else {
+    EntryKind::File
+  };
+  let created = tauri::async_runtime::spawn_blocking(move || create_entry(&parent, &name, kind))
+    .await
+    .map_err(CommandError::internal)?
+    .map_err(|error| match error {
+      CreateError::InvalidName(message) => CommandError::new("invalidName", message),
+      CreateError::NotADirectory(_) => CommandError::new("notADirectory", error.to_string()),
+      CreateError::File(error) => error.into(),
+    })?;
+  tracing::info!(path = %created.path.display(), directory, "created from the explorer");
+  Ok(CreatedDto {
+    path: created.path.display().to_string(),
+    directories: created
+      .directories
+      .iter()
+      .map(|dir| dir.display().to_string())
+      .collect(),
+  })
 }
 
 /// Fuzzy-matches workspace files by path for Go to File.
