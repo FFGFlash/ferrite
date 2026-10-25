@@ -1,0 +1,63 @@
+.extension-view {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.extension-view__message {
+  margin: 0;
+  padding: var(--space-1) var(--space-4) var(--space-2);
+  color: var(--color-text-muted);
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+.extension-view__tree {
+  margin: 0;
+  padding: 0 0 var(--space-2);
+  list-style: none;
+  outline: none;
+}
+
+.extension-view__row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  height: 22px;
+  padding-right: var(--space-2);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.extension-view__row:hover {
+  background: var(--color-list-hover-background);
+}
+
+.extension-view__row[aria-selected="true"] {
+  background: var(--color-list-active-background);
+}
+
+.extension-view__tree:focus-visible .extension-view__row[data-focused] {
+  outline: 1px solid var(--color-list-focus-outline);
+  outline-offset: -1px;
+}
+
+.extension-view__chevron {
+  flex: none;
+  width: 12px;
+  color: var(--color-text-muted);
+  font-size: 10px;
+  text-align: center;
+}
+
+.extension-view__label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.extension-view__description {
+  overflow: hidden;
+  color: var(--color-text-muted);
+  font-size: var(--font-size-ui-small);
+  text-overflow: ellipsis;
+}

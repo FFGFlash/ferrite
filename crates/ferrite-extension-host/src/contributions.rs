@@ -1,0 +1,615 @@
+//! Workbench contributions declared in a manifest: themes, keybindings,
+//! menu items, status bar items, side bar views, and decoration types.
+//!
+//! Contributions are data: the workbench renders them, and extensions only
+//! fill in content (status text, view items, decorated ranges) through the
+//! `workbench` interface. Every value is validated here, so nothing an
+//! extension declares reaches the frontend as markup or arbitrary CSS:
+//! colors must be hex colors and theme keys must be known tokens.
+
+use std::collections::{BTreeMap, BTreeSet};
+use std::path::{Component, Path, PathBuf};
+use std::sync::LazyLock;
+
+use serde::{Deserialize, Serialize};
+
+use crate::keys;
+use crate::manifest::{CommandContribution, ManifestError};
+
+/// The semantic color tokens a theme may set (`--color-<token>`), shared
+/// with the frontend, which checks them against `styles/tokens.css`.
+pub static THEME_TOKENS: LazyLock<BTreeSet<String>> = LazyLock::new(|| {
+  serde_json::from_str(include_str!("../../../src/themes/tokens.json")).unwrap_or_default()
+});
+/// Icons a view can use in the activity bar.
+pub const VIEW_ICONS: &[&str] = &[
+  "list", "check", "bolt", "book", "bug", "tag", "star", "flag", "bell",
+];
+const MAX_THEME_FILE_BYTES: u64 = 256 * 1024;
+
+fn invalid(message: impl Into<String>) -> ManifestError {
+  ManifestError::Invalid(message.into())
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ThemeKind {
+  Dark,
+  Light,
+}
+
+/// A color theme: a base (dark or light) and colors that override its tokens.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ThemeContribution {
+  /// `<extension id>.<theme id>`, as written in `workbench.theme`.
+  pub id: String,
+  pub label: String,
+  pub kind: ThemeKind,
+  /// Token (without `--color-`) to hex color.
+  pub colors: BTreeMap<String, String>,
+  #[serde(skip)]
+  pub path: PathBuf,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct KeybindingContribution {
+  pub command: String,
+  pub key: String,
+  /// A different binding on macOS.
+  pub mac: Option<String>,
+  /// Only while the editor has focus.
+  pub editor_focus: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub enum MenuLocation {
+  /// The editor's context menu.
+  #[serde(rename = "editor/context")]
+  EditorContext,
+  /// The explorer's context menu for a file; the command gets its path as
+  /// the argument.
+  #[serde(rename = "explorer/context")]
+  ExplorerContext,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MenuContribution {
+  pub location: MenuLocation,
+  pub command: String,
+  /// Items are grouped by this, then sorted by title.
+  pub group: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Alignment {
+  Left,
+  Right,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StatusItemContribution {
+  pub id: String,
+  pub alignment: Alignment,
+  /// Higher priorities are placed further left within their side.
+  pub priority: i32,
+  /// Shown until the extension sets other content.
+  pub text: Option<String>,
+  pub tooltip: Option<String>,
+  pub command: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ViewContribution {
+  /// The id the extension uses.
+  pub id: String,
+  /// `<extension id>.<view id>`, unique in the workbench.
+  pub full_id: String,
+  pub title: String,
+  pub icon: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum UnderlineStyle {
+  Solid,
+  Wavy,
+  Dotted,
+  Dashed,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DecorationColors {
+  pub background: Option<String>,
+  pub color: Option<String>,
+  pub border: Option<String>,
+  pub underline_color: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DecorationType {
+  /// The name the extension uses.
+  pub name: String,
+  /// `<extension id>/<name>`, as decorations are tagged in views.
+  pub key: String,
+  pub dark: DecorationColors,
+  pub light: DecorationColors,
+  pub underline: Option<UnderlineStyle>,
+  pub bold: bool,
+  pub italic: bool,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Contributions {
+  pub themes: Vec<ThemeContribution>,
+  pub keybindings: Vec<KeybindingContribution>,
+  pub menus: Vec<MenuContribution>,
+  pub status_items: Vec<StatusItemContribution>,
+  pub views: Vec<ViewContribution>,
+  pub decorations: Vec<DecorationType>,
+}
+
+impl Contributions {
+  /// Whether anything needs the extension's code to run.
+  pub fn needs_code(&self) -> bool {
+    !(self.keybindings.is_empty()
+      && self.menus.is_empty()
+      && self.status_items.is_empty()
+      && self.views.is_empty()
+      && self.decorations.is_empty())
+  }
+
+  pub fn view(&self, id: &str) -> Option<&ViewContribution> {
+    self.views.iter().find(|view| view.id == id)
+  }
+
+  pub fn status_item(&self, id: &str) -> Option<&StatusItemContribution> {
+    self.status_items.iter().find(|item| item.id == id)
+  }
+
+  pub fn decoration(&self, name: &str) -> Option<&DecorationType> {
+    self
+      .decorations
+      .iter()
+      .find(|decoration| decoration.name == name)
+  }
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RawTheme {
+  id: String,
+  label: String,
+  kind: String,
+  path: String,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RawKeybinding {
+  command: String,
+  key: String,
+  mac: Option<String>,
+  when: Option<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RawMenu {
+  location: String,
+  command: String,
+  group: Option<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RawStatusItem {
+  id: String,
+  alignment: Option<String>,
+  priority: Option<i32>,
+  text: Option<String>,
+  tooltip: Option<String>,
+  command: Option<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RawView {
+  pub(crate) id: String,
+  title: String,
+  icon: Option<String>,
+}
+
+#[derive(Deserialize, Default)]
+#[serde(deny_unknown_fields)]
+pub struct RawDecorationColors {
+  background: Option<String>,
+  color: Option<String>,
+  border: Option<String>,
+  underline_color: Option<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RawDecoration {
+  background: Option<String>,
+  color: Option<String>,
+  border: Option<String>,
+  underline_color: Option<String>,
+  underline: Option<String>,
+  #[serde(default)]
+  bold: bool,
+  #[serde(default)]
+  italic: bool,
+  light: Option<RawDecorationColors>,
+}
+
+/// The contribution sections of a manifest, as written.
+#[derive(Default)]
+pub struct RawContributions {
+  pub themes: Vec<RawTheme>,
+  pub keybindings: Vec<RawKeybinding>,
+  pub menus: Vec<RawMenu>,
+  pub status_items: Vec<RawStatusItem>,
+  pub views: Vec<RawView>,
+  pub decorations: BTreeMap<String, RawDecoration>,
+}
+
+/// Validates contributions. Theme colors are read later, by
+/// [`load_theme_colors`].
+pub fn parse(
+  raw: RawContributions,
+  extension: &str,
+  commands: &[CommandContribution],
+) -> Result<Contributions, ManifestError> {
+  let declared = |section: &str, command: &str| {
+    if commands.iter().any(|c| c.id == command) {
+      Ok(command.to_owned())
+    } else {
+      Err(invalid(format!(
+        "{section}: command {command:?} is not one of this extension's commands"
+      )))
+    }
+  };
+  let limit = |section: &str, count: usize, max: usize| {
+    if count > max {
+      Err(invalid(format!("at most {max} {section} can be declared")))
+    } else {
+      Ok(())
+    }
+  };
+  limit("themes", raw.themes.len(), 20)?;
+  limit("keybindings", raw.keybindings.len(), 100)?;
+  limit("menus", raw.menus.len(), 50)?;
+  limit("status_items", raw.status_items.len(), 20)?;
+  limit("views", raw.views.len(), 10)?;
+  limit("decorations", raw.decorations.len(), 20)?;
+
+  let mut contributions = Contributions::default();
+  for theme in raw.themes {
+    local_id("themes", &theme.id)?;
+    let kind = match theme.kind.as_str() {
+      "dark" => ThemeKind::Dark,
+      "light" => ThemeKind::Light,
+      other => {
+        return Err(invalid(format!(
+          "themes: kind {other:?} must be \"dark\" or \"light\""
+        )));
+      }
+    };
+    let label = text("themes", "label", &theme.label, 64)?;
+    let path = inside("themes", &theme.path)?;
+    let id = format!("{extension}.{}", theme.id);
+    unique("themes", contributions.themes.iter().map(|t| &t.id), &id)?;
+    contributions.themes.push(ThemeContribution {
+      id,
+      label,
+      kind,
+      colors: BTreeMap::new(),
+      path,
+    });
+  }
+
+  for binding in raw.keybindings {
+    let command = declared("keybindings", &binding.command)?;
+    let key =
+      keys::normalize(&binding.key).map_err(|error| invalid(format!("keybindings: {error}")))?;
+    let mac = binding
+      .mac
+      .as_deref()
+      .map(keys::normalize)
+      .transpose()
+      .map_err(|error| invalid(format!("keybindings: {error}")))?;
+    let editor_focus = match binding.when.as_deref() {
+      None => false,
+      Some("editorFocus") => true,
+      Some(other) => {
+        return Err(invalid(format!(
+          "keybindings: when {other:?} is not supported (only \"editorFocus\")"
+        )));
+      }
+    };
+    contributions.keybindings.push(KeybindingContribution {
+      command,
+      key,
+      mac,
+      editor_focus,
+    });
+  }
+
+  for menu in raw.menus {
+    let location = match menu.location.as_str() {
+      "editor/context" => MenuLocation::EditorContext,
+      "explorer/context" => MenuLocation::ExplorerContext,
+      other => {
+        return Err(invalid(format!(
+          "menus: location {other:?} must be \"editor/context\" or \"explorer/context\""
+        )));
+      }
+    };
+    contributions.menus.push(MenuContribution {
+      location,
+      command: declared("menus", &menu.command)?,
+      group: menu.group.unwrap_or_default(),
+    });
+  }
+
+  for item in raw.status_items {
+    local_id("status_items", &item.id)?;
+    unique(
+      "status_items",
+      contributions.status_items.iter().map(|i| &i.id),
+      &item.id,
+    )?;
+    let alignment = match item.alignment.as_deref() {
+      None | Some("left") => Alignment::Left,
+      Some("right") => Alignment::Right,
+      Some(other) => {
+        return Err(invalid(format!(
+          "status_items: alignment {other:?} must be \"left\" or \"right\""
+        )));
+      }
+    };
+    contributions.status_items.push(StatusItemContribution {
+      id: item.id,
+      alignment,
+      priority: item.priority.unwrap_or(0),
+      text: item
+        .text
+        .map(|value| text("status_items", "text", &value, 100))
+        .transpose()?,
+      tooltip: item
+        .tooltip
+        .map(|value| text("status_items", "tooltip", &value, 500))
+        .transpose()?,
+      command: item
+        .command
+        .map(|command| declared("status_items", &command))
+        .transpose()?,
+    });
+  }
+
+  for view in raw.views {
+    local_id("views", &view.id)?;
+    unique("views", contributions.views.iter().map(|v| &v.id), &view.id)?;
+    let icon = view.icon.unwrap_or_else(|| "list".into());
+    if !VIEW_ICONS.contains(&icon.as_str()) {
+      return Err(invalid(format!(
+        "views: icon {icon:?} must be one of {}",
+        VIEW_ICONS.join(", ")
+      )));
+    }
+    contributions.views.push(ViewContribution {
+      full_id: format!("{extension}.{}", view.id),
+      title: text("views", "title", &view.title, 40)?,
+      id: view.id,
+      icon,
+    });
+  }
+
+  for (name, decoration) in raw.decorations {
+    local_id("decorations", &name)?;
+    let section = format!("decorations.{name}");
+    let base = RawDecorationColors {
+      background: decoration.background,
+      color: decoration.color,
+      border: decoration.border,
+      underline_color: decoration.underline_color,
+    };
+    let dark = colors(&section, &base)?;
+    let light = match &decoration.light {
+      Some(light) => {
+        let overrides = colors(&format!("{section}.light"), light)?;
+        DecorationColors {
+          background: overrides.background.or_else(|| dark.background.clone()),
+          color: overrides.color.or_else(|| dark.color.clone()),
+          border: overrides.border.or_else(|| dark.border.clone()),
+          underline_color: overrides
+            .underline_color
+            .or_else(|| dark.underline_color.clone()),
+        }
+      }
+      None => dark.clone(),
+    };
+    let underline = match decoration.underline.as_deref() {
+      None => None,
+      Some("solid") => Some(UnderlineStyle::Solid),
+      Some("wavy") => Some(UnderlineStyle::Wavy),
+      Some("dotted") => Some(UnderlineStyle::Dotted),
+      Some("dashed") => Some(UnderlineStyle::Dashed),
+      Some(other) => {
+        return Err(invalid(format!(
+          "{section}: underline {other:?} must be solid, wavy, dotted, or dashed"
+        )));
+      }
+    };
+    contributions.decorations.push(DecorationType {
+      key: format!("{extension}/{name}"),
+      name,
+      dark,
+      light,
+      underline,
+      bold: decoration.bold,
+      italic: decoration.italic,
+    });
+  }
+  Ok(contributions)
+}
+
+/// Reads and checks a theme's colors from its file:
+/// `[colors]` mapping known tokens to hex colors.
+pub fn load_theme_colors(dir: &Path, theme: &mut ThemeContribution) -> Result<(), ManifestError> {
+  #[derive(Deserialize)]
+  #[serde(deny_unknown_fields)]
+  struct ThemeFile {
+    colors: BTreeMap<String, String>,
+  }
+  let path = dir.join(&theme.path);
+  let read = |source| ManifestError::Read {
+    path: path.clone(),
+    source,
+  };
+  if std::fs::metadata(&path).map_err(read)?.len() > MAX_THEME_FILE_BYTES {
+    return Err(invalid(format!(
+      "theme {} is too large",
+      theme.path.display()
+    )));
+  }
+  let text = std::fs::read_to_string(&path).map_err(read)?;
+  let file: ThemeFile = toml::from_str(&text)
+    .map_err(|error| invalid(format!("theme {}: {error}", theme.path.display())))?;
+  theme.colors = check_theme_colors(&file.colors)
+    .map_err(|error| invalid(format!("theme {}: {error}", theme.path.display())))?;
+  Ok(())
+}
+
+/// Checks theme colors: keys must be known tokens, values hex colors.
+/// Also used for the user's `workbench.colors`.
+pub fn check_theme_colors(
+  colors: &BTreeMap<String, String>,
+) -> Result<BTreeMap<String, String>, String> {
+  let mut checked = BTreeMap::new();
+  for (token, value) in colors {
+    if !THEME_TOKENS.contains(token) {
+      return Err(format!("{token:?} is not a theme color"));
+    }
+    if !is_hex_color(value) {
+      return Err(format!(
+        "{token} must be a hex color like \"#1e1e2e\", not {value:?}"
+      ));
+    }
+    checked.insert(token.clone(), value.to_lowercase());
+  }
+  Ok(checked)
+}
+
+/// `#rgb`, `#rgba`, `#rrggbb`, or `#rrggbbaa`.
+pub fn is_hex_color(value: &str) -> bool {
+  value.strip_prefix('#').is_some_and(|hex| {
+    matches!(hex.len(), 3 | 4 | 6 | 8) && hex.chars().all(|c| c.is_ascii_hexdigit())
+  })
+}
+
+fn colors(section: &str, raw: &RawDecorationColors) -> Result<DecorationColors, ManifestError> {
+  let check = |field: &str, value: &Option<String>| match value {
+    Some(value) if !is_hex_color(value) => Err(invalid(format!(
+      "{section}: {field} must be a hex color like \"#e5c07b\", not {value:?}"
+    ))),
+    other => Ok(other.as_ref().map(|value| value.to_lowercase())),
+  };
+  Ok(DecorationColors {
+    background: check("background", &raw.background)?,
+    color: check("color", &raw.color)?,
+    border: check("border", &raw.border)?,
+    underline_color: check("underline_color", &raw.underline_color)?,
+  })
+}
+
+/// Ids local to an extension: lowercase letters, digits, '-', and '_'.
+fn local_id(section: &str, id: &str) -> Result<(), ManifestError> {
+  let valid = (1..=32).contains(&id.len())
+    && id
+      .chars()
+      .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || matches!(c, '-' | '_'));
+  if valid {
+    Ok(())
+  } else {
+    Err(invalid(format!(
+      "{section}: id {id:?} must be 1 to 32 lowercase letters, digits, '-', or '_'"
+    )))
+  }
+}
+
+fn unique<'a>(
+  section: &str,
+  mut existing: impl Iterator<Item = &'a String>,
+  id: &str,
+) -> Result<(), ManifestError> {
+  if existing.any(|other| other == id) {
+    Err(invalid(format!("{section}: {id:?} is declared twice")))
+  } else {
+    Ok(())
+  }
+}
+
+fn text(section: &str, field: &str, value: &str, max: usize) -> Result<String, ManifestError> {
+  let value = value.trim();
+  if value.is_empty() || value.chars().count() > max {
+    Err(invalid(format!(
+      "{section}: {field} must be 1 to {max} characters"
+    )))
+  } else {
+    Ok(value.to_owned())
+  }
+}
+
+/// A relative path that stays inside the extension's folder.
+fn inside(section: &str, path: &str) -> Result<PathBuf, ManifestError> {
+  let relative = Path::new(path);
+  let confined = !path.is_empty()
+    && !relative.has_root()
+    && relative
+      .components()
+      .all(|component| matches!(component, Component::Normal(_) | Component::CurDir));
+  if confined {
+    Ok(relative.to_path_buf())
+  } else {
+    Err(invalid(format!(
+      "{section}: path {path:?} must be inside the extension's folder"
+    )))
+  }
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+
+  #[test]
+  fn the_token_list_is_loaded() {
+    assert!(THEME_TOKENS.contains("editor-background"));
+    assert!(THEME_TOKENS.len() > 50);
+  }
+
+  #[test]
+  fn checks_theme_colors() {
+    let ok = BTreeMap::from([("editor-background".to_owned(), "#ABCDEF".to_owned())]);
+    assert_eq!(
+      check_theme_colors(&ok).expect("valid")["editor-background"],
+      "#abcdef"
+    );
+    let token = BTreeMap::from([("editor-backdrop".to_owned(), "#000".to_owned())]);
+    assert!(check_theme_colors(&token).is_err());
+    for value in ["red", "#12345", "url(x)", "#000;background:url(x)"] {
+      let colors = BTreeMap::from([("text".to_owned(), value.to_owned())]);
+      assert!(check_theme_colors(&colors).is_err(), "{value}");
+    }
+  }
+}

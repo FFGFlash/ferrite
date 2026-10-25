@@ -1,9 +1,9 @@
-/// The Ferrite extension API, version 1.
+/// The Ferrite extension API, version 1 (1.1: workbench contributions).
 ///
 /// An extension is a WebAssembly component targeting the `extension` world.
 /// It can call only the functions in `host`; there is no filesystem,
 /// network, environment, or clock access. See `docs/extensions.md`.
-package ferrite:extension@1.0.0;
+package ferrite:extension@1.1.0;
 
 /// Types shared by the host functions and the extension's exports.
 interface types {
@@ -147,6 +147,33 @@ interface types {
     /// That document's selections, the primary one first.
     selections: list<range>,
   }
+
+  /// The content of a status bar item declared in the manifest. (1.1)
+  record status-item {
+    /// Plain text, at most 100 characters.
+    text: string,
+    tooltip: option<string>,
+    /// One of the extension's commands, run when the item is clicked.
+    command: option<string>,
+  }
+
+  /// A row in one of the extension's side bar views. (1.1)
+  record view-item {
+    /// Unique within the view.
+    id: string,
+    /// The item this one is nested under; it must come earlier in the list.
+    parent: option<string>,
+    label: string,
+    /// Shown dimmed after the label.
+    description: option<string>,
+    tooltip: option<string>,
+    /// Whether its children are shown at first.
+    expanded: bool,
+    /// One of the extension's commands, run with `argument` when the item
+    /// is activated (see `command-argument`).
+    command: option<string>,
+    argument: option<string>,
+  }
 }
 
 /// Functions the editor provides.
@@ -191,10 +218,48 @@ interface host {
   ) -> result<_, api-error>;
 }
 
+/// Contributions to the workbench: status bar items, side bar views, and
+/// editor decorations, all declared in the manifest. (1.1)
+interface workbench {
+  use types.{api-error, document-id, range, status-item, view-item};
+
+  /// Shows a status bar item with new content, or hides it (`none`).
+  set-status-item: func(id: string, item: option<status-item>) -> result<_, api-error>;
+
+  /// Replaces the items of a side bar view (at most 5,000).
+  set-view-items: func(view: string, items: list<view-item>) -> result<_, api-error>;
+
+  /// Shows a message in a view instead of (or above) its items, e.g. while
+  /// it is empty; `none` removes it.
+  set-view-message: func(view: string, message: option<string>) -> result<_, api-error>;
+
+  /// Shows a side bar view.
+  show-view: func(view: string) -> result<_, api-error>;
+
+  /// Replaces the ranges decorated with one of the extension's decoration
+  /// types in a document. Ranges refer to the text at `version`, as for
+  /// diagnostics. Needs the `documents-read` permission.
+  set-decorations: func(
+    id: document-id,
+    version: u64,
+    decoration: string,
+    ranges: list<range>,
+  ) -> result<_, api-error>;
+
+  /// Selects `range` in a document and scrolls it into view, making it the
+  /// active document. Needs the `documents-read` permission.
+  reveal: func(id: document-id, range: range) -> result<_, api-error>;
+
+  /// The argument the running command was invoked with, from a view item
+  /// or an explorer menu (the file's path); `none` otherwise.
+  command-argument: func() -> option<string>;
+}
+
 world extension {
   use types.{activation, command-context, document-change, document-id, document-info};
 
   import host;
+  import workbench;
 
   /// Called once before any other export. An error fails the extension.
   export activate: func(context: activation) -> result<_, string>;

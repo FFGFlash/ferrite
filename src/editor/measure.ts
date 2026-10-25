@@ -4,7 +4,7 @@
  * a badge for shortened lines that is not part of the text. A UTF-16 column
  * is an offset into the concatenation of those text nodes.
  */
-import type { DiagnosticView, Position, Range, SelectionView } from "../ipc/editor";
+import type { DecorationView, DiagnosticView, Position, Range, SelectionView } from "../ipc/editor";
 
 /** Width of the selection highlight shown for a selected line break. */
 const LINE_BREAK_WIDTH = 6;
@@ -21,9 +21,17 @@ export interface Overlay {
   /** Find matches; `current` marks the match the primary selection covers. */
   matches: (Rect & { current: boolean })[];
   diagnostics: (Rect & { severity: number })[];
+  /** Extension decorations; `key` names the decoration type. */
+  decorations: (Rect & { key: string })[];
 }
 
-export const EMPTY_OVERLAY: Overlay = { carets: [], selections: [], matches: [], diagnostics: [] };
+export const EMPTY_OVERLAY: Overlay = {
+  carets: [],
+  selections: [],
+  matches: [],
+  diagnostics: [],
+  decorations: [],
+};
 
 /** Marks elements inside a line that are not part of its text. */
 const NOT_TEXT = ".editor-view__cut";
@@ -105,11 +113,18 @@ export function measureOverlay(
   matches: readonly Range[],
   lineHeight: number,
   diagnostics: readonly DiagnosticView[] = [],
+  decorations: readonly DecorationView[] = [],
 ): Overlay {
   const count = lines.children.length;
   const lineAt = (line: number) =>
     line >= startLine && line < startLine + count ? lines.children[line - startLine] : undefined;
-  const overlay: Overlay = { carets: [], selections: [], matches: [], diagnostics: [] };
+  const overlay: Overlay = {
+    carets: [],
+    selections: [],
+    matches: [],
+    diagnostics: [],
+    decorations: [],
+  };
 
   /** Rectangles covering `start..end`, one per rendered line. */
   const rectsFor = (from: Position, to: Position): Rect[] => {
@@ -167,6 +182,10 @@ export function measureOverlay(
       rects.push({ top: (start.line - startLine) * lineHeight, left, width: LINE_BREAK_WIDTH });
     }
     overlay.diagnostics.push(...rects.map((rect) => ({ ...rect, severity })));
+  }
+
+  for (const { start, end, key } of decorations) {
+    overlay.decorations.push(...rectsFor(start, end).map((rect) => ({ ...rect, key })));
   }
   return overlay;
 }

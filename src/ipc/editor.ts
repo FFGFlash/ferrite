@@ -77,7 +77,7 @@ export interface SearchView {
   error: string | null;
 }
 
-export type ClipboardAction = "copy" | "cut";
+export type ClipboardAction = "copy" | "cut" | "paste";
 
 export interface DocumentSummary {
   id: number;
@@ -189,6 +189,16 @@ interface ViewFields {
   search: SearchView | null;
   diagnostics: DiagnosticView[];
   language: LanguageStatus | null;
+  /** Extension decorations on the view's lines. */
+  decorations: DecorationView[];
+}
+
+/** A range decorated by an extension. */
+export interface DecorationView {
+  start: Position;
+  end: Position;
+  /** The decoration type: `<extension id>/<name>`. */
+  key: string;
 }
 
 /** A view as the backend sends it: only the lines the client was missing. */
@@ -216,7 +226,9 @@ export interface EditorView extends ViewFields {
 }
 
 export const listDocuments = () => call<DocumentSummary[]>("document_list");
-export const newDocument = () => call<DocumentSummary>("document_new");
+/** Creates an untitled document, optionally with `text`. */
+export const newDocument = (text?: string) =>
+  call<DocumentSummary>("document_new", { text: text ?? null });
 export const openDocumentDialog = () => call<DocumentSummary | null>("document_open_dialog");
 export const saveDocument = (id: number) => call<DocumentSummary | null>("document_save", { id });
 export const saveDocumentAs = (id: number) =>

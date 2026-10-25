@@ -515,6 +515,18 @@ pub struct EditorView {
   pub diagnostics: Vec<DiagnosticDto>,
   /// The document's language and its server, if it has a known language.
   pub language: Option<LanguageStatusDto>,
+  /// Extension decorations on the view's lines.
+  pub decorations: Vec<DecorationDto>,
+}
+
+/// A range decorated by an extension.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DecorationDto {
+  pub start: Position,
+  pub end: Position,
+  /// The decoration type, `<extension id>/<name>`.
+  pub key: String,
 }
 
 impl EditorView {
@@ -584,6 +596,7 @@ impl EditorView {
       highlights,
       diagnostics: Vec::new(),
       language: None,
+      decorations: Vec::new(),
     }
   }
 }

@@ -7,14 +7,22 @@ do only what the [extension API](../crates/ferrite-extension-api/wit/extension.w
 - read open documents and get notified of changes;
 - edit documents through validated, versioned edits;
 - publish diagnostics (squiggles and hover messages);
+- customize the workbench: color themes, keybindings, context menu items, status bar items,
+  side bar views, and editor decorations;
 - read their own settings;
 - log, and show messages.
 
 There is no filesystem, network, environment, clock, or process access. A manifest declares
 the permissions an extension needs, and the user grants them before the extension starts.
 
-This guide uses the example extension, [Tidy](../extensions/tidy/). It flags trailing whitespace
-and long lines, and has commands to trim trailing whitespace and to count words.
+This guide uses three examples:
+
+- [Tidy](../extensions/tidy/) flags trailing whitespace and long lines, and has commands to trim
+  trailing whitespace and to count words.
+- [TODOs](../extensions/todos/) uses every workbench contribution: it highlights TODO comments,
+  lists them in a side bar view, counts them in the status bar, and adds a keybinding and a
+  context menu item.
+- [Example Themes](../extensions/themes/) contributes two color themes and no code at all.
 
 ## Quick start
 
@@ -125,6 +133,7 @@ extension invalid in the Extensions view, with a message:
 | `on-startup`       | When Ferrite starts (or the extension is loaded). |
 | `on-language:<id>` | When a document of that language is opened.       |
 | `on-command:<id>`  | When that command runs.                           |
+| `on-view:<id>`     | When one of its side bar views is shown.          |
 
 Every extension also starts when one of its commands runs, so `on-command` is only
 documentation. Language ids are `rust`, `typescript`, `typescriptreact`, `javascript`, `json`,
@@ -133,6 +142,9 @@ documentation. Language ids are `rust`, `typescript`, `typescriptreact`, `javasc
 **Entry point.** An installed extension's entry point must be inside its folder. A development
 extension may point elsewhere, such as Tidy's
 `../target/wasm32-unknown-unknown/release/tidy.wasm`. The file can be at most 32 MiB.
+
+**Hidden commands.** A command with `hidden = true` is left out of the command palette, for
+commands run only from view items or other contributions.
 
 **Dependencies** between extensions aren't supported in API version 1.
 
@@ -245,6 +257,156 @@ next read.
 - `show-message(level, message)` shows a notification. Messages are cut at 1,000 characters, and
   at most 1 per second is shown, after a burst of 10.
 
+## Workbench contributions
+
+Contributions are declared in the manifest, and the workbench draws them itself. An extension
+never supplies markup or CSS: it supplies text, and colors that must be hex colors.
+
+- **Ids.** Contribution ids are local to the extension (`list`, `count`). In the workbench they
+  become `<extension id>.<id>`.
+- **Commands.** Commands named by contributions must be the extension's own.
+- **Disabled extensions.** Contributions of a disabled or invalid extension aren't shown.
+
+### Themes
+
+```toml
+[[themes]]
+id = "midnight"                   # used as "example.themes.midnight"
+label = "Midnight"
+kind = "dark"                     # the built-in theme it starts from: dark or light
+path = "themes/midnight.toml"     # inside the extension's folder
+```
+
+The theme file sets Ferrite's color tokens; any token it leaves out keeps the base theme's
+color:
+
+```toml
+[colors]
+editor-background = "#1a1b26"
+syntax-keyword = "#bb9af7"
+```
+
+- **Tokens.** The tokens are listed in [`src/themes/tokens.json`](../src/themes/tokens.json)
+  and defined in `src/styles/tokens.css`.
+- **Validation.** Unknown tokens and values that aren't hex colors make the extension invalid.
+- **No code needed.** An extension that only contributes themes needs no entrypoint.
+- **Selecting.** Users pick a theme with **Preferences: Color Theme: …** or
+  `workbench.theme = "example.themes.midnight"`.
+- **User colors.** `[workbench.colors]` in the settings overrides individual tokens on top of
+  any theme.
+
+### Keybindings
+
+```toml
+[[keybindings]]
+command = "example.todos.next"
+key = "ctrl+alt+t"                # modifiers: mod, ctrl, alt, shift, meta
+mac = "mod+alt+t"                 # optional; "mod" is Cmd on macOS
+when = "editorFocus"              # optional: only while the editor has focus
+```
+
+Keys are written like `ctrl+shift+p`, `alt+f12`, or `mod++`. Named keys are `enter`, `tab`,
+`escape`, `space`, `backspace`, `delete`, `insert`, `home`, `end`, `pageup`, `pagedown`, the
+arrows (`arrowup`, …), and `f1` to `f24`.
+
+**Precedence.** A built-in command's keys win over an extension's. The user's `[keybindings]`
+settings win over both: they replace a command's keys, or remove them with `""`. **Preferences:
+Keyboard Shortcuts** lists every command with its id and keys.
+
+### Menus
+
+```toml
+[[menus]]
+location = "editor/context"       # or "explorer/context"
+command = "example.todos.insert"
+group = "todos"                   # items are grouped by this, then sorted by title
+```
+
+- **`editor/context`** items appear in the editor's right-click menu and run with the usual
+  command context (the active document and its selections).
+- **`explorer/context`** items appear when right-clicking a file in the explorer. They receive
+  the file's path as the command argument (`workbench::command-argument`).
+
+### Status bar items
+
+```toml
+[[status_items]]
+id = "count"
+alignment = "right"               # or "left" (default)
+priority = 10                     # higher is further left within its side
+text = "TODOs"                    # shown until the extension sets other content
+tooltip = "Show TODOs"
+command = "example.todos.show"    # optional: run on click
+```
+
+The item shows its manifest text even before the extension starts (clicking it starts the
+extension). While running, the extension changes it with `workbench::set-status-item(id, item)`,
+or hides it with `none`. Text is plain text, at most 100 characters.
+
+### Side bar views
+
+```toml
+[[views]]
+id = "list"
+title = "TODOs"
+icon = "check"                    # list, check, bolt, book, bug, tag, star, flag, bell
+```
+
+A view adds an activity bar entry and a side bar panel. Its content is a tree of items:
+
+- **`set-view-items(view, items)`** sets the tree, at most 5,000 items. Each item has an id, an
+  optional parent (which must come earlier in the list), a label, a description, a tooltip,
+  whether it starts expanded, and an optional command and argument.
+- **Activating an item** (click or Enter) runs its command. The command reads the item's
+  argument with `workbench::command-argument()`.
+- **`set-view-message(view, message)`** shows a line of text above the items, such as "No TODOs
+  in open documents."
+- **`show-view(view)`** brings the view into the side bar.
+
+Use `on-view:<id>` to start the extension only when its view is first shown.
+
+### Decorations
+
+```toml
+[decorations.keyword]
+background = "#e5c07b26"          # all colors optional; hex only
+color = "#e5c07b"                 # text color
+border = "#e5c07b"
+underline = "wavy"                # solid, wavy, dotted, or dashed
+underline_color = "#e5c07b"
+bold = true
+italic = false
+
+[decorations.keyword.light]       # optional colors for light themes
+background = "#9868011f"
+color = "#986801"
+```
+
+`workbench::set-decorations(document, version, "keyword", ranges)` replaces the ranges decorated
+with that type in a document (at most 10,000). It works like `publish-diagnostics`:
+
+- **Version.** Ranges refer to the text at `version`, which may be the current version or a
+  recently sent one.
+- **Editing.** Decorations move with later edits.
+- **Removal.** Decorations are removed when the extension stops.
+- **Permission.** It needs the `documents_read` permission.
+
+`workbench::reveal(document, range)` selects a range and scrolls it into view, making that
+document active. TODOs uses it when a view item is chosen. It also needs `documents_read`.
+
+### Limits
+
+| Item                               | Limit                                   |
+| ---------------------------------- | --------------------------------------- |
+| Themes / keybindings / menus       | 20 / 100 / 50 per extension             |
+| Status items / views / decorations | 20 / 10 / 20 types per extension        |
+| Status text / tooltip              | 100 / 500 characters (cut, not refused) |
+| View items                         | 5,000 per view                          |
+| Decorated ranges                   | 10,000 per type and document            |
+
+Misuse fails with `invalid-argument` or `too-large` and changes nothing: an undeclared id, a
+command that isn't the extension's own, or an item whose parent isn't listed before it.
+
 ## Limits and failures
 
 Each extension runs on its own thread with these limits:
@@ -260,8 +422,8 @@ Each extension runs on its own thread with these limits:
 
 **Failures.** Ferrite stops an extension when it traps, panics, runs out of memory or stack, or
 misses a deadline. Infinite loops are interrupted at the deadline. The extension is marked
-failed, its diagnostics are removed, and the user sees why, with a **Restart** button. The
-editor and the document are unaffected.
+failed, and its diagnostics, decorations, status bar items, and view contents are removed. The
+user sees why, with a **Restart** button. The editor and the document are unaffected.
 
 **Commands.** A command that returns `Err(message)` shows the message as an error; the
 extension keeps running.
@@ -306,16 +468,18 @@ model for testing an extension end to end. Run them with
 ## Other languages
 
 Any language that can produce a WebAssembly component for the `extension` world works. The
-component must import nothing but `ferrite:extension/host@1.0.0`. The host provides no WASI, so
+component must import nothing but the Ferrite interfaces (`ferrite:extension/host` and
+`ferrite:extension/workbench`). The host provides no WASI, so
 a component that imports `wasi:*` interfaces (most toolchains' defaults) fails to start, with a
 message saying so. Rust on `wasm32-unknown-unknown` is the supported path for now.
 
 ## Versioning
 
-The WIT package is versioned: `ferrite:extension@1.0.0`, `api_version = "1"`.
+The WIT package is versioned: `ferrite:extension@1.1.0`, `api_version = "1"`.
 
-- **Additions.** New host functions arrive as minor versions of the package. Wasmtime links
-  components built against an older minor version.
+- **Additions.** New host functions arrive as minor versions of the package. Version 1.1 added the
+  `workbench` interface. Wasmtime links components built against an older minor version: the
+  host's tests load a Tidy build made against 1.0.
 - **Breaking changes.** Changes that break existing extensions get a new major version and a new
   `api_version`.
 - **Rejection.** Manifests for unsupported versions are rejected before loading.

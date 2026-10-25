@@ -2,6 +2,7 @@ import {
   memo,
   useEffect,
   useLayoutEffect,
+  useMemo,
   useRef,
   useState,
   type ClipboardEvent,
@@ -54,7 +55,18 @@ import {
   type Overlay,
   type Rect,
 } from "./measure";
-import { segments } from "./segments";
+import { openContextMenu, type MenuEntry } from "../components/contextMenuState";
+import { openPalette } from "../components/paletteState";
+import { getCommand, primaryKeybinding } from "../commands/registry";
+import {
+  contributedMenuItems,
+  decorationTypes,
+  extensionsStore,
+  runContributed,
+} from "../state/extensions";
+import { themeKind } from "../themes/theme";
+import { decorationRectStyle, textOverlays } from "./decorations";
+import { LINK_CLASS, segments, type TextOverlay } from "./segments";
 import { EditorSession, ipcTransport, type EditorTransport } from "./session";
 import "./EditorView.css";
 
@@ -288,6 +300,7 @@ export function EditorView({ documentId, title, transport = ipcTransport }: Edit
       view.search?.matches ?? [],
       lineHeight,
       view.diagnostics,
+      view.decorations,
     );
     setOverlay(measured);
     recordTiming("editor.render", performance.now() - receivedAtRef.current);
@@ -644,6 +657,65 @@ export function EditorView({ documentId, title, transport = ipcTransport }: Edit
     }, HOVER_DELAY);
   };
 
+  /** The editor's context menu: clipboard, language, extension, and palette entries. */
+  const onContextMenu = (event: ReactMouseEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    hideHover();
+    closeCompletion();
+    inputRef.current?.focus();
+    const position = positionAt(event.clientX, event.clientY);
+    const current = viewRef.current;
+    // Right-clicking outside the selection moves the cursor there first.
+    if (position && current) {
+      const inside = current.selections.some((selection) => {
+        const [start, end] = [
+          earlier(selection.anchor, selection.head),
+          later(selection.anchor, selection.head),
+        ];
+        return (
+          !samePosition(start, end) && !earlierThan(position, start) && !earlierThan(end, position)
+        );
+      });
+      if (!inside) {
+        dispatch({ type: "setCursor", position, extend: false, add: false });
+      }
+    }
+    const hint = (id: string) => primaryKeybinding(getCommand(id));
+    const clipboard = (action: "cut" | "copy" | "paste") => () => {
+      revealRef.current = true;
+      sessionRef.current?.clipboard(action);
+    };
+    const entries: MenuEntry[] = [];
+    if (current?.language) {
+      entries.push(
+        {
+          label: "Go to Definition",
+          hint: hint("editor.goToDefinition"),
+          run: () => goToDefinition(position ?? undefined),
+        },
+        null,
+      );
+    }
+    entries.push(
+      { label: "Cut", hint: isMac() ? "⌘X" : "Ctrl+X", run: clipboard("cut") },
+      { label: "Copy", hint: isMac() ? "⌘C" : "Ctrl+C", run: clipboard("copy") },
+      { label: "Paste", hint: isMac() ? "⌘V" : "Ctrl+V", run: clipboard("paste") },
+      null,
+      ...contributedMenuItems("editor/context").map((item) => ({
+        label: item.title,
+        hint: hint(item.command),
+        run: () => runContributed(item.command),
+      })),
+      null,
+      {
+        label: "Command Palette…",
+        hint: hint("workbench.commandPalette"),
+        run: () => openPalette(">"),
+      },
+    );
+    openContextMenu(event.clientX, event.clientY, entries);
+  };
+
   const onContentMouseLeave = (event: ReactMouseEvent<HTMLDivElement>) => {
     pointerRef.current = null;
     clearLink();
@@ -840,6 +912,22 @@ export function EditorView({ documentId, title, transport = ipcTransport }: Edit
 
   const startLine = view?.startLine ?? 0;
   const lineCount = view?.lineCount ?? 1;
+  const extensions = useStore(extensionsStore);
+  const kind = useStore(themeKind);
+  const types = useMemo(() => decorationTypes(extensions), [extensions]);
+  const lineOverlays = useMemo(
+    () =>
+      view && view.decorations.length > 0
+        ? textOverlays(
+            view.decorations,
+            types,
+            kind,
+            view.startLine,
+            view.lines.map((line) => line.text.length),
+          )
+        : new Map<number, TextOverlay[]>(),
+    [view, types, kind],
+  );
   const primary = primaryCaret;
   const activeLine = view?.primary.position.line;
   const layerStyle = { transform: `translateY(${startLine * lineHeight}px)` };
@@ -888,6 +976,7 @@ export function EditorView({ documentId, title, transport = ipcTransport }: Edit
             onMouseDown={onMouseDown}
             onMouseMove={onContentMouseMove}
             onMouseLeave={onContentMouseLeave}
+            onContextMenu={onContextMenu}
           >
             <div className="editor-view__layer" style={layerStyle}>
               <div className="editor-view__selections" aria-hidden="true">
@@ -899,6 +988,24 @@ export function EditorView({ documentId, title, transport = ipcTransport }: Edit
                     style={{ top: rect.top, left: rect.left, width: rect.width }}
                   />
                 ))}
+                {overlay.decorations.map((rect, index) => {
+                  const type = types.get(rect.key);
+                  return (
+                    type && (
+                      <div
+                        key={`x${index}`}
+                        className="editor-view__decoration"
+                        data-underline={type.underline ?? undefined}
+                        style={{
+                          ...decorationRectStyle(type, kind),
+                          top: rect.top,
+                          left: rect.left,
+                          width: rect.width,
+                        }}
+                      />
+                    )
+                  );
+                })}
                 {overlay.selections.map((rect, index) => (
                   <div
                     key={index}
@@ -925,6 +1032,7 @@ export function EditorView({ documentId, title, transport = ipcTransport }: Edit
                         ? link
                         : null
                     }
+                    overlays={lineOverlays.get(startLine + index) ?? NO_OVERLAYS}
                   />
                 ))}
               </div>
@@ -981,9 +1089,23 @@ function earlier(a: Position, b: Position): Position {
   return a.line < b.line || (a.line === b.line && a.column <= b.column) ? a : b;
 }
 
-const Line = memo(function Line({ line, link }: { line: DisplayLine; link: Word | null }) {
+const NO_OVERLAYS: readonly TextOverlay[] = [];
+
+interface LineProps {
+  line: DisplayLine;
+  link: Word | null;
+  /** Decoration styles on this line. */
+  overlays: readonly TextOverlay[];
+}
+
+const Line = memo(function Line({ line, link, overlays }: LineProps) {
+  const all = link
+    ? [...overlays, { from: link.from, to: link.to, className: LINK_CLASS }]
+    : overlays;
   const text =
-    line.spans.length === 0 && !link ? line.text : highlighted(line.text, line.spans, link);
+    line.spans.length === 0 && all.length === 0
+      ? line.text
+      : highlighted(line.text, line.spans, all);
   if (line.fullLength === null) {
     return <div className="editor-view__line">{text}</div>;
   }
@@ -1001,17 +1123,33 @@ const Line = memo(function Line({ line, link }: { line: DisplayLine; link: Word 
   );
 });
 
-/** `text` split into plain, highlighted, and linked runs (see `measure.ts`). */
-function highlighted(text: string, spans: readonly number[], link: Word | null): ReactNode[] {
-  return segments(text, spans, link && [link.from, link.to]).map(({ start, end, className }) =>
-    className ? (
-      <span key={start} className={className}>
+/** `text` split into plain, highlighted, decorated, and linked runs (see `measure.ts`). */
+function highlighted(
+  text: string,
+  spans: readonly number[],
+  overlays: readonly TextOverlay[],
+): ReactNode[] {
+  return segments(text, spans, overlays).map(({ start, end, className, style }) =>
+    className || style ? (
+      <span key={start} className={className || undefined} style={style}>
         {text.slice(start, end)}
       </span>
     ) : (
       text.slice(start, end)
     ),
   );
+}
+
+function later(a: Position, b: Position): Position {
+  return earlier(a, b) === a ? b : a;
+}
+
+function earlierThan(a: Position, b: Position): boolean {
+  return a.line < b.line || (a.line === b.line && a.column < b.column);
+}
+
+function samePosition(a: Position, b: Position): boolean {
+  return a.line === b.line && a.column === b.column;
 }
 
 function visibleRange(scroller: HTMLElement, lineHeight: number): [number, number] {

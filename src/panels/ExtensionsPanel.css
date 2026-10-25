@@ -167,3 +167,9 @@
   direction: rtl;
   text-align: left;
 }
+
+.extension__contributes {
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: var(--font-size-ui-small);
+}

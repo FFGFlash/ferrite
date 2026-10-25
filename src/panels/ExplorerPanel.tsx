@@ -1,11 +1,25 @@
 import { useMemo, useState, type KeyboardEvent } from "react";
 import { executeCommand, primaryKeybinding, getCommand } from "../commands/registry";
 import type { DirectoryEntry } from "../ipc/workspace";
+import { openContextMenu } from "../components/contextMenuState";
 import { documentsStore, openPath } from "../state/documents";
+import { contributedMenuItems, runContributed } from "../state/extensions";
 import { layoutStore } from "../state/layout";
 import { useStore } from "../state/store";
 import { openFolder, toggleFolder, workspaceStore, type Listing } from "../state/workspace";
 import "./ExplorerPanel.css";
+
+/** The context menu of a file: open it, plus extensions' items, which get its path. */
+function openFileMenu(x: number, y: number, path: string): void {
+  openContextMenu(x, y, [
+    { label: "Open", run: () => openPath(path) },
+    null,
+    ...contributedMenuItems("explorer/context").map((item) => ({
+      label: item.title,
+      run: () => runContributed(item.command, path),
+    })),
+  ]);
+}
 
 interface Row {
   entry: DirectoryEntry;
@@ -136,6 +150,13 @@ export function ExplorerPanel() {
           style={{ paddingLeft: `calc(${row.depth} * var(--space-3) + var(--space-2))` }}
           title={row.entry.path}
           onClick={() => activate(row)}
+          onContextMenu={(event) => {
+            event.preventDefault();
+            setFocused(row.entry.path);
+            if (!row.entry.directory) {
+              openFileMenu(event.clientX, event.clientY, row.entry.path);
+            }
+          }}
         >
           <span className="explorer-tree__chevron" aria-hidden="true">
             {row.entry.directory ? (row.expanded ? "▾" : "▸") : ""}

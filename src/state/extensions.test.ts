@@ -32,8 +32,9 @@ function extension(overrides: Partial<ExtensionStatus> = {}): ExtensionStatus {
         decided: true,
       },
     ],
-    commands: [{ id: "example.tidy.trim", title: "Trim", category: "Tidy" }],
+    commands: [{ id: "example.tidy.trim", title: "Trim", category: "Tidy", hidden: false }],
     configErrors: [],
+    contributions: { themes: [], keybindings: [], menus: [], views: [], decorations: [] },
     ...overrides,
   };
 }
@@ -52,7 +53,7 @@ describe("extensions state", () => {
 
     activeEditor.set({ documentId: 4 } as never);
     await executeCommand("example.tidy.trim");
-    expect(ipc.runExtensionCommand).toHaveBeenCalledWith("example.tidy.trim", 4);
+    expect(ipc.runExtensionCommand).toHaveBeenCalledWith("example.tidy.trim", 4, null);
     activeEditor.set(null);
 
     applyStatuses([extension({ state: "disabled" })]);

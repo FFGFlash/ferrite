@@ -3,7 +3,7 @@
  * commands (`src-tauri/src/{workspace,settings,ui_state,events}.rs`).
  */
 import { Channel } from "@tauri-apps/api/core";
-import type { DocumentSummary, SearchQuery } from "./editor";
+import type { DocumentSummary, Position, SearchQuery } from "./editor";
 import { call, isDesktop } from "./index";
 import type { MessageLevel } from "./extensions";
 
@@ -53,10 +53,15 @@ export type SearchEvent =
       cancelled: boolean;
     };
 
-export type Theme = "system" | "dark" | "light";
+/** `system`, `dark`, `light`, or a contributed theme's id. */
+export type Theme = string;
 
 export interface FrontendSettings {
   theme: Theme;
+  /** Theme color overrides: token (without `--color-`) to hex color. */
+  colors: Record<string, string>;
+  /** Command id to keys, replacing the defaults; empty removes them. */
+  keybindings: Record<string, string[]>;
   fontSize: number;
   fontFamily: string;
   tabSize: number;
@@ -82,7 +87,12 @@ export type AppEvent =
   | { type: "extensionsChanged" }
   | { type: "extensionMessage"; extension: string; level: MessageLevel; message: string }
   | { type: "extensionFailed"; id: string; name: string; reason: string }
-  | { type: "documentEdited"; documentId: number };
+  | { type: "documentEdited"; documentId: number }
+  | { type: "extensionStatusItemsChanged" }
+  | { type: "extensionViewChanged"; view: string }
+  | { type: "extensionShowView"; view: string }
+  | { type: "decorationsChanged"; documentId: number }
+  | { type: "extensionReveal"; documentId: number; start: Position; end: Position };
 
 export const getWorkspace = () => call<WorkspaceInfo | null>("workspace_get");
 export const openWorkspaceDialog = () => call<WorkspaceInfo | null>("workspace_open_dialog");

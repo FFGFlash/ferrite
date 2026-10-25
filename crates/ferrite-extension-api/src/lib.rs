@@ -40,10 +40,11 @@ pub mod bindings {
     pub_export_macro: true,
     export_macro_name: "export_extension",
     default_bindings_module: "ferrite_extension_api::bindings",
+    additional_derives: [PartialEq],
   });
 }
 
-pub use bindings::ferrite::extension::{host, types};
+pub use bindings::ferrite::extension::{host, types, workbench};
 pub use bindings::{Guest, export_extension};
 
 /// The API version this crate implements, as written in `api_version` in

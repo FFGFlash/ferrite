@@ -12,7 +12,7 @@ use serde::Serialize;
 use tauri::ipc::Channel;
 use tauri::{AppHandle, Manager, State};
 
-use crate::editor::protocol::DocumentSummary;
+use crate::editor::protocol::{DocumentSummary, Position};
 use crate::settings::FrontendSettings;
 
 #[derive(Debug, Clone, Serialize)]
@@ -85,6 +85,26 @@ pub enum AppEvent {
   /// An extension edited a document.
   DocumentEdited {
     document_id: u64,
+  },
+  /// Extension status bar items changed.
+  ExtensionStatusItemsChanged,
+  /// The content of an extension view changed.
+  ExtensionViewChanged {
+    view: String,
+  },
+  /// An extension asked to show one of its views.
+  ExtensionShowView {
+    view: String,
+  },
+  /// A document's extension decorations changed.
+  DecorationsChanged {
+    document_id: u64,
+  },
+  /// An extension asked to select and show a range in a document.
+  ExtensionReveal {
+    document_id: u64,
+    start: Position,
+    end: Position,
   },
 }
 

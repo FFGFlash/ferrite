@@ -1,8 +1,11 @@
 import { memo } from "react";
+import { executeCommand } from "../commands/registry";
 import type { AppInfo } from "../ipc";
 import type { LanguageStatus } from "../ipc/editor";
+import type { StatusItem } from "../ipc/extensions";
 import { documentsStore } from "../state/documents";
 import { editorStatus } from "../state/editorStatus";
+import { statusItemsStore } from "../state/extensions";
 import { useStore } from "../state/store";
 import "./StatusBar.css";
 
@@ -14,6 +17,12 @@ export const StatusBar = memo(function StatusBar({ appInfo }: StatusBarProps) {
   const status = useStore(editorStatus);
   const { documents, activeId } = useStore(documentsStore);
   const active = documents.find((document) => document.id === activeId);
+  const items = useStore(statusItemsStore);
+  const side = (alignment: StatusItem["alignment"]) =>
+    items
+      .filter((item) => item.alignment === alignment)
+      .sort((a, b) => b.priority - a.priority)
+      .map((item) => <ExtensionItem key={item.id} item={item} />);
 
   return (
     <footer className="statusbar">
@@ -24,8 +33,10 @@ export const StatusBar = memo(function StatusBar({ appInfo }: StatusBarProps) {
             {status.selectionCount > 1 && ` (${status.selectionCount} selections)`}
           </span>
         )}
+        {side("left")}
       </div>
       <div className="statusbar__group">
+        {side("right")}
         {status?.language && <LanguageItems status={status.language} />}
         {active && (
           <>
@@ -46,6 +57,29 @@ export const StatusBar = memo(function StatusBar({ appInfo }: StatusBarProps) {
     </footer>
   );
 });
+
+/** A status bar item contributed by an extension; plain text, never markup. */
+function ExtensionItem({ item }: { item: StatusItem }) {
+  const title = item.tooltip ?? item.extension;
+  const command = item.command;
+  if (command) {
+    return (
+      <button
+        type="button"
+        className="statusbar__item statusbar__button"
+        title={title}
+        onClick={() => void executeCommand(command)}
+      >
+        {item.text}
+      </button>
+    );
+  }
+  return (
+    <span className="statusbar__item" title={title}>
+      {item.text}
+    </span>
+  );
+}
 
 function serverText(server: NonNullable<LanguageStatus["server"]>): string {
   switch (server.state) {

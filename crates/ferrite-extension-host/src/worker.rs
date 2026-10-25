@@ -71,6 +71,8 @@ pub enum Event {
   Command {
     command: String,
     context: CommandContext,
+    /// From a view item or menu; see `command-argument`.
+    argument: Option<String>,
     reply: Reply,
   },
 }
@@ -325,7 +327,12 @@ fn run(shared: &Weak<Shared>, setup: &Setup) -> Result<(), Failure> {
     let shared = shared.upgrade().ok_or("the editor is closing")?;
     (shared.runtime()?, shared.budgets())
   };
-  let component = runtime.compile(&setup.manifest.entrypoint)?;
+  let entrypoint = setup
+    .manifest
+    .entrypoint
+    .as_ref()
+    .ok_or("has no code to run")?;
+  let component = runtime.compile(entrypoint)?;
   let mut store = Store::new(
     runtime.engine(),
     StoreState {
@@ -401,11 +408,14 @@ fn run(shared: &Weak<Shared>, setup: &Setup) -> Result<(), Failure> {
       Event::Command {
         command,
         context,
+        argument,
         reply,
       } => {
+        store.data_mut().api.argument = argument;
         let result = guarded(&mut store, budgets.command, "The command", |store| {
           extension.call_run_command(&mut *store, &command, &context)
         });
+        store.data_mut().api.argument = None;
         match result {
           Ok(outcome) => {
             let _ = reply.send(outcome.map_err(|message| truncate(&message)));
@@ -568,6 +578,7 @@ mod tests {
         document: None,
         selections: Vec::new(),
       },
+      argument: None,
       reply,
     };
     assert!(
@@ -590,6 +601,7 @@ mod tests {
           document: None,
           selections: Vec::new(),
         },
+        argument: None,
         reply,
       })
       .expect("queued");

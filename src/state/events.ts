@@ -2,8 +2,15 @@
 import { activeEditor } from "../editor/activeEditor";
 import { subscribeToEvents, type AppEvent } from "../ipc/workspace";
 import { applySettings } from "./appearance";
-import { documentsStore, setDirty, updateSummary } from "./documents";
-import { refreshExtensions, showExtensionFailure, showExtensionMessage } from "./extensions";
+import { documentsStore, revealInDocument, setDirty, updateSummary } from "./documents";
+import {
+  refreshExtensions,
+  refreshStatusItems,
+  showExtensionFailure,
+  showExtensionMessage,
+  showView,
+  viewChanged,
+} from "./extensions";
 import { notify } from "./notifications";
 import { refreshDirectories, setIndexing, setWorkspace } from "./workspace";
 
@@ -38,6 +45,7 @@ export function handleEvent(event: AppEvent): void {
       break;
     case "searchCounted":
     case "syntaxUpdated":
+    case "decorationsChanged":
     case "diagnosticsChanged": {
       const editor = activeEditor.get();
       if (editor?.documentId === event.documentId) {
@@ -64,6 +72,18 @@ export function handleEvent(event: AppEvent): void {
       break;
     case "extensionFailed":
       showExtensionFailure(event.id, event.name, event.reason);
+      break;
+    case "extensionStatusItemsChanged":
+      void refreshStatusItems();
+      break;
+    case "extensionViewChanged":
+      viewChanged(event.view);
+      break;
+    case "extensionShowView":
+      showView(event.view);
+      break;
+    case "extensionReveal":
+      revealInDocument(event.documentId, event.start, event.end);
       break;
     case "documentEdited": {
       setDirty(event.documentId, true);

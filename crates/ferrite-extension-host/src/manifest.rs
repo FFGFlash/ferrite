@@ -13,6 +13,7 @@ use semver::{Version, VersionReq};
 use serde::Deserialize;
 
 use crate::config::{ConfigProperty, ConfigType, ConfigValue};
+use crate::contributions::{self, Contributions, RawContributions};
 use crate::permissions::Permission;
 
 /// The manifest file in an extension's folder.
@@ -52,6 +53,8 @@ pub enum Activation {
   Command(String),
   /// When a document of this language (e.g. `rust`) is opened.
   Language(String),
+  /// When one of its side bar views is shown.
+  View(String),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -61,6 +64,8 @@ pub struct CommandContribution {
   /// Shown before the title in the command palette; the extension's name
   /// by default.
   pub category: String,
+  /// Left out of the command palette (e.g. run only from view items).
+  pub hidden: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -72,12 +77,14 @@ pub struct Manifest {
   pub api_version: u32,
   /// The folder the manifest is in.
   pub dir: PathBuf,
-  /// The component or module to load, resolved against `dir`.
-  pub entrypoint: PathBuf,
+  /// The component or module to load, resolved against `dir`. Extensions
+  /// that only contribute themes have none.
+  pub entrypoint: Option<PathBuf>,
   pub activation: Vec<Activation>,
   pub permissions: Vec<Permission>,
   pub commands: Vec<CommandContribution>,
   pub configuration: BTreeMap<String, ConfigProperty>,
+  pub contributions: Contributions,
 }
 
 impl Manifest {
@@ -90,6 +97,13 @@ impl Manifest {
       .activation
       .iter()
       .any(|activation| matches!(activation, Activation::Language(l) if l == language))
+  }
+
+  pub fn activates_for_view(&self, view: &str) -> bool {
+    self
+      .activation
+      .iter()
+      .any(|activation| matches!(activation, Activation::View(v) if v == view))
   }
 
   pub fn declares_command(&self, id: &str) -> bool {
@@ -106,7 +120,7 @@ struct RawManifest {
   #[serde(default)]
   description: String,
   api_version: String,
-  entrypoint: String,
+  entrypoint: Option<String>,
   #[serde(default)]
   activation: Vec<String>,
   #[serde(default)]
@@ -117,6 +131,18 @@ struct RawManifest {
   commands: Vec<RawCommand>,
   #[serde(default)]
   configuration: BTreeMap<String, RawProperty>,
+  #[serde(default)]
+  themes: Vec<contributions::RawTheme>,
+  #[serde(default)]
+  keybindings: Vec<contributions::RawKeybinding>,
+  #[serde(default)]
+  menus: Vec<contributions::RawMenu>,
+  #[serde(default)]
+  status_items: Vec<contributions::RawStatusItem>,
+  #[serde(default)]
+  views: Vec<contributions::RawView>,
+  #[serde(default)]
+  decorations: BTreeMap<String, contributions::RawDecoration>,
 }
 
 #[derive(Deserialize, Default)]
@@ -140,6 +166,8 @@ struct RawCommand {
   id: String,
   title: String,
   category: Option<String>,
+  #[serde(default)]
+  hidden: bool,
 }
 
 #[derive(Deserialize)]
@@ -172,22 +200,27 @@ pub fn load(
     return Err(invalid(format!("{MANIFEST_FILE} is too large")));
   }
   let text = std::fs::read_to_string(&path).map_err(read)?;
-  let manifest = parse(&text, dir, editor_version, development)?;
-  let entry = std::fs::metadata(&manifest.entrypoint).map_err(|source| ManifestError::Read {
-    path: manifest.entrypoint.clone(),
-    source,
-  })?;
-  if !entry.is_file() {
-    return Err(invalid(format!(
-      "entrypoint {} is not a file",
-      manifest.entrypoint.display()
-    )));
+  let mut manifest = parse(&text, dir, editor_version, development)?;
+  if let Some(entrypoint) = &manifest.entrypoint {
+    let entry = std::fs::metadata(entrypoint).map_err(|source| ManifestError::Read {
+      path: entrypoint.clone(),
+      source,
+    })?;
+    if !entry.is_file() {
+      return Err(invalid(format!(
+        "entrypoint {} is not a file",
+        entrypoint.display()
+      )));
+    }
+    if entry.len() > MAX_ENTRYPOINT_BYTES {
+      return Err(invalid(format!(
+        "entrypoint is larger than {} MiB",
+        MAX_ENTRYPOINT_BYTES / 1024 / 1024
+      )));
+    }
   }
-  if entry.len() > MAX_ENTRYPOINT_BYTES {
-    return Err(invalid(format!(
-      "entrypoint is larger than {} MiB",
-      MAX_ENTRYPOINT_BYTES / 1024 / 1024
-    )));
+  for theme in &mut manifest.contributions.themes {
+    contributions::load_theme_colors(dir, theme)?;
   }
   Ok(manifest)
 }
@@ -240,7 +273,11 @@ pub fn parse(
     }
   }
 
-  let entrypoint = resolve_entrypoint(dir, &raw.entrypoint, development)?;
+  let entrypoint = raw
+    .entrypoint
+    .as_deref()
+    .map(|entrypoint| resolve_entrypoint(dir, entrypoint, development))
+    .transpose()?;
 
   let mut commands: Vec<CommandContribution> = Vec::new();
   for command in raw.commands {
@@ -276,6 +313,7 @@ pub fn parse(
       category: command
         .category
         .map_or_else(|| name.to_owned(), |category| category.trim().to_owned()),
+      hidden: command.hidden,
     });
   }
 
@@ -294,9 +332,16 @@ pub fn parse(
       && !language.is_empty()
     {
       Activation::Language(language.to_owned())
+    } else if let Some(view) = event.strip_prefix("on-view:") {
+      if !raw.views.iter().any(|v| v.id == view) {
+        return Err(invalid(format!(
+          "activation {event:?} names a view that is not declared"
+        )));
+      }
+      Activation::View(view.to_owned())
     } else {
       return Err(invalid(format!(
-        "unknown activation event {event:?} (expected \"on-startup\", \"on-command:<id>\", or \"on-language:<id>\")"
+        "unknown activation event {event:?} (expected \"on-startup\", \"on-command:<id>\", \"on-language:<id>\", or \"on-view:<id>\")"
       )));
     };
     activation.push(parsed);
@@ -326,6 +371,30 @@ pub fn parse(
     configuration.insert(key, property);
   }
 
+  let contributions = contributions::parse(
+    RawContributions {
+      themes: raw.themes,
+      keybindings: raw.keybindings,
+      menus: raw.menus,
+      status_items: raw.status_items,
+      views: raw.views,
+      decorations: raw.decorations,
+    },
+    &raw.id,
+    &commands,
+  )?;
+  if entrypoint.is_none()
+    && (!commands.is_empty()
+      || !activation.is_empty()
+      || !permissions.is_empty()
+      || !configuration.is_empty()
+      || contributions.needs_code())
+  {
+    return Err(invalid(
+      "entrypoint is required unless the extension only contributes themes",
+    ));
+  }
+
   Ok(Manifest {
     id: raw.id,
     name: name.to_owned(),
@@ -338,6 +407,7 @@ pub fn parse(
     permissions,
     commands,
     configuration,
+    contributions,
   })
 }
 
@@ -468,7 +538,10 @@ minimum = 0
     let manifest = parse_text(VALID).expect("valid");
     assert_eq!(manifest.id, "example.tidy");
     assert_eq!(manifest.version, Version::new(0, 1, 0));
-    assert_eq!(manifest.entrypoint, Path::new("/ext").join("tidy.wasm"));
+    assert_eq!(
+      manifest.entrypoint,
+      Some(Path::new("/ext").join("tidy.wasm"))
+    );
     assert!(manifest.activates_on_startup());
     assert!(manifest.activates_for_language("rust"));
     assert_eq!(manifest.permissions, vec![Permission::DocumentsRead]);
@@ -533,5 +606,98 @@ minimum = 0
     assert!(error_of(&out_of_range).contains("at least 0"));
     let unknown = VALID.replace("type = \"integer\"", "type = \"color\"");
     assert!(error_of(&unknown).contains("unknown type"));
+  }
+
+  const WORKBENCH: &str = r##"
+[[keybindings]]
+command = "example.tidy.trim"
+key = "Shift+Ctrl+T"
+mac = "mod+shift+t"
+when = "editorFocus"
+
+[[menus]]
+location = "editor/context"
+command = "example.tidy.trim"
+
+[[status_items]]
+id = "count"
+text = "3 problems"
+command = "example.tidy.trim"
+
+[[views]]
+id = "problems"
+title = "Problems"
+icon = "check"
+
+[decorations.todo]
+background = "#E5C07B33"
+underline = "dotted"
+[decorations.todo.light]
+background = "#98680122"
+"##;
+
+  #[test]
+  fn parses_workbench_contributions() {
+    let manifest = parse_text(&format!("{VALID}{WORKBENCH}")).expect("valid");
+    let contributions = &manifest.contributions;
+    let binding = &contributions.keybindings[0];
+    assert_eq!(binding.key, "ctrl+shift+t");
+    assert_eq!(binding.mac.as_deref(), Some("mod+shift+t"));
+    assert!(binding.editor_focus);
+    assert_eq!(
+      contributions.menus[0].location,
+      crate::contributions::MenuLocation::EditorContext
+    );
+    let item = &contributions.status_items[0];
+    assert_eq!(item.alignment, crate::contributions::Alignment::Left);
+    assert_eq!(item.text.as_deref(), Some("3 problems"));
+    assert_eq!(contributions.views[0].full_id, "example.tidy.problems");
+    let todo = &contributions.decorations[0];
+    assert_eq!(todo.key, "example.tidy/todo");
+    assert_eq!(todo.dark.background.as_deref(), Some("#e5c07b33"));
+    assert_eq!(todo.light.background.as_deref(), Some("#98680122"));
+  }
+
+  #[test]
+  fn rejects_invalid_workbench_contributions() {
+    let with =
+      |old: &str, new: &str| error_of(&format!("{VALID}{}", WORKBENCH.replacen(old, new, 1)));
+    assert!(
+      with(
+        "command = \"example.tidy.trim\"\nkey",
+        "command = \"other.x\"\nkey"
+      )
+      .contains("not one of")
+    );
+    assert!(with("Shift+Ctrl+T", "hyper+t").contains("unknown modifier"));
+    assert!(with("editor/context", "title/bar").contains("location"));
+    assert!(with("icon = \"check\"", "icon = \"skull\"").contains("icon"));
+    assert!(with("#E5C07B33", "red").contains("hex color"));
+    assert!(with("underline = \"dotted\"", "underline = \"zigzag\"").contains("underline"));
+    let view = VALID.replace("\"on-startup\"", "\"on-view:missing\"");
+    assert!(error_of(&view).contains("view that is not declared"));
+  }
+
+  #[test]
+  fn only_theme_extensions_may_omit_the_entrypoint() {
+    let themes = r#"
+id = "example.themes"
+name = "Themes"
+version = "1.0.0"
+api_version = "1"
+
+[[themes]]
+id = "night"
+label = "Night"
+kind = "dark"
+path = "themes/night.toml"
+"#;
+    let manifest = parse_text(themes).expect("valid");
+    assert!(manifest.entrypoint.is_none());
+    assert_eq!(manifest.contributions.themes[0].id, "example.themes.night");
+    let escaping = themes.replace("themes/night.toml", "../night.toml");
+    assert!(error_of(&escaping).contains("inside the extension's folder"));
+    let code = VALID.replace("entrypoint = \"tidy.wasm\"\n", "");
+    assert!(error_of(&code).contains("entrypoint is required"));
   }
 }

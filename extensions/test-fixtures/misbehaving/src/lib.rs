@@ -4,9 +4,9 @@
 
 use ferrite_extension_api::types::{
   Activation, CommandContext, ConfigValue, Diagnostic, DocumentChange, DocumentId, DocumentInfo,
-  LogLevel, MessageLevel, Position, Range, Severity, TextEdit,
+  LogLevel, MessageLevel, Position, Range, Severity, StatusItem, TextEdit, ViewItem,
 };
-use ferrite_extension_api::{Guest, export_extension, host};
+use ferrite_extension_api::{Guest, export_extension, host, workbench};
 
 fn text_setting(key: &str) -> String {
   match host::configuration(key) {
@@ -138,6 +138,68 @@ impl Guest for Misbehaving {
           text_setting("on_change"),
           host::configuration("limit"),
           host::configuration("unknown"),
+        ));
+      }
+      "ui" => {
+        let status = workbench::set_status_item(
+          "state",
+          Some(&StatusItem {
+            text: "busy".into(),
+            tooltip: Some("Working".into()),
+            command: Some("test.misbehaving.argument".into()),
+          }),
+        );
+        let item = |id: &str, parent: Option<&str>| ViewItem {
+          id: id.into(),
+          parent: parent.map(Into::into),
+          label: id.to_uppercase(),
+          description: None,
+          tooltip: None,
+          expanded: true,
+          command: Some("test.misbehaving.argument".into()),
+          argument: Some(format!("item {id}")),
+        };
+        let view = workbench::set_view_items("items", &[item("a", None), item("b", Some("a"))]);
+        let message = workbench::set_view_message("items", Some("Two items"));
+        let mark = Range {
+          start: at(0, 0),
+          end: at(0, 2),
+        };
+        let decorations = workbench::set_decorations(document, version, "mark", &[mark]);
+        let reveal = workbench::reveal(document, mark);
+        let shown = workbench::show_view("items");
+        report(format!(
+          "ui: {status:?} {view:?} {message:?} {decorations:?} {reveal:?} {shown:?}"
+        ));
+      }
+      "argument" => report(format!("argument: {:?}", workbench::command_argument())),
+      "uiErrors" => {
+        let status = workbench::set_status_item("nope", None);
+        let foreign = workbench::set_status_item(
+          "state",
+          Some(&StatusItem {
+            text: "x".into(),
+            tooltip: None,
+            command: Some("other.command".into()),
+          }),
+        );
+        let orphan = workbench::set_view_items(
+          "items",
+          &[ViewItem {
+            id: "child".into(),
+            parent: Some("missing".into()),
+            label: "Child".into(),
+            description: None,
+            tooltip: None,
+            expanded: false,
+            command: None,
+            argument: None,
+          }],
+        );
+        let decoration = workbench::set_decorations(document, version, "nope", &[]);
+        let view = workbench::show_view("nope");
+        report(format!(
+          "uiErrors: {status:?} {foreign:?} {orphan:?} {decoration:?} {view:?}"
         ));
       }
       other => return Err(format!("unknown command {other}")),

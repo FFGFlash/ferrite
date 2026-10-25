@@ -1,8 +1,13 @@
 /**
  * The command registry: every workbench action is a named command with an
  * optional keybinding. The command palette lists them, the keybinding
- * dispatcher runs them, and extension contributions (M7) will register into
- * the same registry.
+ * dispatcher runs them, and extension commands register into the same
+ * registry.
+ *
+ * Keybindings come from three places, in order of precedence: the user's
+ * `[keybindings]` settings (which replace a command's defaults), built-in
+ * defaults, and extension defaults. Extensions can't take a key from a
+ * built-in command, but the user can reassign anything.
  */
 import { useEffect } from "react";
 import type { KeyInput } from "../editor/keymap";
@@ -28,10 +33,20 @@ export interface Command {
   editorFocus?: boolean;
   /** Omitted from the command palette. */
   hidden?: boolean;
+  /** Who registered it; extension keybindings yield to built-in ones. */
+  source?: "builtin" | "extension";
   run: () => void | Promise<void>;
 }
 
 const registry = createStore<ReadonlyMap<string, Command>>(new Map());
+/** The user's keybindings, by command id; an empty list removes the defaults. */
+const overrides = createStore<Readonly<Record<string, readonly string[]>>>({});
+
+export function setKeybindingOverrides(
+  keybindings: Readonly<Record<string, readonly string[]>>,
+): void {
+  overrides.set(keybindings);
+}
 
 /** Registers commands; the returned function unregisters them. */
 export function registerCommands(commands: readonly Command[]): () => void {
@@ -58,7 +73,12 @@ export function getCommand(id: string): Command | undefined {
   return registry.get().get(id);
 }
 
+export function listCommands(): Command[] {
+  return [...registry.get().values()];
+}
+
 export function useCommands(): Command[] {
+  useStore(overrides);
   return [...useStore(registry).values()];
 }
 
@@ -78,7 +98,12 @@ export async function executeCommand(id: string): Promise<void> {
   }
 }
 
-function bindingsOf(command: Command, mac: boolean): string[] {
+/** The keys bound to `command` on this platform, after the user's overrides. */
+export function bindingsOf(command: Command, mac: boolean): string[] {
+  const override = overrides.get()[command.id];
+  if (override) {
+    return [...override];
+  }
   const list = command.keybinding === undefined ? [] : [command.keybinding].flat();
   return list.map((binding) =>
     typeof binding === "string" ? binding : mac ? binding.mac : binding.default,
@@ -157,7 +182,11 @@ export function commandForKey(
   mac: boolean,
   editorFocused: boolean,
 ): Command | undefined {
-  for (const command of registry.get().values()) {
+  const user = overrides.get();
+  const rank = (command: Command) =>
+    command.id in user ? 0 : command.source === "extension" ? 2 : 1;
+  const ordered = [...registry.get().values()].sort((a, b) => rank(a) - rank(b));
+  for (const command of ordered) {
     if (command.editorFocus && !editorFocused) {
       continue;
     }

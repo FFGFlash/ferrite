@@ -7,6 +7,8 @@ use std::path::{Path, PathBuf};
 use std::sync::{PoisonError, RwLock};
 
 use ferrite_core::EditorConfig;
+use ferrite_extension_host::contributions::check_theme_colors;
+use ferrite_extension_host::keys::normalize as normalize_key;
 use ferrite_lsp::{ServerCommand, ServerConfig, default_servers};
 use ferrite_workspace::ExcludeFilter;
 use serde::{Deserialize, Serialize};
@@ -20,7 +22,7 @@ const FILE_NAME: &str = "settings.toml";
 
 /// Written when the settings file does not exist yet. Every setting is shown
 /// with its default value, commented out.
-const TEMPLATE: &str = r#"# Ferrite settings. Uncomment a line to change it; save to apply.
+const TEMPLATE: &str = r##"# Ferrite settings. Uncomment a line to change it; save to apply.
 
 [editor]
 # tab_size = 4
@@ -29,7 +31,11 @@ const TEMPLATE: &str = r#"# Ferrite settings. Uncomment a line to change it; sav
 # font_family = ""          # empty: the default monospace font
 
 [workbench]
-# theme = "system"          # "system", "dark", or "light"
+# theme = "system"          # "system", "dark", "light", or an extension's theme id
+#
+# Override theme colors (hex), e.g. the editor background:
+# [workbench.colors]
+# editor-background = "#1b1b1f"
 
 [files]
 # Hidden from the explorer, Go to File, and search. Patterns without "/"
@@ -69,16 +75,17 @@ const TEMPLATE: &str = r#"# Ferrite settings. Uncomment a line to change it; sav
 # Settings that extensions declare, by extension id:
 # [extensions.settings."example.tidy"]
 # max_line_length = 120
-"#;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
-#[serde(rename_all = "lowercase")]
-pub enum Theme {
-  #[default]
-  System,
-  Dark,
-  Light,
-}
+[keybindings]
+# Change a command's keys (find command ids in the Keyboard Shortcuts list).
+# "mod" is Ctrl on Windows and Linux and Cmd on macOS; "" removes them.
+# "workbench.showSearch" = "mod+shift+h"
+# "file.save" = ["mod+s", "f2"]
+"##;
+
+/// Built-in theme names; other values name a theme contributed by an
+/// extension (`<extension id>.<theme id>`).
+pub const BUILTIN_THEMES: &[&str] = &["system", "dark", "light"];
 
 #[derive(Debug, Clone, PartialEq, Deserialize, Default)]
 #[serde(default, deny_unknown_fields)]
@@ -89,6 +96,26 @@ pub struct Settings {
   pub search: SearchSettings,
   pub lsp: LspSettings,
   pub extensions: ExtensionsSettings,
+  /// Command id to its keys, overriding the defaults.
+  pub keybindings: BTreeMap<String, KeybindingSetting>,
+}
+
+/// One key or several; `""` or `[]` removes a command's keys.
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(untagged)]
+pub enum KeybindingSetting {
+  One(String),
+  Many(Vec<String>),
+}
+
+impl KeybindingSetting {
+  fn keys(&self) -> Vec<&str> {
+    match self {
+      Self::One(key) if key.trim().is_empty() => Vec::new(),
+      Self::One(key) => vec![key.as_str()],
+      Self::Many(keys) => keys.iter().map(String::as_str).collect(),
+    }
+  }
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize)]
@@ -120,10 +147,21 @@ pub struct EditorSettings {
   pub font_family: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Deserialize, Default)]
+#[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct WorkbenchSettings {
-  pub theme: Theme,
+  pub theme: String,
+  /// Theme color overrides: token to hex color.
+  pub colors: BTreeMap<String, String>,
+}
+
+impl Default for WorkbenchSettings {
+  fn default() -> Self {
+    Self {
+      theme: "system".into(),
+      colors: BTreeMap::new(),
+    }
+  }
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize)]
@@ -197,7 +235,10 @@ impl Default for SearchSettings {
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct FrontendSettings {
-  pub theme: Theme,
+  pub theme: String,
+  pub colors: BTreeMap<String, String>,
+  /// Command id to normalized keys; empty removes the defaults.
+  pub keybindings: BTreeMap<String, Vec<String>>,
   pub font_size: u32,
   pub font_family: String,
   pub tab_size: usize,
@@ -241,6 +282,20 @@ impl Settings {
       .any(|folder| folder.trim().is_empty())
     {
       return Err("extensions.development entries must be folder paths".into());
+    }
+    let theme = self.workbench.theme.trim();
+    if theme.is_empty() || theme.len() > 128 {
+      return Err(format!(
+        "workbench.theme must be one of {}, or an extension's theme id",
+        BUILTIN_THEMES.join(", ")
+      ));
+    }
+    check_theme_colors(&self.workbench.colors)
+      .map_err(|error| format!("workbench.colors: {error}"))?;
+    for (command, setting) in &self.keybindings {
+      for key in setting.keys() {
+        normalize_key(key).map_err(|error| format!("keybindings.\"{command}\": {error}"))?;
+      }
     }
     Ok(())
   }
@@ -302,7 +357,21 @@ impl Settings {
 
   pub fn frontend(&self) -> FrontendSettings {
     FrontendSettings {
-      theme: self.workbench.theme,
+      theme: self.workbench.theme.trim().to_owned(),
+      // Validated on load.
+      colors: check_theme_colors(&self.workbench.colors).unwrap_or_default(),
+      keybindings: self
+        .keybindings
+        .iter()
+        .map(|(command, setting)| {
+          let keys = setting
+            .keys()
+            .into_iter()
+            .filter_map(|key| normalize_key(key).ok())
+            .collect();
+          (command.clone(), keys)
+        })
+        .collect(),
       font_size: self.editor.font_size,
       font_family: self.editor.font_family.clone(),
       tab_size: self.editor.tab_size,
@@ -431,12 +500,8 @@ pub fn settings_file(state: State<'_, SettingsState>) -> Result<String, CommandE
 /// Sets `workbench.theme` in the settings file, keeping its comments and
 /// formatting, and applies it.
 #[tauri::command]
-pub fn settings_set_theme(app: AppHandle, theme: Theme) -> Result<(), CommandError> {
-  let name = match theme {
-    Theme::System => "system",
-    Theme::Dark => "dark",
-    Theme::Light => "light",
-  };
+pub fn settings_set_theme(app: AppHandle, theme: String) -> Result<(), CommandError> {
+  let name = theme.as_str();
   edit(&app, |document| {
     if !document.contains_table("workbench") {
       document["workbench"] = toml_edit::table();
@@ -482,7 +547,7 @@ mod tests {
       Settings::parse("[editor]\ntab_size = 2\n[workbench]\ntheme = \"light\"\n").expect("valid");
     assert_eq!(settings.editor.tab_size, 2);
     assert!(settings.editor.insert_spaces);
-    assert_eq!(settings.workbench.theme, Theme::Light);
+    assert_eq!(settings.workbench.theme, "light");
     assert_eq!(settings.files.exclude, FilesSettings::default().exclude);
   }
 
@@ -492,13 +557,38 @@ mod tests {
     assert!(unknown.contains("tab_width"), "{unknown}");
     let range = Settings::parse("[editor]\ntab_size = 0\n").expect_err("out of range");
     assert!(range.contains("tab_size"));
-    let theme = Settings::parse("[workbench]\ntheme = \"neon\"\n").expect_err("bad theme");
-    assert!(theme.contains("neon"), "{theme}");
+    let theme = Settings::parse("[workbench]\ntheme = \"\"\n").expect_err("empty theme");
+    assert!(theme.contains("workbench.theme"), "{theme}");
+    let color = Settings::parse("[workbench.colors]\ntext = \"red\"\n").expect_err("bad color");
+    assert!(color.contains("workbench.colors"), "{color}");
+    let key = Settings::parse("[keybindings]\n\"file.save\" = \"hyper+s\"\n").expect_err("bad key");
+    assert!(key.contains("file.save"), "{key}");
     let glob = Settings::parse("[files]\nexclude = [\"[x\"]\n").expect_err("bad glob");
     assert!(glob.contains("files.exclude"));
     let server =
       Settings::parse("[lsp.servers.mine]\ncommand = \"x\"\n").expect_err("no languages");
     assert!(server.contains("lsp.servers.mine"), "{server}");
+  }
+
+  #[test]
+  fn keybindings_and_colors_reach_the_frontend_normalized() {
+    let settings = Settings::parse(
+      r##"
+[workbench]
+theme = "example.themes.night"
+[workbench.colors]
+editor-background = "#ABCDEF"
+[keybindings]
+"file.save" = ["Ctrl+S", "f2"]
+"workbench.showSearch" = ""
+"##,
+    )
+    .expect("valid");
+    let frontend = settings.frontend();
+    assert_eq!(frontend.theme, "example.themes.night");
+    assert_eq!(frontend.colors["editor-background"], "#abcdef");
+    assert_eq!(frontend.keybindings["file.save"], ["ctrl+s", "f2"]);
+    assert!(frontend.keybindings["workbench.showSearch"].is_empty());
   }
 
   #[test]

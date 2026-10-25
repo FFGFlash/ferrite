@@ -5,7 +5,7 @@
 //! become one validated, versioned change in the editor core; nothing an
 //! extension sends can reach the document storage any other way.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::ops::Range as Span;
 use std::sync::{Arc, RwLock, Weak};
 use std::time::Instant;
@@ -16,14 +16,17 @@ use ferrite_text::{Edit, TextBuffer};
 use crate::bindings::ferrite::extension::host::Host;
 use crate::bindings::ferrite::extension::types::{
   self, ApiError, ConfigValue as WitConfigValue, Diagnostic, DocumentInfo, LineSlice, LogLevel,
-  MessageLevel, Permission as WitPermission, Position, Range, TextEdit, TextSlice,
+  MessageLevel, Permission as WitPermission, Position, Range, StatusItem, TextEdit, TextSlice,
+  ViewItem,
 };
+use crate::bindings::ferrite::extension::workbench::Host as WorkbenchHost;
 use crate::config::ConfigValue;
 use crate::host::{Shared, StoredDiagnostic};
+use crate::manifest::Manifest;
 use crate::permissions::Permission;
 use crate::runtime::StoreState;
 use crate::worker::Setup;
-use crate::{Notification, Severity};
+use crate::{Notification, Severity, StatusContent, ViewEntry};
 
 /// Most lines returned by one `read-lines` call.
 pub const MAX_READ_LINES: usize = 10_000;
@@ -82,24 +85,29 @@ impl RateLimit {
 /// What host functions know about the calling extension.
 pub struct ApiContext {
   shared: Weak<Shared>,
+  manifest: Arc<Manifest>,
   id: String,
   name: String,
   granted: BTreeSet<Permission>,
   config: Arc<RwLock<BTreeMap<String, ConfigValue>>>,
   logs: RateLimit,
   messages: RateLimit,
+  /// The argument of the command being run.
+  pub argument: Option<String>,
 }
 
 impl ApiContext {
   pub fn new(shared: Weak<Shared>, setup: &Setup) -> Self {
     Self {
       shared,
+      manifest: setup.manifest.clone(),
       id: setup.manifest.id.clone(),
       name: setup.manifest.name.clone(),
       granted: setup.granted.clone(),
       config: setup.config.clone(),
       logs: RateLimit::new(200.0, 50.0),
       messages: RateLimit::new(10.0, 1.0),
+      argument: None,
     }
   }
 
@@ -444,6 +452,185 @@ impl Host for StoreState {
       .embedder
       .notify(Notification::DiagnosticsChanged(DocumentId::from_raw(id)));
     Ok(())
+  }
+}
+
+/// Most items in one view.
+pub const MAX_VIEW_ITEMS: usize = 5_000;
+/// Most decorated ranges per decoration type and document.
+pub const MAX_DECORATIONS: usize = 10_000;
+
+impl ApiContext {
+  fn own_command(&self, command: Option<&String>) -> Result<(), ApiError> {
+    match command {
+      Some(command) if !self.manifest.declares_command(command) => Err(ApiError::InvalidArgument(
+        format!("{command:?} is not one of this extension's commands"),
+      )),
+      _ => Ok(()),
+    }
+  }
+
+  fn view(&self, view: &str) -> Result<String, ApiError> {
+    self
+      .manifest
+      .contributions
+      .view(view)
+      .map(|declared| declared.full_id.clone())
+      .ok_or_else(|| ApiError::InvalidArgument(format!("no view {view:?} is declared")))
+  }
+}
+
+impl WorkbenchHost for StoreState {
+  fn set_status_item(&mut self, id: String, item: Option<StatusItem>) -> Result<(), ApiError> {
+    let api = &self.api;
+    if api.manifest.contributions.status_item(&id).is_none() {
+      return Err(ApiError::InvalidArgument(format!(
+        "no status item {id:?} is declared"
+      )));
+    }
+    let content = match item {
+      Some(item) => {
+        api.own_command(item.command.as_ref())?;
+        Some(StatusContent {
+          text: cut(item.text.trim(), 100),
+          tooltip: item.tooltip.map(|tooltip| cut(&tooltip, 500)),
+          command: item.command,
+        })
+      }
+      None => None,
+    };
+    api.shared()?.set_status_item(&api.id, &id, content);
+    Ok(())
+  }
+
+  fn set_view_items(&mut self, view: String, items: Vec<ViewItem>) -> Result<(), ApiError> {
+    let api = &self.api;
+    let full_id = api.view(&view)?;
+    if items.len() > MAX_VIEW_ITEMS {
+      return Err(ApiError::TooLarge(format!(
+        "a view can show at most {MAX_VIEW_ITEMS} items"
+      )));
+    }
+    let mut seen = HashSet::new();
+    let mut entries = Vec::with_capacity(items.len());
+    for item in items {
+      if item.id.is_empty() || item.id.len() > 200 {
+        return Err(ApiError::InvalidArgument(
+          "view item ids must be 1 to 200 bytes".into(),
+        ));
+      }
+      if let Some(parent) = &item.parent
+        && !seen.contains(parent)
+      {
+        return Err(ApiError::InvalidArgument(format!(
+          "view item {:?}: its parent {parent:?} must come before it",
+          item.id
+        )));
+      }
+      api.own_command(item.command.as_ref())?;
+      if !seen.insert(item.id.clone()) {
+        return Err(ApiError::InvalidArgument(format!(
+          "view item {:?} appears twice",
+          item.id
+        )));
+      }
+      entries.push(ViewEntry {
+        id: item.id,
+        parent: item.parent,
+        label: cut(&item.label, 200),
+        description: item.description.map(|text| cut(&text, 200)),
+        tooltip: item.tooltip.map(|text| cut(&text, 1_000)),
+        expanded: item.expanded,
+        command: item.command,
+        argument: item.argument.map(|text| cut(&text, 4_000)),
+      });
+    }
+    api
+      .shared()?
+      .update_view(&full_id, |content| content.items = entries);
+    Ok(())
+  }
+
+  fn set_view_message(&mut self, view: String, message: Option<String>) -> Result<(), ApiError> {
+    let full_id = self.api.view(&view)?;
+    let message = message.map(|text| cut(&text, 500));
+    self
+      .api
+      .shared()?
+      .update_view(&full_id, |content| content.message = message);
+    Ok(())
+  }
+
+  fn show_view(&mut self, view: String) -> Result<(), ApiError> {
+    let full_id = self.api.view(&view)?;
+    self
+      .api
+      .shared()?
+      .embedder
+      .notify(Notification::ShowView(full_id));
+    Ok(())
+  }
+
+  fn set_decorations(
+    &mut self,
+    id: u64,
+    version: u64,
+    decoration: String,
+    ranges: Vec<Range>,
+  ) -> Result<(), ApiError> {
+    let shared = self.api.require(Permission::DocumentsRead)?;
+    if self
+      .api
+      .manifest
+      .contributions
+      .decoration(&decoration)
+      .is_none()
+    {
+      return Err(ApiError::InvalidArgument(format!(
+        "no decoration type {decoration:?} is declared"
+      )));
+    }
+    if ranges.len() > MAX_DECORATIONS {
+      return Err(ApiError::TooLarge(format!(
+        "at most {MAX_DECORATIONS} ranges can be decorated with one type"
+      )));
+    }
+    let extension = self.api.id.clone();
+    with_editor(&shared, |editor| {
+      let document = find(editor, id)?;
+      shared.store_decorations(document, &extension, &decoration, version, |buffer| {
+        ranges.iter().map(|range| to_span(buffer, *range)).collect()
+      })
+    })
+    .ok_or_else(editor_unavailable)??;
+    shared
+      .embedder
+      .notify(Notification::DecorationsChanged(DocumentId::from_raw(id)));
+    Ok(())
+  }
+
+  fn reveal(&mut self, id: u64, range: Range) -> Result<(), ApiError> {
+    let shared = self.api.require(Permission::DocumentsRead)?;
+    let (start, end) = with_editor(&shared, |editor| {
+      let document = find(editor, id)?;
+      let buffer = document.buffer();
+      let span = to_span(buffer, range)?;
+      Ok::<_, ApiError>((
+        buffer.offset_to_utf16(span.start),
+        buffer.offset_to_utf16(span.end),
+      ))
+    })
+    .ok_or_else(editor_unavailable)??;
+    shared.embedder.notify(Notification::Reveal {
+      document: DocumentId::from_raw(id),
+      start,
+      end,
+    });
+    Ok(())
+  }
+
+  fn command_argument(&mut self) -> Option<String> {
+    self.api.argument.clone()
   }
 }
 

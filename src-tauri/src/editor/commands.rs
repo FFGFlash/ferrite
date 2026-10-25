@@ -33,14 +33,26 @@ pub fn document_list(state: State<'_, EditorState>) -> Vec<DocumentSummary> {
   state.lock().documents().map(DocumentSummary::of).collect()
 }
 
+/// Creates an untitled document, optionally containing `text` (e.g. the
+/// keyboard shortcuts list), inserted as its first edit.
 #[tauri::command]
 pub fn document_new(
   app: AppHandle,
   state: State<'_, EditorState>,
+  text: Option<String>,
 ) -> Result<DocumentSummary, CommandError> {
   let mut editor = state.lock();
   let id = editor.create_untitled();
   tracing::info!(document = %id, "created untitled document");
+  if let Some(text) = text.filter(|text| !text.is_empty()) {
+    let document = editor.document_mut(id)?;
+    document.apply(EditorOp::Insert(text))?;
+    document.apply(EditorOp::SetCursor {
+      offset: 0,
+      extend: false,
+      add: false,
+    })?;
+  }
   let document = editor.document(id)?;
   app.state::<ExtensionsState>().sync(document);
   Ok(DocumentSummary::of(document))
@@ -148,7 +160,7 @@ fn build_view(
   );
   let lines = view.start_line..view.end_line;
   (view.diagnostics, view.language) = lsp.view(document, lines.clone());
-  extensions.add_to_view(
+  view.decorations = extensions.add_to_view(
     document,
     lines,
     &mut view.diagnostics,
@@ -215,10 +227,12 @@ pub fn editor_apply(
 pub enum ClipboardAction {
   Copy,
   Cut,
+  Paste,
 }
 
-/// Copies (or cuts) the selected text to the system clipboard. The text goes
-/// straight from the backend to the clipboard without crossing IPC.
+/// Copies (or cuts) the selected text to the system clipboard, or pastes
+/// from it. The text goes straight between the backend and the clipboard
+/// without crossing IPC. (Keyboard paste arrives as an insert instead.)
 #[tauri::command]
 pub fn editor_clipboard(
   app: AppHandle,
@@ -229,6 +243,19 @@ pub fn editor_clipboard(
   known: Option<KnownDto>,
   search: Option<SearchQueryDto>,
 ) -> Result<EditorView, CommandError> {
+  if let ClipboardAction::Paste = action {
+    // Read before taking the editor lock: the clipboard can be slow.
+    let text = app
+      .clipboard()
+      .read_text()
+      .map_err(|error| CommandError::new("clipboard", format!("Could not paste: {error}")))?;
+    let mut editor = state.lock();
+    let document = editor.document_mut(DocumentId::from_raw(id))?;
+    if !text.is_empty() {
+      document.apply(EditorOp::Insert(text))?;
+    }
+    return Ok(build_view(&app, document, viewport, known, search));
+  }
   let mut editor = state.lock();
   let document = editor.document_mut(DocumentId::from_raw(id))?;
   if let Some(text) = document.selected_text() {

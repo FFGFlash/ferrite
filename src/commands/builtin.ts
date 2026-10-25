@@ -17,7 +17,8 @@ import { setTheme, settingsFilePath } from "../ipc/workspace";
 import { layoutStore, updateLayout } from "../state/layout";
 import { notify } from "../state/notifications";
 import { closeFolder, collapseAll, openFolder, workspaceStore } from "../state/workspace";
-import type { Command } from "./registry";
+import { isMac } from "../editor/keymap";
+import { bindingsOf, commandLabel, formatKeybinding, listCommands, type Command } from "./registry";
 
 const hasEditor = () => activeEditor.get() !== null;
 const hasDocument = () => documentsStore.get().activeId !== null;
@@ -289,4 +290,43 @@ export const builtinCommands: Command[] = [
     title: "Color Theme: Follow System",
     run: () => setTheme("system"),
   },
+  {
+    id: "preferences.keyboardShortcuts",
+    category: "Preferences",
+    title: "Keyboard Shortcuts",
+    run: () => newFile(keyboardShortcutsText()),
+  },
 ];
+
+/**
+ * A plain-text list of every command with its id and keys, shown in a new
+ * document so it can be searched, for writing `[keybindings]` settings.
+ */
+export function keyboardShortcutsText(mac = isMac()): string {
+  const rows = listCommands()
+    .filter((command) => !command.hidden)
+    .map((command) => [
+      commandLabel(command),
+      command.id,
+      bindingsOf(command, mac)
+        .map((binding) => formatKeybinding(binding, mac))
+        .join(", "),
+    ])
+    .sort((a, b) => a[0]!.localeCompare(b[0]!));
+  const header = ["Command", "Id", "Keys"];
+  const widths = [0, 1].map((column) =>
+    Math.max(header[column]!.length, ...rows.map((row) => row[column]!.length)),
+  );
+  const line = (row: string[]) =>
+    `${row[0]!.padEnd(widths[0]!)}  ${row[1]!.padEnd(widths[1]!)}  ${row[2]}`.trimEnd();
+  return [
+    "Keyboard shortcuts",
+    "",
+    "Change them in settings.toml (Preferences: Open Settings) under [keybindings], e.g.",
+    '  "workbench.showSearch" = "mod+shift+h"     "mod" is Ctrl, or Cmd on macOS; "" removes them',
+    "",
+    line(header),
+    ...rows.map(line),
+    "",
+  ].join("\n");
+}

@@ -254,7 +254,7 @@ fn state_of(host: &ExtensionHost) -> (ExtensionState, Option<String>) {
 fn run(setup: &Setup, command: &str, document: Option<DocumentId>) -> Result<(), String> {
   setup
     .host
-    .run_command(&format!("test.misbehaving.{command}"), document)?
+    .run_command(&format!("test.misbehaving.{command}"), document, None)?
     .wait()
 }
 
@@ -278,7 +278,7 @@ fn tidy_flags_and_trims_trailing_whitespace() {
   assert_eq!(diagnostics[0].code.as_deref(), Some("trailing-whitespace"));
 
   s.host
-    .run_command("example.tidy.trimTrailingWhitespace", Some(id))
+    .run_command("example.tidy.trimTrailingWhitespace", Some(id), None)
     .expect("queued")
     .wait()
     .expect("trimmed");
@@ -335,7 +335,7 @@ max_line_length = 10
   );
 
   s.host
-    .run_command("example.tidy.countWords", Some(id))
+    .run_command("example.tidy.countWords", Some(id), None)
     .expect("queued")
     .wait()
     .expect("counted");
@@ -350,7 +350,7 @@ fn extensions_wait_for_permission_and_denied_permissions_are_enforced() {
   assert_eq!(state_of(&s.host).0, ExtensionState::AwaitingPermission);
   let refused = s
     .host
-    .run_command("example.tidy.trimTrailingWhitespace", Some(id))
+    .run_command("example.tidy.trimTrailingWhitespace", Some(id), None)
     .err()
     .expect("refused while undecided");
   assert!(refused.contains("allow or deny"), "{refused}");
@@ -359,7 +359,7 @@ fn extensions_wait_for_permission_and_denied_permissions_are_enforced() {
     .set_permissions("example.tidy", &[Permission::DocumentsRead]);
   let error = s
     .host
-    .run_command("example.tidy.trimTrailingWhitespace", Some(id))
+    .run_command("example.tidy.trimTrailingWhitespace", Some(id), None)
     .expect("queued")
     .wait()
     .expect_err("editing is not allowed");
@@ -441,9 +441,12 @@ fn an_infinite_loop_is_stopped_and_the_extension_can_be_restarted() {
   let s = misbehaving("");
   let id = s.fake.open(&s.host, "text");
   s.host.load();
+  // Start (and compile) the extension first, so only the loop is timed.
+  run(&s, "read", Some(id)).expect("started");
   let started = Instant::now();
   let error = run(&s, "loop", Some(id)).expect_err("stopped");
   assert!(error.contains("took longer than"), "{error}");
+  // The 1.5 s command deadline, with room for a loaded test machine.
   assert!(started.elapsed() < Duration::from_secs(10));
   let failed = s.fake.wait_for("failure", |n| {
     matches!(n, Notification::ExtensionFailed { .. })
@@ -580,11 +583,241 @@ fn shutdown_stops_busy_extensions_promptly() {
   s.host.load();
   let ticket = s
     .host
-    .run_command("test.misbehaving.loop", None)
+    .run_command("test.misbehaving.loop", None, None)
     .expect("queued");
   std::thread::sleep(Duration::from_millis(200));
   let started = Instant::now();
   s.host.shutdown();
   assert!(started.elapsed() < Duration::from_secs(3));
   assert!(ticket.wait().is_err());
+}
+
+#[test]
+fn extensions_fill_status_items_views_and_decorations() {
+  let s = misbehaving("");
+  let id = s.fake.open(&s.host, "abcdef");
+  s.host.load();
+  // The manifest's text shows before the extension runs.
+  let items = s.host.status_items();
+  assert_eq!(items.len(), 1);
+  assert_eq!(items[0].id, "test.misbehaving.state");
+  assert_eq!(items[0].content.text, "idle");
+
+  run(&s, "ui", Some(id)).expect("ran");
+  // In the order the extension made the calls.
+  s.fake
+    .wait_for("status", |n| *n == Notification::StatusItemsChanged);
+  s.fake.wait_for("decorations", |n| {
+    *n == Notification::DecorationsChanged(id)
+  });
+  let reveal = s
+    .fake
+    .wait_for("reveal", |n| matches!(n, Notification::Reveal { .. }));
+  assert!(
+    matches!(reveal, Notification::Reveal { document, end, .. } if document == id && end.column == 2)
+  );
+  let view = Notification::ShowView("test.misbehaving.items".into());
+  s.fake.wait_for("show view", |n| *n == view);
+  let report = s.fake.wait_for_message("ui:");
+  assert_eq!(report, "ui: Ok(()) Ok(()) Ok(()) Ok(()) Ok(()) Ok(())");
+  let items = s.host.status_items();
+  assert_eq!(items[0].content.text, "busy");
+  assert_eq!(
+    items[0].content.command.as_deref(),
+    Some("test.misbehaving.argument")
+  );
+  let view = s.host.view_content("test.misbehaving.items");
+  assert_eq!(view.message.as_deref(), Some("Two items"));
+  assert_eq!(view.items.len(), 2);
+  assert_eq!(view.items[1].parent.as_deref(), Some("a"));
+  let decorations = {
+    let editor = s.fake.editor();
+    s.host.decorations(editor.document(id).expect("open"), 0..6)
+  };
+  assert_eq!(decorations.len(), 1);
+  assert_eq!(decorations[0].range, 0..2);
+  assert_eq!(decorations[0].key, "test.misbehaving/mark");
+
+  // Decorations move with the text.
+  s.fake.type_text(&s.host, id, "12");
+  let editor = s.fake.editor();
+  let moved = s.host.decorations(editor.document(id).expect("open"), 0..8);
+  assert_eq!(moved[0].range, 2..4);
+}
+
+#[test]
+fn commands_receive_their_argument() {
+  let s = misbehaving("");
+  s.host.load();
+  s.host
+    .run_command("test.misbehaving.argument", None, Some("item b".into()))
+    .expect("queued")
+    .wait()
+    .expect("ran");
+  assert_eq!(
+    s.fake.wait_for_message("argument:"),
+    "argument: Some(\"item b\")"
+  );
+  run(&s, "argument", None).expect("ran");
+  assert_eq!(s.fake.wait_for_message("argument:"), "argument: None");
+}
+
+#[test]
+fn workbench_misuse_is_rejected_and_output_is_removed_on_failure() {
+  let s = misbehaving("");
+  let id = s.fake.open(&s.host, "abc");
+  s.host.load();
+  run(&s, "uiErrors", Some(id)).expect("ran");
+  let report = s.fake.wait_for_message("uiErrors:");
+  assert_eq!(report.matches("InvalidArgument").count(), 5, "{report}");
+
+  run(&s, "ui", Some(id)).expect("ran");
+  s.fake.wait_for_message("ui:");
+  run(&s, "panic", Some(id)).expect_err("fails");
+  assert!(
+    s.host.status_items().is_empty(),
+    "a failed extension's items are hidden"
+  );
+  assert!(
+    s.host
+      .view_content("test.misbehaving.items")
+      .items
+      .is_empty()
+  );
+  let editor = s.fake.editor();
+  assert!(
+    s.host
+      .decorations(editor.document(id).expect("open"), 0..3)
+      .is_empty()
+  );
+}
+
+#[test]
+fn decorations_need_the_read_permission() {
+  let s = misbehaving("");
+  let id = s.fake.open(&s.host, "abc");
+  s.host.load();
+  s.host.set_permissions("test.misbehaving", &[]);
+  run(&s, "ui", Some(id)).expect("ran");
+  let report = s.fake.wait_for_message("ui:");
+  assert!(report.contains("PermissionDenied"), "{report}");
+  // Status items and views need no permission.
+  assert!(report.starts_with("ui: Ok(()) Ok(()) Ok(())"), "{report}");
+}
+
+#[test]
+fn showing_a_view_activates_its_extension() {
+  let s = misbehaving("");
+  s.host.load();
+  assert_eq!(state_of(&s.host).0, ExtensionState::Inactive);
+  s.host.view_opened("test.misbehaving.items");
+  s.fake.wait_for_message("activated with");
+}
+
+#[test]
+fn extensions_built_against_api_1_0_still_run() {
+  let s = setup("tidy", "tidy", Some(ALL), "", |m| m);
+  let dir = PathBuf::from(&s.host.statuses()[0].path);
+  let old = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/tidy-api-1.0.wasm");
+  std::fs::copy(old, dir.join("tidy.wasm")).expect("copy");
+  let id = s.fake.open(&s.host, "x  \n");
+  s.host.load();
+  s.fake.wait_for("diagnostics", |n| {
+    *n == Notification::DiagnosticsChanged(id)
+  });
+  assert_eq!(state_of(&s.host).0, ExtensionState::Active);
+}
+
+#[test]
+fn theme_only_extensions_need_no_code() {
+  let dir = tempfile::tempdir().expect("temp dir");
+  let extension = dir.path().join("themes");
+  std::fs::create_dir_all(extension.join("themes")).expect("mkdir");
+  std::fs::write(
+    extension.join("extension.toml"),
+    "id = \"example.themes\"\nname = \"Themes\"\nversion = \"1.0.0\"\napi_version = \"1\"\n\
+     [[themes]]\nid = \"night\"\nlabel = \"Night\"\nkind = \"dark\"\npath = \"themes/night.toml\"\n",
+  )
+  .expect("manifest");
+  let theme = extension.join("themes/night.toml");
+  std::fs::write(&theme, "[colors]\neditor-background = \"#101020\"\n").expect("theme");
+  let fake = Arc::new(Fake::default());
+  let options = HostOptions {
+    editor_version: semver::Version::new(0, 1, 0),
+    extensions_dir: Some(dir.path().to_path_buf()),
+    development: Vec::new(),
+    permissions_file: None,
+    settings: BTreeMap::new(),
+    limits: limits(),
+  };
+  let host = ExtensionHost::new(fake, options);
+  host.load();
+  let status = &host.statuses()[0];
+  assert_eq!(status.state, ExtensionState::Ready);
+  let themes = &status.contributions.themes;
+  assert_eq!(themes[0].id, "example.themes.night");
+  assert_eq!(themes[0].colors["editor-background"], "#101020");
+
+  std::fs::write(&theme, "[colors]\neditor-background = \"url(evil)\"\n").expect("theme");
+  host.load();
+  let status = &host.statuses()[0];
+  assert_eq!(status.state, ExtensionState::Invalid);
+  assert!(
+    status
+      .error
+      .as_deref()
+      .is_some_and(|e| e.contains("hex color"))
+  );
+}
+
+#[test]
+fn todos_example_highlights_lists_and_counts_markers() {
+  let s = setup("todos", "todos", Some(ALL), "", |m| m);
+  let id = s.fake.open(
+    &s.host,
+    "fn main() {\n  // TODO: tidy up\n}\n// FIXME later\n",
+  );
+  s.host.load();
+  s.fake.wait_for("decorations", |n| {
+    *n == Notification::DecorationsChanged(id)
+  });
+  s.fake.wait_for("view", |n| {
+    *n == Notification::ViewChanged("example.todos.list".into())
+  });
+  let decorations = {
+    let editor = s.fake.editor();
+    let document = editor.document(id).expect("open");
+    s.host.decorations(document, 0..document.buffer().len())
+  };
+  let keys: Vec<_> = decorations
+    .iter()
+    .map(|d| (d.range.clone(), d.key.as_str()))
+    .collect();
+  assert_eq!(
+    keys,
+    [
+      (17..21, "example.todos/keyword"),
+      (36..41, "example.todos/keyword")
+    ]
+  );
+  let view = s.host.view_content("example.todos.list");
+  assert_eq!(view.items.len(), 3, "{view:?}");
+  assert_eq!(view.items[1].label, "TODO: tidy up");
+  let reveal = view.items[1].argument.clone();
+  s.fake
+    .wait_for("count", |n| *n == Notification::StatusItemsChanged);
+  assert_eq!(s.host.status_items()[0].content.text, "☐ 2 TODOs");
+
+  // Selecting the item reveals the marker.
+  s.host
+    .run_command("example.todos.reveal", None, reveal)
+    .expect("queued")
+    .wait()
+    .expect("revealed");
+  let revealed = s
+    .fake
+    .wait_for("reveal", |n| matches!(n, Notification::Reveal { .. }));
+  assert!(
+    matches!(revealed, Notification::Reveal { start, .. } if start.line == 1 && start.column == 5)
+  );
 }

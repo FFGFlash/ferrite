@@ -19,3 +19,21 @@
   padding: 0 var(--space-2);
   white-space: nowrap;
 }
+
+.statusbar__button {
+  border: none;
+  border-radius: var(--radius-control);
+  background: none;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.statusbar__button:hover {
+  background: var(--color-statusbar-hover-background);
+}
+
+.statusbar__button:focus-visible {
+  outline: 1px solid var(--color-statusbar-foreground);
+  outline-offset: -1px;
+}

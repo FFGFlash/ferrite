@@ -1,0 +1,18 @@
+# A theme-only extension: no code, so no entrypoint and no permissions.
+id = "example.themes"
+name = "Example Themes"
+version = "0.1.0"
+description = "Two color themes: Midnight (dark) and Paper (light)."
+api_version = "1"
+
+[[themes]]
+id = "midnight"
+label = "Midnight"
+kind = "dark"
+path = "themes/midnight.toml"
+
+[[themes]]
+id = "paper"
+label = "Paper"
+kind = "light"
+path = "themes/paper.toml"

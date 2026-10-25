@@ -1,6 +1,7 @@
 import { useCallback } from "react";
 import { useKeybindings } from "../commands/registry";
 import { ActivityBar } from "../components/ActivityBar";
+import { ContextMenu } from "../components/ContextMenu";
 import { Notifications } from "../components/Notifications";
 import { Palette } from "../components/Palette";
 import { PerfOverlay } from "../components/PerfOverlay";
@@ -11,7 +12,7 @@ import { EditorArea } from "../editor/EditorArea";
 import type { AppInfo } from "../ipc";
 import { SIDEBAR_MAX_WIDTH, SIDEBAR_MIN_WIDTH, layoutStore, updateLayout } from "../state/layout";
 import { useStore } from "../state/store";
-import { builtinViews } from "./views";
+import { useViews } from "./views";
 import "./Workbench.css";
 
 interface WorkbenchProps {
@@ -20,6 +21,7 @@ interface WorkbenchProps {
 
 export function Workbench({ appInfo }: WorkbenchProps) {
   const { sidebarVisible, sidebarWidth, activeView } = useStore(layoutStore);
+  const views = useViews();
   useKeybindings();
 
   // Selecting the visible view again collapses the side bar.
@@ -34,13 +36,13 @@ export function Workbench({ appInfo }: WorkbenchProps) {
   const resize = useCallback((width: number) => updateLayout({ sidebarWidth: width }), []);
 
   const view = sidebarVisible
-    ? (builtinViews.find((candidate) => candidate.id === activeView) ?? builtinViews[0])
+    ? (views.find((candidate) => candidate.id === activeView) ?? views[0])
     : undefined;
 
   return (
     <div className="workbench">
       <div className="workbench__body">
-        <ActivityBar views={builtinViews} activeViewId={view?.id ?? null} onSelect={selectView} />
+        <ActivityBar views={views} activeViewId={view?.id ?? null} onSelect={selectView} />
         {view && (
           <>
             <SideBar view={view} width={sidebarWidth} />
@@ -58,6 +60,7 @@ export function Workbench({ appInfo }: WorkbenchProps) {
       <StatusBar appInfo={appInfo} />
       <Notifications />
       <Palette />
+      <ContextMenu />
       <PerfOverlay />
     </div>
   );

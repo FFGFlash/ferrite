@@ -36,8 +36,15 @@ const tidy: ExtensionStatus = {
       decided: true,
     },
   ],
-  commands: [{ id: "example.tidy.trim", title: "Trim", category: "Tidy" }],
+  commands: [{ id: "example.tidy.trim", title: "Trim", category: "Tidy", hidden: false }],
   configErrors: ["width must be at least 0; using the default"],
+  contributions: {
+    themes: [{ id: "example.tidy.night", label: "Night", kind: "dark", colors: {} }],
+    keybindings: [],
+    menus: [],
+    views: [],
+    decorations: [],
+  },
 };
 
 describe("ExtensionsPanel", () => {

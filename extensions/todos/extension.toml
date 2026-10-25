@@ -1,0 +1,69 @@
+# Example extension that uses every kind of workbench contribution: a
+# decoration type, a side bar view, a status bar item, a keybinding, and a
+# context menu item. See docs/extensions.md.
+id = "example.todos"
+name = "TODOs"
+version = "0.1.0"
+description = "Highlights TODO and FIXME comments and lists them in a side bar view."
+api_version = "1"
+entrypoint = "../target/wasm32-unknown-unknown/release/todos.wasm"
+activation = ["on-startup"]
+
+[permissions]
+documents_read = true
+documents_write = true
+
+[[commands]]
+id = "example.todos.next"
+title = "Go to Next TODO"
+
+[[commands]]
+id = "example.todos.insert"
+title = "Insert TODO Comment"
+
+[[commands]]
+id = "example.todos.show"
+title = "Show TODOs"
+
+[[commands]]
+id = "example.todos.reveal"
+title = "Reveal TODO"
+hidden = true
+
+[[keybindings]]
+command = "example.todos.next"
+key = "ctrl+alt+t"
+mac = "mod+alt+t"
+when = "editorFocus"
+
+[[menus]]
+location = "editor/context"
+command = "example.todos.insert"
+group = "todos"
+
+[[status_items]]
+id = "count"
+alignment = "right"
+priority = 10
+text = "TODOs"
+tooltip = "Show TODOs"
+command = "example.todos.show"
+
+[[views]]
+id = "list"
+title = "TODOs"
+icon = "check"
+
+[decorations.keyword]
+background = "#e5c07b26"
+color = "#e5c07b"
+bold = true
+
+[decorations.keyword.light]
+background = "#9868011f"
+color = "#986801"
+
+[configuration.keywords]
+type = "string"
+default = "TODO,FIXME"
+description = "Comma-separated words that mark a TODO."

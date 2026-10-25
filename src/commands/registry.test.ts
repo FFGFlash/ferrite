@@ -6,7 +6,9 @@ import {
   executeCommand,
   formatKeybinding,
   matchesKeybinding,
+  primaryKeybinding,
   registerCommands,
+  setKeybindingOverrides,
   type Command,
 } from "./registry";
 
@@ -101,5 +103,39 @@ describe("fuzzy matching", () => {
     // "Toggle Side Bar" also contains s…a, but scattered matches rank last.
     expect(ranked).toEqual(["Save", "Save As", "Toggle Side Bar"]);
     expect(fuzzyFilter(items, "tsb", (item) => item)[0]?.item).toBe("Toggle Side Bar");
+  });
+});
+
+describe("keybinding precedence", () => {
+  afterEach(() => setKeybindingOverrides({}));
+
+  const command = (id: string, keybinding: string, source?: Command["source"]): Command => ({
+    id,
+    title: id,
+    keybinding,
+    source,
+    run: () => {},
+  });
+  const ctrlK = key("k", { ctrlKey: true });
+
+  it("prefers built-in commands over extension commands for the same key", () => {
+    const unregister = registerCommands([
+      command("ext.k", "mod+k", "extension"),
+      command("builtin.k", "mod+k"),
+    ]);
+    expect(commandForKey(ctrlK, false, false)?.id).toBe("builtin.k");
+    unregister();
+  });
+
+  it("lets the user rebind or unbind any command", () => {
+    const unregister = registerCommands([
+      command("builtin.k", "mod+k"),
+      command("ext.j", "mod+j", "extension"),
+    ]);
+    setKeybindingOverrides({ "ext.j": ["mod+k"], "builtin.k": [] });
+    expect(commandForKey(ctrlK, false, false)?.id).toBe("ext.j");
+    expect(commandForKey(key("j", { ctrlKey: true }), false, false)).toBeUndefined();
+    expect(primaryKeybinding(command("builtin.k", "mod+k"), false)).toBeNull();
+    unregister();
   });
 });

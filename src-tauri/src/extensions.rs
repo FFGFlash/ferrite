@@ -12,12 +12,13 @@ use std::sync::OnceLock;
 use ferrite_core::{Document, DocumentId, Editor};
 use ferrite_extension_host::{
   Embedder, ExtensionHost, ExtensionStatus, HostOptions, Limits, MANIFEST_FILE, Notification,
-  Permission,
+  Permission, StatusItem, ViewContent,
 };
 use ferrite_syntax::LanguageId;
 use tauri::{AppHandle, Manager, State, WebviewWindow};
 
 use crate::editor::EditorState;
+use crate::editor::protocol::DecorationDto;
 use crate::error::CommandError;
 use crate::events::{self, AppEvent};
 use crate::lsp::{DiagnosticDto, DiagnosticMessageDto, LanguageStatusDto};
@@ -49,20 +50,30 @@ impl ExtensionsState {
     }
   }
 
-  /// Adds extension diagnostics on `lines` to a view's, and their counts to
-  /// the language status. Call with the editor locked.
+  /// Adds extension diagnostics on `lines` to a view's (and their counts to
+  /// the language status), and returns the decorations there. Call with the
+  /// editor locked.
   pub fn add_to_view(
     &self,
     document: &Document,
     lines: std::ops::Range<usize>,
     diagnostics: &mut Vec<DiagnosticDto>,
     language: Option<&mut LanguageStatusDto>,
-  ) {
+  ) -> Vec<DecorationDto> {
     let Some(host) = self.host() else {
-      return;
+      return Vec::new();
     };
     let buffer = document.buffer();
     let visible = buffer.line_start(lines.start)..buffer.line_end(lines.end.saturating_sub(1));
+    let decorations = host
+      .decorations(document, visible.clone())
+      .into_iter()
+      .map(|decoration| DecorationDto {
+        start: buffer.offset_to_utf16(decoration.range.start).into(),
+        end: buffer.offset_to_utf16(decoration.range.end).into(),
+        key: decoration.key,
+      })
+      .collect();
     diagnostics.extend(
       host
         .diagnostics(document, visible)
@@ -78,6 +89,7 @@ impl ExtensionsState {
       language.errors += errors;
       language.warnings += warnings;
     }
+    decorations
   }
 
   /// Messages of extension diagnostics covering `offset`, for hover.
@@ -133,6 +145,21 @@ impl Embedder for AppEmbedder {
       Notification::ExtensionFailed { id, name, reason } => {
         AppEvent::ExtensionFailed { id, name, reason }
       }
+      Notification::StatusItemsChanged => AppEvent::ExtensionStatusItemsChanged,
+      Notification::ViewChanged(view) => AppEvent::ExtensionViewChanged { view },
+      Notification::ShowView(view) => AppEvent::ExtensionShowView { view },
+      Notification::DecorationsChanged(id) => AppEvent::DecorationsChanged {
+        document_id: id.get(),
+      },
+      Notification::Reveal {
+        document,
+        start,
+        end,
+      } => AppEvent::ExtensionReveal {
+        document_id: document.get(),
+        start: start.into(),
+        end: end.into(),
+      },
     };
     events::emit(&self.app, event);
   }
@@ -229,22 +256,46 @@ pub fn extensions_list(state: State<'_, ExtensionsState>) -> Vec<ExtensionStatus
 }
 
 /// Runs an extension's command for the active document and waits for it.
+/// `argument` comes from a view item or menu.
 #[tauri::command]
 pub async fn extension_run_command(
   app: AppHandle,
   command: String,
   document_id: Option<u64>,
+  argument: Option<String>,
 ) -> Result<(), CommandError> {
   let ticket = {
     let state = app.state::<ExtensionsState>();
     host(&state)?
-      .run_command(&command, document_id.map(DocumentId::from_raw))
+      .run_command(&command, document_id.map(DocumentId::from_raw), argument)
       .map_err(|message| CommandError::new("extension", message))?
   };
   tauri::async_runtime::spawn_blocking(move || ticket.wait())
     .await
     .map_err(CommandError::internal)?
     .map_err(|message| CommandError::new("extension", message))
+}
+
+#[tauri::command]
+pub fn extension_status_items(state: State<'_, ExtensionsState>) -> Vec<StatusItem> {
+  state
+    .host()
+    .map_or_else(Vec::new, ExtensionHost::status_items)
+}
+
+#[tauri::command]
+pub fn extension_view(state: State<'_, ExtensionsState>, view: String) -> ViewContent {
+  state
+    .host()
+    .map_or_else(ViewContent::default, |host| host.view_content(&view))
+}
+
+/// Tells extensions a view is shown, starting its extension if needed.
+#[tauri::command]
+pub fn extension_view_opened(state: State<'_, ExtensionsState>, view: String) {
+  if let Some(host) = state.host() {
+    host.view_opened(&view);
+  }
 }
 
 #[tauri::command]

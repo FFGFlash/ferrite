@@ -94,6 +94,7 @@
 
   --color-statusbar-background: #a8461f;
   --color-statusbar-foreground: #ffffff;
+  --color-statusbar-hover-background: rgb(255 255 255 / 0.15);
 
   --color-syntax-comment: #6f7785;
   --color-syntax-keyword: #e48a5c;
@@ -168,6 +169,7 @@
 
   --color-statusbar-background: #a8461f;
   --color-statusbar-foreground: #ffffff;
+  --color-statusbar-hover-background: rgb(255 255 255 / 0.15);
 
   --color-syntax-comment: #7d8490;
   --color-syntax-keyword: #a8461f;

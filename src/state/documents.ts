@@ -139,11 +139,25 @@ export async function openPath(
   }
 }
 
-export async function newFile(): Promise<void> {
+/** Creates an untitled document, optionally containing `text`. */
+export async function newFile(text?: string): Promise<void> {
   try {
-    upsert(await ipc.newDocument(), true);
+    upsert(await ipc.newDocument(text), true);
   } catch (error) {
     reportError("Creating a file", error);
+  }
+}
+
+/** Makes an open document active and selects `start..end` in it. */
+export function revealInDocument(id: number, start: Position, end: Position): void {
+  const editor = activeEditor.get();
+  if (editor?.documentId === id) {
+    selectRange(editor, start, end);
+    return;
+  }
+  if (documentsStore.get().documents.some((document) => document.id === id)) {
+    pendingSelections.set(id, { start, end });
+    activate(id);
   }
 }
 

@@ -3,10 +3,10 @@
 A fast, memory-efficient, extensible code editor built with Rust, Tauri, React, and a sandboxed
 WebAssembly extension system.
 
-> **Status:** Milestone 6 (WebAssembly extensions) is complete: sandboxed extensions can add
-> commands, read and edit documents through a validated API, and publish diagnostics, with
-> permissions the user grants and enforced resource limits. The customizable workbench comes in
-> Milestone 7. See [`docs/DESIGN.md`](docs/DESIGN.md) for the full brief and milestone plan, and
+> **Status:** Milestone 7 (customizable workbench) is complete: extensions can contribute color
+> themes, keybindings, context menu items, status bar items, side bar views, and editor
+> decorations, and you can set your own keybindings and theme colors. Hardening comes in
+> Milestone 8. See [`docs/DESIGN.md`](docs/DESIGN.md) for the full brief and milestone plan, and
 > [`docs/performance.md`](docs/performance.md) for measurements.
 
 ## Prerequisites
@@ -100,24 +100,55 @@ Servers can be changed, added, or turned off in the `[lsp]` section of the setti
 
 Extensions are WebAssembly modules that run in a sandbox: they can only use Ferrite's
 [extension API](crates/ferrite-extension-api/wit/extension.wit). With it they add commands to
-the palette, read open documents, edit them, and show problems as squiggles. They have no access
-to files, the network, or anything else on your computer. Before an extension starts, Ferrite
+the palette, read open documents, edit them, and show problems as squiggles. They can also
+customize the workbench: color themes, keybindings, context menu items, status bar items, side
+bar views, and highlights in the text. They have no access to files, the network, or anything
+else on your computer. Before an extension starts, Ferrite
 asks you to allow the permissions it requests (reading or editing open documents). The
 Extensions view (`Ctrl+Shift+X`) shows each extension's state and permissions, and lets you
 change them, restart an extension, or turn it off. An extension that crashes, loops, or uses too
 much memory is stopped without affecting the editor.
 
-To try the example extension, [Tidy](extensions/tidy/), which flags trailing whitespace and long
-lines and can trim them:
+Three example extensions are included:
+
+- [Tidy](extensions/tidy/) flags trailing whitespace and long lines, and can trim them.
+- [TODOs](extensions/todos/) highlights TODO and FIXME comments and lists them in a side bar
+  view. It shows the count in the status bar, jumps to the next one with `Ctrl+Alt+T`, and adds
+  **Insert TODO Comment** to the editor's context menu.
+- [Example Themes](extensions/themes/) adds the Midnight and Paper color themes, with no code.
+
+To try them:
 
 ```sh
 rustup target add wasm32-unknown-unknown
 cd extensions && cargo build --release
 ```
 
-Then run **Extensions: Load Development Extension…** and choose `extensions/tidy`. To install
+Then run **Extensions: Load Development Extension…** and choose an extension's folder, such as
+`extensions/todos`. To install
 an extension, copy its folder (manifest and `.wasm`) into the `extensions` folder next to
 `settings.toml`. See [`docs/extensions.md`](docs/extensions.md) for writing your own.
+
+## Customizing
+
+- **Themes.** **Preferences: Color Theme: …** in the command palette switches between Dark, Light,
+  Follow System, and themes from extensions. You can override any theme color in the settings.
+- **Keybindings.** Set keybindings in the settings by command id. **Preferences: Keyboard
+  Shortcuts** lists every command with its id and keys. Your keybindings take precedence over the
+  built-in ones, which take precedence over extensions'.
+
+```toml
+[workbench]
+theme = "example.themes.midnight"
+
+[workbench.colors]
+editor-background = "#101018"            # any token in src/themes/tokens.json
+
+[keybindings]
+"workbench.showSearch" = "mod+shift+h"   # "mod" is Ctrl, or Cmd on macOS
+"example.todos.next" = ["f8", "ctrl+alt+t"]
+"workbench.toggleSidebar" = ""           # remove a command's keys
+```
 
 ## Workspace
 
@@ -137,7 +168,7 @@ tab_size = 2
 font_size = 15
 
 [workbench]
-theme = "light"   # "system", "dark", or "light"
+theme = "light"   # "system", "dark", "light", or an extension's theme id
 
 [files]
 exclude = [".git", "dist"]
@@ -224,7 +255,7 @@ src/                  React + TypeScript workbench
   ipc/                Typed wrappers for Tauri commands (the only place that calls invoke)
   themes/             Theme selection
   styles/             Design tokens and base styles
-extensions/           Extensions built to WebAssembly: the Tidy example and test fixtures
+extensions/           Extensions built to WebAssembly: examples (tidy, todos, themes) and test fixtures
 docs/                 Architecture notes, ADRs, extension guide
 ```
 

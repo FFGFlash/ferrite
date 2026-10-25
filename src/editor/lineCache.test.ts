@@ -18,6 +18,7 @@ function wire(version: number, startLine: number, endLine: number, lines: LinesU
     highlights: [],
     diagnostics: [],
     language: null,
+    decorations: [],
   };
 }
 

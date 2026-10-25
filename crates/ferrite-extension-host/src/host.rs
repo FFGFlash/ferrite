@@ -1,5 +1,6 @@
 //! The extension host: discovery, lifecycle, permission decisions, document
-//! notifications, and extension diagnostics.
+//! notifications, extension diagnostics and decorations, and the content of
+//! extension status bar items and views.
 //!
 //! Lock order: the editor lock (held by the embedder around `sync` and the
 //! diagnostics queries, and taken by host functions through
@@ -30,13 +31,16 @@ use crate::worker::{
   self, Budgets, Event, Failure, MAX_PENDING_CHANGE_BYTES, Queue, Setup, Worker,
 };
 use crate::{
-  CommandInfo, Embedder, ExtensionDiagnostic, ExtensionState, ExtensionStatus, HostOptions,
-  Notification, PermissionStatus, Severity,
+  CommandInfo, Embedder, ExtensionDecoration, ExtensionDiagnostic, ExtensionState, ExtensionStatus,
+  HostOptions, Notification, PermissionStatus, Severity, StatusContent, StatusItem, ViewContent,
 };
 
 /// Synced versions kept per document, to interpret diagnostics published
 /// for slightly older text.
 const SYNC_HISTORY: usize = 8;
+/// Added to a command's deadlines when waiting for its result, to cover
+/// compiling the extension and events queued before it.
+const COMMAND_SAFETY_MARGIN: Duration = Duration::from_secs(120);
 /// How long shutdown waits for extensions to deactivate.
 const SHUTDOWN_WAIT: Duration = Duration::from_millis(1500);
 
@@ -55,23 +59,54 @@ struct DiagnosticSet {
 }
 
 impl DiagnosticSet {
-  /// Maps the ranges through the edits since they were stored.
   fn catch_up(&mut self, buffer: &TextBuffer) {
-    if self.version == buffer.version() {
-      return;
+    if !catch_up(
+      &mut self.version,
+      self.items.iter_mut().map(|item| &mut item.range),
+      buffer,
+    ) {
+      self.items.clear();
     }
-    match buffer.edits_since(self.version) {
-      Some(edits) => {
-        for item in &mut self.items {
-          let start = map_offset_through(&edits, item.range.start, true);
-          let end = map_offset_through(&edits, item.range.end, false).max(start);
-          item.range = start..end;
-        }
-      }
-      None => self.items.clear(),
-    }
-    self.version = buffer.version();
   }
+}
+
+/// Ranges decorated with one decoration type.
+struct DecorationSet {
+  version: Version,
+  ranges: Vec<Range<usize>>,
+}
+
+impl DecorationSet {
+  fn catch_up(&mut self, buffer: &TextBuffer) {
+    if !catch_up(&mut self.version, self.ranges.iter_mut(), buffer) {
+      self.ranges.clear();
+    }
+  }
+}
+
+/// Maps ranges stored at `version` through the edits since, and updates
+/// `version`. Returns `false` if the edits are too old to map.
+fn catch_up<'a>(
+  version: &mut Version,
+  ranges: impl Iterator<Item = &'a mut Range<usize>>,
+  buffer: &TextBuffer,
+) -> bool {
+  if *version == buffer.version() {
+    return true;
+  }
+  let mapped = match buffer.edits_since(*version) {
+    Some(edits) => {
+      for range in ranges {
+        let start = map_offset_through(&edits, range.start, true);
+        let end = map_offset_through(&edits, range.end, false).max(start);
+        *range = start..end;
+      }
+      true
+    }
+    None => false,
+  };
+  *version = buffer.version();
+  mapped
 }
 
 /// What the host knows about an open document.
@@ -83,6 +118,8 @@ struct DocumentRecord {
   history: VecDeque<TextSnapshot>,
   /// Diagnostics by extension id.
   diagnostics: BTreeMap<String, DiagnosticSet>,
+  /// Decorations by extension id and decoration type.
+  decorations: BTreeMap<(String, String), DecorationSet>,
 }
 
 impl DocumentRecord {
@@ -123,6 +160,11 @@ struct State {
   extensions: Vec<Entry>,
   invalid: Vec<Invalid>,
   documents: HashMap<DocumentId, DocumentRecord>,
+  /// Status bar content set by extensions, by extension and item id:
+  /// `None` hides the item. Items not here show their manifest text.
+  status: BTreeMap<(String, String), Option<StatusContent>>,
+  /// View content set by extensions, by full view id.
+  views: BTreeMap<String, ViewContent>,
   next_generation: u64,
   shutting_down: bool,
 }
@@ -179,6 +221,7 @@ impl Shared {
     let entry = &state.extensions[index];
     let decision = state.decisions.get(&entry.manifest.id);
     if state.shutting_down
+      || entry.manifest.entrypoint.is_none()
       || decision.disabled
       || !decision.pending(&entry.manifest.permissions).is_empty()
       || matches!(entry.run, Run::Running { .. })
@@ -223,15 +266,73 @@ impl Shared {
       worker.stop(true);
     }
     let id = entry.manifest.id.clone();
-    Self::forget_diagnostics(state, &id, outbox);
+    Self::forget_output(state, &id, outbox);
     outbox.push(Notification::ExtensionsChanged);
   }
 
-  fn forget_diagnostics(state: &mut State, id: &str, outbox: &mut Outbox) {
+  /// Removes what a stopped extension showed: diagnostics, decorations,
+  /// status bar content, and view content.
+  fn forget_output(state: &mut State, id: &str, outbox: &mut Outbox) {
     for (&document, record) in &mut state.documents {
       if record.diagnostics.remove(id).is_some() {
         outbox.push(Notification::DiagnosticsChanged(document));
       }
+      let before = record.decorations.len();
+      record
+        .decorations
+        .retain(|(extension, _), _| extension != id);
+      if record.decorations.len() != before {
+        outbox.push(Notification::DecorationsChanged(document));
+      }
+    }
+    let before = state.status.len();
+    state.status.retain(|(extension, _), _| extension != id);
+    if state.status.len() != before {
+      outbox.push(Notification::StatusItemsChanged);
+    }
+    let prefix = format!("{id}.");
+    let views: Vec<String> = state
+      .views
+      .keys()
+      .filter(|view| view.starts_with(&prefix))
+      .cloned()
+      .collect();
+    for view in views {
+      state.views.remove(&view);
+      outbox.push(Notification::ViewChanged(view));
+    }
+  }
+
+  /// Sets (or hides, with `None`) one of an extension's status bar items.
+  pub fn set_status_item(&self, extension: &str, item: &str, content: Option<StatusContent>) {
+    let changed = {
+      let mut state = self.lock();
+      let key = (extension.to_owned(), item.to_owned());
+      if state.status.get(&key) == Some(&content) {
+        false
+      } else {
+        state.status.insert(key, content);
+        true
+      }
+    };
+    if changed {
+      self.embedder.notify(Notification::StatusItemsChanged);
+    }
+  }
+
+  /// Changes the content of a view.
+  pub fn update_view(&self, full_id: &str, change: impl FnOnce(&mut ViewContent)) {
+    let changed = {
+      let mut state = self.lock();
+      let content = state.views.entry(full_id.to_owned()).or_default();
+      let before = content.clone();
+      change(content);
+      *content != before
+    };
+    if changed {
+      self
+        .embedder
+        .notify(Notification::ViewChanged(full_id.to_owned()));
     }
   }
 
@@ -283,7 +384,7 @@ impl Shared {
         if let Run::Running { worker, .. } = std::mem::replace(&mut entry.run, run) {
           worker.queue.stop(&stopped);
         }
-        Self::forget_diagnostics(&mut state, id, &mut outbox);
+        Self::forget_output(&mut state, id, &mut outbox);
         outbox.push(Notification::ExtensionsChanged);
       } else if let Err(failure) = outcome {
         // Stopped or restarted meanwhile.
@@ -327,6 +428,7 @@ impl Shared {
               path: document.path().map(Path::to_path_buf),
               history: VecDeque::from([buffer.snapshot()]),
               diagnostics: BTreeMap::new(),
+              decorations: BTreeMap::new(),
             },
           );
           for entry in &state.extensions {
@@ -413,6 +515,49 @@ impl Shared {
     convert: impl FnOnce(&TextBuffer) -> Result<Vec<StoredDiagnostic>, ApiError>,
   ) -> Result<(), ApiError> {
     let mut state = self.lock();
+    let (items, at, record) = Self::convert_at(&mut state, document, extension, version, convert)?;
+    record
+      .diagnostics
+      .insert(extension.to_owned(), DiagnosticSet { version: at, items });
+    Ok(())
+  }
+
+  /// Stores an extension's ranges for one decoration type, like
+  /// [`Self::store_diagnostics`].
+  pub fn store_decorations(
+    &self,
+    document: &Document,
+    extension: &str,
+    decoration: &str,
+    version: u64,
+    convert: impl FnOnce(&TextBuffer) -> Result<Vec<Range<usize>>, ApiError>,
+  ) -> Result<(), ApiError> {
+    let mut state = self.lock();
+    let (ranges, at, record) = Self::convert_at(&mut state, document, extension, version, convert)?;
+    let key = (extension.to_owned(), decoration.to_owned());
+    if ranges.is_empty() {
+      record.decorations.remove(&key);
+    } else {
+      record.decorations.insert(
+        key,
+        DecorationSet {
+          version: at,
+          ranges,
+        },
+      );
+    }
+    Ok(())
+  }
+
+  /// Converts with the text at `version` (current or recently synced) for
+  /// a running extension.
+  fn convert_at<'s, T>(
+    state: &'s mut State,
+    document: &Document,
+    extension: &str,
+    version: u64,
+    convert: impl FnOnce(&TextBuffer) -> Result<T, ApiError>,
+  ) -> Result<(T, Version, &'s mut DocumentRecord), ApiError> {
     let current = document.version().get();
     let running = state
       .extensions
@@ -427,23 +572,18 @@ impl Shared {
       .documents
       .get_mut(&document.id())
       .ok_or(ApiError::UnknownDocument)?;
-    let (items, at) = if version == current {
-      (convert(document.buffer())?, document.version())
-    } else {
-      let snapshot = record
-        .history
-        .iter()
-        .find(|snapshot| snapshot.version().get() == version)
-        .ok_or(ApiError::StaleVersion(current))?;
-      (
-        convert(&TextBuffer::from_snapshot(snapshot))?,
-        snapshot.version(),
-      )
-    };
-    record
-      .diagnostics
-      .insert(extension.to_owned(), DiagnosticSet { version: at, items });
-    Ok(())
+    if version == current {
+      let converted = convert(document.buffer())?;
+      return Ok((converted, document.version(), record));
+    }
+    let snapshot = record
+      .history
+      .iter()
+      .find(|snapshot| snapshot.version().get() == version)
+      .ok_or(ApiError::StaleVersion(current))?;
+    let at = snapshot.version();
+    let converted = convert(&TextBuffer::from_snapshot(snapshot))?;
+    Ok((converted, at, record))
   }
 }
 
@@ -462,11 +602,16 @@ pub struct CommandTicket {
 
 impl CommandTicket {
   /// Waits for the command to finish. Fails with the extension's error, or
-  /// if it doesn't finish in time.
+  /// if the extension stops.
+  ///
+  /// Every call into the extension has its own deadline, and the worker
+  /// always replies, so this normally returns within those deadlines plus
+  /// the time to compile the extension (which can't be interrupted). The
+  /// timeout is only a safety net against a host bug.
   pub fn wait(self) -> Result<(), String> {
     match self.receiver.recv_timeout(self.timeout) {
       Ok(result) => result,
-      Err(mpsc::RecvTimeoutError::Timeout) => Err("The command did not finish in time.".into()),
+      Err(mpsc::RecvTimeoutError::Timeout) => Err("The extension did not respond.".into()),
       Err(mpsc::RecvTimeoutError::Disconnected) => Err("The extension stopped.".into()),
     }
   }
@@ -491,6 +636,8 @@ impl ExtensionHost {
         extensions: Vec::new(),
         invalid: Vec::new(),
         documents: HashMap::new(),
+        status: BTreeMap::new(),
+        views: BTreeMap::new(),
         next_generation: 0,
         shutting_down: false,
       }),
@@ -634,6 +781,7 @@ impl ExtensionHost {
         let decision = state.decisions.get(&manifest.id);
         let (status, error) = match &entry.run {
           _ if decision.disabled => (ExtensionState::Disabled, None),
+          _ if manifest.entrypoint.is_none() => (ExtensionState::Ready, None),
           Run::Idle if !decision.pending(&manifest.permissions).is_empty() => {
             (ExtensionState::AwaitingPermission, None)
           }
@@ -669,9 +817,11 @@ impl ExtensionHost {
               id: command.id.clone(),
               title: command.title.clone(),
               category: command.category.clone(),
+              hidden: command.hidden,
             })
             .collect(),
           config_errors: entry.config_errors.clone(),
+          contributions: manifest.contributions.clone(),
         }
       })
       .collect();
@@ -692,6 +842,7 @@ impl ExtensionHost {
         permissions: Vec::new(),
         commands: Vec::new(),
         config_errors: Vec::new(),
+        contributions: crate::Contributions::default(),
       }
     }));
     statuses
@@ -704,6 +855,7 @@ impl ExtensionHost {
     &self,
     command: &str,
     document: Option<DocumentId>,
+    argument: Option<String>,
   ) -> Result<CommandTicket, String> {
     let selections = document
       .and_then(|id| {
@@ -765,12 +917,12 @@ impl ExtensionHost {
             .push_command(Event::Command {
               command: command.to_owned(),
               context,
+              argument,
               reply,
             })
             .map(|()| CommandTicket {
               receiver,
-              // Starting the extension and waiting behind other events count too.
-              timeout: command_time + state.options.limits.activation_time + Duration::from_secs(5),
+              timeout: command_time + state.options.limits.activation_time + COMMAND_SAFETY_MARGIN,
             })
         }
         _ => Err(format!("{name} could not be started.")),
@@ -824,6 +976,101 @@ impl ExtensionHost {
       self.start_wanted(&mut state, &mut outbox);
     }
     outbox.send(self.shared.embedder.as_ref());
+  }
+
+  /// The status bar items to show, from enabled extensions that haven't
+  /// failed.
+  pub fn status_items(&self) -> Vec<StatusItem> {
+    let state = self.shared.lock();
+    let mut items = Vec::new();
+    for entry in &state.extensions {
+      let manifest = &entry.manifest;
+      if state.decisions.get(&manifest.id).disabled || matches!(entry.run, Run::Failed(_)) {
+        continue;
+      }
+      for declared in &manifest.contributions.status_items {
+        let content = match state
+          .status
+          .get(&(manifest.id.clone(), declared.id.clone()))
+        {
+          Some(content) => content.clone(),
+          None => declared.text.clone().map(|text| StatusContent {
+            text,
+            tooltip: declared.tooltip.clone(),
+            command: declared.command.clone(),
+          }),
+        };
+        if let Some(content) = content {
+          items.push(StatusItem {
+            id: format!("{}.{}", manifest.id, declared.id),
+            extension: manifest.name.clone(),
+            alignment: declared.alignment,
+            priority: declared.priority,
+            content,
+          });
+        }
+      }
+    }
+    items
+  }
+
+  /// The content of a view (by full id), as last set by its extension.
+  pub fn view_content(&self, full_id: &str) -> ViewContent {
+    self
+      .shared
+      .lock()
+      .views
+      .get(full_id)
+      .cloned()
+      .unwrap_or_default()
+  }
+
+  /// Called when a view is shown: starts its extension if it activates for
+  /// the view.
+  pub fn view_opened(&self, full_id: &str) {
+    let mut outbox = Outbox::default();
+    {
+      let mut state = self.shared.lock();
+      let index = state.extensions.iter().position(|entry| {
+        entry
+          .manifest
+          .contributions
+          .views
+          .iter()
+          .any(|view| view.full_id == full_id && entry.manifest.activates_for_view(&view.id))
+      });
+      if let Some(index) = index
+        && matches!(state.extensions[index].run, Run::Idle)
+      {
+        self.shared.start(&mut state, index, &mut outbox);
+      }
+    }
+    outbox.send(self.shared.embedder.as_ref());
+  }
+
+  /// Extension decorations overlapping `bytes`, mapped to the current text.
+  /// Call with the editor locked.
+  pub fn decorations(&self, document: &Document, bytes: Range<usize>) -> Vec<ExtensionDecoration> {
+    let mut state = self.shared.lock();
+    let Some(record) = state.documents.get_mut(&document.id()) else {
+      return Vec::new();
+    };
+    let mut found = Vec::new();
+    for ((extension, name), set) in &mut record.decorations {
+      set.catch_up(document.buffer());
+      let key = format!("{extension}/{name}");
+      found.extend(
+        set
+          .ranges
+          .iter()
+          .filter(|range| range.start <= bytes.end && range.end >= bytes.start)
+          .map(|range| ExtensionDecoration {
+            range: range.clone(),
+            key: key.clone(),
+          }),
+      );
+    }
+    found
   }
 
   /// Restarts an extension (e.g. after it failed, or was rebuilt).

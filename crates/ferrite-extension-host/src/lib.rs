@@ -23,7 +23,9 @@
 
 mod api;
 mod config;
+pub mod contributions;
 mod host;
+pub mod keys;
 pub mod manifest;
 mod permissions;
 mod runtime;
@@ -47,6 +49,7 @@ use serde::Serialize;
 
 pub use api::{MAX_DIAGNOSTICS, MAX_EDITS, MAX_READ_BYTES, MAX_READ_LINES};
 pub use config::{ConfigProperty, ConfigType, ConfigValue};
+pub use contributions::Contributions;
 pub use host::{CommandTicket, ExtensionHost};
 pub use manifest::{MANIFEST_FILE, Manifest, ManifestError};
 pub use permissions::{Decision, Permission};
@@ -89,6 +92,74 @@ pub enum Notification {
     name: String,
     reason: String,
   },
+  /// Status bar items changed.
+  StatusItemsChanged,
+  /// The content of a view changed (by full view id).
+  ViewChanged(String),
+  /// An extension asked to show one of its views.
+  ShowView(String),
+  /// A document's extension decorations changed.
+  DecorationsChanged(ferrite_core::DocumentId),
+  /// An extension asked to select and show a range.
+  Reveal {
+    document: ferrite_core::DocumentId,
+    start: ferrite_text::Utf16Position,
+    end: ferrite_text::Utf16Position,
+  },
+}
+
+/// What a status bar item shows.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StatusContent {
+  pub text: String,
+  pub tooltip: Option<String>,
+  /// The extension command run on click.
+  pub command: Option<String>,
+}
+
+/// A status bar item to show.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StatusItem {
+  /// `<extension id>.<item id>`.
+  pub id: String,
+  /// The extension's name.
+  pub extension: String,
+  pub alignment: contributions::Alignment,
+  pub priority: i32,
+  #[serde(flatten)]
+  pub content: StatusContent,
+}
+
+/// A row of an extension view.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ViewEntry {
+  pub id: String,
+  pub parent: Option<String>,
+  pub label: String,
+  pub description: Option<String>,
+  pub tooltip: Option<String>,
+  pub expanded: bool,
+  pub command: Option<String>,
+  pub argument: Option<String>,
+}
+
+/// The content of an extension view.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ViewContent {
+  pub message: Option<String>,
+  pub items: Vec<ViewEntry>,
+}
+
+/// A range decorated by an extension, in the current text.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ExtensionDecoration {
+  pub range: Range<usize>,
+  /// The decoration type's key, `<extension id>/<name>`.
+  pub key: String,
 }
 
 /// Resource limits for each extension.
@@ -180,6 +251,8 @@ pub enum ExtensionState {
   Disabled,
   /// The manifest or folder is invalid (see `error`).
   Invalid,
+  /// Contributes only themes; there is no code to run.
+  Ready,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -198,6 +271,7 @@ pub struct CommandInfo {
   pub id: String,
   pub title: String,
   pub category: String,
+  pub hidden: bool,
 }
 
 /// An extension and its state, for display.
@@ -217,4 +291,5 @@ pub struct ExtensionStatus {
   pub commands: Vec<CommandInfo>,
   /// Problems with the user's configuration values.
   pub config_errors: Vec<String>,
+  pub contributions: Contributions,
 }

@@ -221,6 +221,29 @@ diagnostics after every change.
 - **Binary size** grew by 16.6 MB, almost all Wasmtime's Cranelift compiler. Thin LTO or
   caching compiled extensions are options if size matters; neither is enabled.
 
+## Milestone 7: workbench contributions
+
+A spot check on 2026-10-24, without extensions loaded. Startup was slower on the machine that
+evening for every build, so the previous build (Milestone 5 plus the Ctrl+hover change) was run
+back to back again.
+
+| Measurement                         | Previous build | Milestone 7           |
+| ----------------------------------- | -------------- | --------------------- |
+| Startup, later runs (median of 4)   | 705 / 671 ms   | 663 / 645 ms          |
+| Keystroke → painted, small document | —              | 13.3 ms p50, 14.1 p95 |
+| Keystroke → painted, 200,000 lines  | —              | 13.4 ms p50, 14.2 p95 |
+| Idle memory, whole process tree     | —              | 363 MB resident       |
+| Binary size                         | 20.7 MB        | 37.9 MB (M6: 37.3)    |
+
+- **Without extensions, nothing changes.** Contributions add work only when an extension uses
+  them. Views without decorations carry an empty list, and extension commands and keybindings
+  are registered once per extension list change.
+- **Decorations.** Decorated lines are re-rendered when a view changes (their text runs are
+  rebuilt); undecorated lines aren't.
+- **Status and view updates.** These send an event only when the content actually changed. The
+  TODOs example republishes its view after every change, but the frontend refetches only when
+  something differs.
+
 ## Optimizations made from these measurements
 
 1. **Parallel find in files.** On one thread, searching 10,000 small files took

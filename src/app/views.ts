@@ -1,5 +1,9 @@
-import type { ComponentType } from "react";
+import { createElement, useMemo, type ComponentType } from "react";
 import type { IconName } from "../components/Icon";
+import type { ViewContribution } from "../ipc/extensions";
+import { ExtensionViewPanel } from "../panels/ExtensionViewPanel";
+import { extensionsStore, usableExtensions } from "../state/extensions";
+import { useStore } from "../state/store";
 import { ExplorerActions, ExplorerPanel } from "../panels/ExplorerPanel";
 import { ExtensionsActions, ExtensionsPanel } from "../panels/ExtensionsPanel";
 import { SearchPanel } from "../panels/SearchPanel";
@@ -45,3 +49,29 @@ export const builtinViews: readonly ViewDescriptor[] = [
     command: "workbench.showExtensions",
   },
 ];
+
+/** One component per contributed view, kept so React doesn't remount it. */
+const contributedComponents = new Map<string, ComponentType>();
+
+function contributedView(view: ViewContribution): ViewDescriptor {
+  let component = contributedComponents.get(view.fullId);
+  if (!component) {
+    component = () => createElement(ExtensionViewPanel, { view: view.fullId });
+    contributedComponents.set(view.fullId, component);
+  }
+  return { id: view.fullId, title: view.title, icon: view.icon as IconName, component };
+}
+
+/** Built-in views followed by those of enabled extensions. */
+export function useViews(): readonly ViewDescriptor[] {
+  const extensions = useStore(extensionsStore);
+  return useMemo(
+    () => [
+      ...builtinViews,
+      ...usableExtensions(extensions).flatMap((extension) =>
+        extension.contributions.views.map(contributedView),
+      ),
+    ],
+    [extensions],
+  );
+}

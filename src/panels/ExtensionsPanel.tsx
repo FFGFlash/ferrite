@@ -20,7 +20,24 @@ const stateLabels: Record<ExtensionState, string> = {
   failed: "Stopped",
   disabled: "Disabled",
   invalid: "Invalid",
+  ready: "Enabled",
 };
+
+/** What an extension adds to the workbench, e.g. "2 themes, 1 view". */
+function contributionSummary(extension: ExtensionStatus): string | null {
+  const { themes, keybindings, menus, views, decorations } = extension.contributions;
+  const parts = [
+    [themes.length, "theme"],
+    [views.length, "view"],
+    [keybindings.length, "keybinding"],
+    [menus.length, "menu item"],
+    [decorations.length, "decoration type"],
+  ] as const;
+  const listed = parts
+    .filter(([count]) => count > 0)
+    .map(([count, noun]) => `${count} ${noun}${count === 1 ? "" : "s"}`);
+  return listed.length > 0 ? `Adds ${listed.join(", ")}` : null;
+}
 
 /** Lists installed and development extensions with their state and permissions. */
 export function ExtensionsPanel() {
@@ -58,6 +75,8 @@ function act(action: string, run: () => Promise<void>): void {
 
 function ExtensionItem({ extension }: { extension: ExtensionStatus }) {
   const valid = extension.state !== "invalid";
+  const runs = valid && extension.state !== "ready";
+  const visibleCommands = extension.commands.filter((command) => !command.hidden);
   const disabled = extension.state === "disabled";
   const granted = extension.permissions.filter((p) => p.granted).map((p) => p.permission);
   const toggle = (permission: Permission, allow: boolean) => {
@@ -74,6 +93,9 @@ function ExtensionItem({ extension }: { extension: ExtensionStatus }) {
         <span className="extension__state">{stateLabels[extension.state]}</span>
       </div>
       {extension.description && <p className="extension__description">{extension.description}</p>}
+      {contributionSummary(extension) && (
+        <p className="extension__contributes">{contributionSummary(extension)}</p>
+      )}
       {extension.error && (
         <p className="extension__error" role="alert">
           {extension.error}
@@ -102,9 +124,9 @@ function ExtensionItem({ extension }: { extension: ExtensionStatus }) {
           ))}
         </fieldset>
       )}
-      {extension.commands.length > 0 && (
+      {visibleCommands.length > 0 && (
         <div className="extension__commands">
-          {extension.commands.map((command) => (
+          {visibleCommands.map((command) => (
             <button
               key={command.id}
               type="button"
@@ -124,14 +146,18 @@ function ExtensionItem({ extension }: { extension: ExtensionStatus }) {
         </span>
         {valid && (
           <>
-            <button
-              type="button"
-              className="extensions-panel__button"
-              disabled={disabled}
-              onClick={() => act("Restarting the extension", () => restartExtension(extension.id))}
-            >
-              Restart
-            </button>
+            {runs && (
+              <button
+                type="button"
+                className="extensions-panel__button"
+                disabled={disabled}
+                onClick={() =>
+                  act("Restarting the extension", () => restartExtension(extension.id))
+                }
+              >
+                Restart
+              </button>
+            )}
             <button
               type="button"
               className="extensions-panel__button"

@@ -4,7 +4,7 @@ This document describes Ferrite's architecture as it currently exists and how it
 grow. The goals and constraints come from [`DESIGN.md`](DESIGN.md); decisions with lasting
 consequences are recorded as ADRs in [`adr/`](adr/).
 
-## Current state (Milestone 6)
+## Current state (Milestone 7)
 
 ```text
 ┌──────────────────────────── Desktop process (ferrite) ─────────────────────────────┐
@@ -57,7 +57,8 @@ workspace, `extensions/`. The design brief's `editor-app` and `src-tauri` are on
 [ADR 0003](adr/0003-workbench-services.md), and performance decisions in
 [ADR 0004](adr/0004-performance-foundations.md), and syntax and language server decisions in
 [ADR 0005](adr/0005-syntax-and-language-servers.md), and extension decisions in
-[ADR 0006](adr/0006-wasm-extensions.md). Measurements are in
+[ADR 0006](adr/0006-wasm-extensions.md) and [ADR 0007](adr/0007-workbench-contributions.md).
+Measurements are in
 [`performance.md`](performance.md).
 
 ## Background work
@@ -195,7 +196,9 @@ timestamp granularity and with the same length isn't detected.
   tab size and spaces apply to open documents, font and theme to the frontend, and exclusions
   rebuild the index. Invalid settings (unknown keys, out-of-range values, bad globs) are reported
   with the parser's message and the previous settings stay in effect. **Color Theme** commands
-  edit the file with `toml_edit`, preserving comments and formatting.
+  edit the file with `toml_edit`, preserving comments and formatting. `workbench.theme` names a
+  built-in theme or a contributed one; `workbench.colors` overrides theme tokens; `[keybindings]`
+  replaces commands' keys.
 - **`state.json`** in the local data directory holds the open folder, open files, the active file,
   and the frontend's layout (side bar visibility, width, active view, expanded folders). It's
   written atomically on every change; the frontend debounces its layout updates by 500 ms. On
@@ -215,6 +218,12 @@ enabled commands with their shortcuts (`>`), finds files (no prefix), and goes t
 Editing keys that need the editor's textarea (arrows, Backspace, clipboard) stay in
 `editor/keymap.ts`. Extension commands, declared in their manifests, are registered into the
 same registry, so they appear in the palette before their extension starts.
+
+When a key matches several commands, the user's `[keybindings]` settings win (they replace a
+command's keys, or remove them with `""`), then built-in defaults, then extension defaults. The
+backend validates and normalizes key syntax (`ferrite_extension_host::keys`) for both
+manifests and settings. **Preferences: Keyboard Shortcuts** opens a list of every command with
+its id and keys.
 
 ## The frontend–backend boundary
 
@@ -438,6 +447,35 @@ connects it to the editor, settings, and frontend. The developer guide is
     the reason with a **Restart** action.
 - **Benchmarks** run without extensions unless `--extensions` is passed to `scripts/bench.mjs`.
 
+### Workbench contributions
+
+Extensions customize the workbench declaratively ([ADR 0007](adr/0007-workbench-contributions.md)).
+The manifest declares contributions (validated in `contributions.rs`), and the workbench renders
+them. Extensions fill in content through the `workbench` interface (API 1.1).
+
+| Contribution     | Declared                               | Filled in by the extension                        | Rendered by                        |
+| ---------------- | -------------------------------------- | ------------------------------------------------- | ---------------------------------- |
+| Themes           | base kind + theme file of token colors | (nothing: no code needed)                         | `themes/theme.ts`, `appearance.ts` |
+| Keybindings      | key, macOS key, `editorFocus`          | —                                                 | the command registry               |
+| Menu items       | location, command, group               | — (explorer items get the path as argument)       | `components/ContextMenu`           |
+| Status bar items | alignment, priority, initial text      | `set-status-item`                                 | `StatusBar`                        |
+| Side bar views   | title, icon                            | `set-view-items`, `set-view-message`, `show-view` | `panels/ExtensionViewPanel`        |
+| Decorations      | colors (dark/light), underline, weight | `set-decorations` (ranges per document)           | `EditorView` overlay and line runs |
+
+- **Host state.** Status and view content live in the host's state, keyed by extension. They are
+  compared on update (unchanged content sends no event) and removed when the extension stops.
+  The frontend fetches them on `extensionStatusItemsChanged` and `extensionViewChanged` events.
+- **Decorations** are stored per document like extension diagnostics, mapped through edits, and
+  sent with each view for its lines (`decorations: [{ start, end, key }]`). The frontend draws
+  backgrounds, borders, and underlines as overlay rectangles, and text color and font styles as
+  styled runs. Colors are validated hex colors, applied through CSS variables and inline styles.
+- **Themes** apply after their extension loads. The frontend re-resolves `workbench.theme`
+  whenever the extension list changes, falling back to the system theme while it isn't loaded.
+- **Command arguments.** View items and explorer menu items run their command with an argument,
+  which the extension reads with `workbench::command-argument()` during that command.
+- **`reveal`** asks the frontend to activate a document and select a range; **`show-view`** opens
+  a view.
+
 ## Frontend structure
 
 - **`ipc/`**: typed command wrappers. `call()` normalizes failures to `CommandError`.
@@ -467,12 +505,19 @@ connects it to the editor, settings, and frontend. The developer guide is
   (Ctrl on Windows/Linux, Cmd/Option on macOS). Commands' keybindings are handled in the capture
   phase before the editor sees the key.
 - **Extensions view** (`panels/ExtensionsPanel`, `Ctrl+Shift+X`): each extension's state,
-  permissions (checkboxes that grant or deny), commands, errors, and Restart and Disable buttons.
+  permissions (checkboxes that grant or deny), what it contributes, commands, errors, and
+  Restart and Disable buttons. The activity bar and side bar list built-in views followed by the
+  views of enabled extensions (`app/views.ts`).
+- **Context menus** (`components/ContextMenu`) are a generic keyboard-navigable menu, opened by
+  the editor (clipboard, Go to Definition, extension items, Command Palette) and by explorer
+  file rows (Open, extension items).
 - **Tabs** can be reordered by dragging, cycled with Ctrl+Tab and Ctrl+PageUp/PageDown, and
   remember their scroll position while the app runs. Clicking a tab returns focus to its editor.
 - **Theming**: `styles/tokens.css` defines semantic tokens for dark and light themes (including
   find matches, widgets, inputs, lists, and buttons), selected by `data-theme` on `<html>`.
-  Components use tokens only. The `workbench.theme` setting picks dark, light, or the OS scheme.
+  Components use tokens only. The `workbench.theme` setting picks dark, light, the OS scheme, or
+  an extension's theme, which overrides tokens with inline custom properties on `<html>` (as do
+  the user's `workbench.colors`). The allowed tokens are listed in `themes/tokens.json`.
   Editor font size, family, line height, and tab width are CSS variables set from settings.
 - **Accessibility**: the tab strip and tab panels use ARIA tab roles, and unsaved tabs say so in
   their accessible name. The explorer is an ARIA `tree` with arrow-key navigation, and the palette
@@ -556,14 +601,14 @@ These are tracked for later milestones:
   aren't open aren't shown.
 - Highlighting uses each grammar's bundled query; there's no injection support (e.g. code in
   Markdown or doc comments) and no language detection beyond file names.
-- Extensions (API version 1) can't contribute keybindings, menus, status bar items, views,
-  themes, or decorations other than diagnostics yet, and have no storage API. They can't
-  depend on other extensions. Components that import WASI are rejected. There's no installer;
-  extensions are installed by copying their folder.
+- Extensions have no storage API and can't depend on other extensions. Components that import
+  WASI are rejected. There's no installer; extensions are installed by copying their folder.
+- Contributed views are trees of text items; there are no rich custom views, inline text
+  (inlays), gutter icons, or decoration hover text. Menus exist only in the editor and the
+  explorer (files), and keybindings support only the `editorFocus` condition.
 - Extension diagnostics count toward the status bar's problem counts only in files with a known
   language, because the counts live in the language status.
-- There's no graphical settings UI; settings are edited as TOML. Keybindings aren't configurable
-  yet (M7).
+- There's no graphical settings or keybindings UI; both are edited as TOML.
 - Multi-line Tab/Shift+Tab indentation, auto-closing brackets, and copying the whole line when
   nothing is selected aren't implemented. Alt+drag doesn't create column selections.
 - Errors opening files at startup are only logged, not shown.

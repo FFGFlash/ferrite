@@ -6,6 +6,7 @@ version = "0.1.0"
 description = "Breaks rules and limits on request."
 api_version = "1"
 entrypoint = "../../target/wasm32-unknown-unknown/release/misbehaving.wasm"
+activation = ["on-view:items"]
 
 [permissions]
 documents_read = true
@@ -81,3 +82,40 @@ default = 3
 minimum = 1
 maximum = 10
 description = "A number to report."
+
+[[commands]]
+id = "test.misbehaving.ui"
+title = "Fill the Workbench"
+
+[[commands]]
+id = "test.misbehaving.argument"
+title = "Report the Argument"
+
+[[commands]]
+id = "test.misbehaving.uiErrors"
+title = "Misuse the Workbench"
+
+[[keybindings]]
+command = "test.misbehaving.argument"
+key = "ctrl+alt+a"
+when = "editorFocus"
+
+[[menus]]
+location = "explorer/context"
+command = "test.misbehaving.argument"
+
+[[status_items]]
+id = "state"
+alignment = "right"
+priority = 5
+text = "idle"
+
+[[views]]
+id = "items"
+title = "Items"
+icon = "list"
+
+[decorations.mark]
+background = "#ff000033"
+underline = "wavy"
+underline_color = "#ff0000"
