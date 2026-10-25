@@ -146,6 +146,24 @@ describe('EditorView', () => {
     contextMenuStore.set(null)
   })
 
+  it('moves the cursor to the end of the last line when clicked below it', async () => {
+    const { transport, applied } = fakeTransport(makeView(['fn main() {', '}']))
+    const input = await renderEditor(transport)
+    const content = document.querySelector('.editor-view__content')
+    expect(content).not.toBeNull()
+    // Lines start at y = 0 in jsdom, so y = 500 is far below the second line.
+    fireEvent.mouseDown(content as Element, { button: 0, clientX: 40, clientY: 500 })
+    fireEvent.mouseUp(window)
+    await act(async () => {})
+    expect(input).toHaveFocus()
+    expect(applied.flat()).toContainEqual({
+      type: 'setCursor',
+      position: { line: 1, column: Number.MAX_SAFE_INTEGER },
+      extend: false,
+      add: false,
+    })
+  })
+
   it('inserts pasted text', async () => {
     const user = userEvent.setup()
     const { transport, applied } = fakeTransport(makeView(['']))

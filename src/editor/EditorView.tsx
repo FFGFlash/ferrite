@@ -577,6 +577,22 @@ export function EditorView({ documentId, title, transport = ipcTransport }: Edit
     return { line, column }
   }
 
+  /**
+   * Whether a point is below the last line, in the space that fills the
+   * view when the document is short. Clicks there go to the end of the last
+   * line, but nothing is hovered or linked.
+   */
+  const belowText = (clientY: number): boolean => {
+    const lines = linesRef.current
+    const current = viewRef.current
+    if (!lines || !current) {
+      return false
+    }
+    const textBottom =
+      lines.getBoundingClientRect().top + (current.lineCount - current.startLine) * lineHeight
+    return clientY >= textBottom
+  }
+
   const onMouseDown = (event: ReactMouseEvent<HTMLDivElement>) => {
     if (event.button !== 0) {
       return
@@ -591,7 +607,9 @@ export function EditorView({ documentId, title, transport = ipcTransport }: Edit
     }
     if (definitionModifier(event)) {
       dispatch({ type: 'setCursor', position, extend: false, add: false })
-      void goToDefinition(position)
+      if (!belowText(event.clientY)) {
+        void goToDefinition(position)
+      }
       return
     }
     if (event.detail === 2) {
@@ -685,7 +703,7 @@ export function EditorView({ documentId, title, transport = ipcTransport }: Edit
     // Hover shows language information and diagnostics (which extensions
     // may publish for any file).
     const current = viewRef.current
-    if (!position || !(current?.language || current?.diagnostics.length)) {
+    if (!position || !(current?.language || current?.diagnostics.length) || belowText(clientY)) {
       return
     }
     hoverTimerRef.current = window.setTimeout(() => {
@@ -802,7 +820,7 @@ export function EditorView({ documentId, title, transport = ipcTransport }: Edit
     const position = positionAt(clientX, clientY)
     const lines = linesRef.current
     const current = viewRef.current
-    if (!position || !lines || !current) {
+    if (!position || !lines || !current || belowText(clientY)) {
       return null
     }
     const element = lines.children[position.line - current.startLine]
@@ -1006,7 +1024,15 @@ export function EditorView({ documentId, title, transport = ipcTransport }: Edit
         />
       )}
       <div className="editor-view" ref={scrollRef} onScroll={onScroll}>
-        <div className="editor-view__sizer" style={{ minHeight: lineCount * lineHeight }}>
+        {/* The lines plus a view's height less one line, so the last line can
+            scroll to the top (as in VS Code). Clicks in that space reach the
+            content and go to the end of the last line. */}
+        <div
+          className="editor-view__sizer"
+          style={{
+            minHeight: `max(${lineCount * lineHeight}px, 100% + ${(lineCount - 1) * lineHeight}px)`,
+          }}
+        >
           <div
             className="editor-view__gutter"
             ref={gutterRef}
