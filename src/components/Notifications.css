@@ -22,11 +22,11 @@
   user-select: text;
 }
 
-.notification[data-kind="error"] {
+.notification[data-kind='error'] {
   border-left: 3px solid var(--color-error);
 }
 
-.notification[data-kind="warning"] {
+.notification[data-kind='warning'] {
   border-left: 3px solid var(--color-diagnostic-warning);
 }
 

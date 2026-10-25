@@ -1,44 +1,44 @@
-import { useMemo, useState, type KeyboardEvent } from "react";
-import { executeCommand, primaryKeybinding, getCommand } from "../commands/registry";
-import type { DirectoryEntry } from "../ipc/workspace";
-import { openContextMenu } from "../components/contextMenuState";
-import { documentsStore, openPath } from "../state/documents";
-import { contributedMenuItems, runContributed } from "../state/extensions";
-import { layoutStore } from "../state/layout";
-import { useStore } from "../state/store";
-import { openFolder, toggleFolder, workspaceStore, type Listing } from "../state/workspace";
-import "./ExplorerPanel.css";
+import { useMemo, useState, type KeyboardEvent } from 'react'
+import { executeCommand, primaryKeybinding, getCommand } from '../commands/registry'
+import type { DirectoryEntry } from '../ipc/workspace'
+import { openContextMenu } from '../components/contextMenuState'
+import { documentsStore, openPath } from '../state/documents'
+import { contributedMenuItems, runContributed } from '../state/extensions'
+import { layoutStore } from '../state/layout'
+import { useStore } from '../state/store'
+import { openFolder, toggleFolder, workspaceStore, type Listing } from '../state/workspace'
+import './ExplorerPanel.css'
 
 /** The context menu of a file: open it, plus extensions' items, which get its path. */
 function openFileMenu(x: number, y: number, path: string): void {
   openContextMenu(x, y, [
-    { label: "Open", run: () => openPath(path) },
+    { label: 'Open', run: () => openPath(path) },
     null,
-    ...contributedMenuItems("explorer/context").map((item) => ({
+    ...contributedMenuItems('explorer/context').map(item => ({
       label: item.title,
       run: () => runContributed(item.command, path),
     })),
-  ]);
+  ])
 }
 
 interface Row {
-  entry: DirectoryEntry;
-  depth: number;
-  expanded: boolean;
+  entry: DirectoryEntry
+  depth: number
+  expanded: boolean
 }
 
 /** Folders and files of the open workspace, loaded as folders expand. */
 export function ExplorerPanel() {
-  const { info, listings } = useStore(workspaceStore);
-  const { expanded } = useStore(layoutStore);
-  const { documents, activeId } = useStore(documentsStore);
-  const [focused, setFocused] = useState<string | null>(null);
-  const activePath = documents.find((document) => document.id === activeId)?.path ?? null;
+  const { info, listings } = useStore(workspaceStore)
+  const { expanded } = useStore(layoutStore)
+  const { documents, activeId } = useStore(documentsStore)
+  const [focused, setFocused] = useState<string | null>(null)
+  const activePath = documents.find(document => document.id === activeId)?.path ?? null
 
   const rows = useMemo(
     () => (info ? flatten(info.root, listings, new Set(expanded), 0) : []),
     [info, listings, expanded],
-  );
+  )
 
   if (!info) {
     return (
@@ -48,84 +48,84 @@ export function ExplorerPanel() {
           Open Folder…
         </button>
       </div>
-    );
+    )
   }
-  const rootListing = listings.get(info.root);
-  if (rootListing && "error" in rootListing) {
+  const rootListing = listings.get(info.root)
+  if (rootListing && 'error' in rootListing) {
     return (
       <p className="panel-empty">
         Could not read {info.name}: {rootListing.error}
       </p>
-    );
+    )
   }
 
   const focusIndex = Math.max(
     0,
-    rows.findIndex((row) => row.entry.path === focused),
-  );
+    rows.findIndex(row => row.entry.path === focused),
+  )
   const activate = (row: Row) => {
-    setFocused(row.entry.path);
+    setFocused(row.entry.path)
     if (row.entry.directory) {
-      toggleFolder(row.entry.path);
+      toggleFolder(row.entry.path)
     } else {
-      void openPath(row.entry.path);
+      void openPath(row.entry.path)
     }
-  };
+  }
 
   const onKeyDown = (event: KeyboardEvent<HTMLUListElement>) => {
-    const row = rows[focusIndex];
+    const row = rows[focusIndex]
     if (!row) {
-      return;
+      return
     }
     const move = (index: number) => {
-      const target = rows[Math.max(0, Math.min(rows.length - 1, index))];
+      const target = rows[Math.max(0, Math.min(rows.length - 1, index))]
       if (target) {
-        setFocused(target.entry.path);
-        document.getElementById(rowId(target.entry.path))?.scrollIntoView({ block: "nearest" });
+        setFocused(target.entry.path)
+        document.getElementById(rowId(target.entry.path))?.scrollIntoView({ block: 'nearest' })
       }
-    };
+    }
     switch (event.key) {
-      case "ArrowDown":
-        move(focusIndex + 1);
-        break;
-      case "ArrowUp":
-        move(focusIndex - 1);
-        break;
-      case "Home":
-        move(0);
-        break;
-      case "End":
-        move(rows.length - 1);
-        break;
-      case "ArrowRight":
+      case 'ArrowDown':
+        move(focusIndex + 1)
+        break
+      case 'ArrowUp':
+        move(focusIndex - 1)
+        break
+      case 'Home':
+        move(0)
+        break
+      case 'End':
+        move(rows.length - 1)
+        break
+      case 'ArrowRight':
         if (row.entry.directory && !row.expanded) {
-          toggleFolder(row.entry.path);
+          toggleFolder(row.entry.path)
         } else {
-          move(focusIndex + 1);
+          move(focusIndex + 1)
         }
-        break;
-      case "ArrowLeft":
+        break
+      case 'ArrowLeft':
         if (row.entry.directory && row.expanded) {
-          toggleFolder(row.entry.path);
+          toggleFolder(row.entry.path)
         } else {
           const parent = rows
             .slice(0, focusIndex)
             .reverse()
-            .find((candidate) => candidate.depth < row.depth);
+            .find(candidate => candidate.depth < row.depth)
           if (parent) {
-            move(rows.indexOf(parent));
+            move(rows.indexOf(parent))
           }
         }
-        break;
-      case "Enter":
-      case " ":
-        activate(row);
-        break;
+        break
+      case 'Enter':
+      case ' ':
+        activate(row)
+        break
       default:
-        return;
+        return
     }
-    event.preventDefault();
-  };
+    event.preventDefault()
+  }
 
   return (
     <ul
@@ -135,16 +135,16 @@ export function ExplorerPanel() {
       tabIndex={0}
       aria-activedescendant={rows[focusIndex] ? rowId(rows[focusIndex].entry.path) : undefined}
       onKeyDown={onKeyDown}
-      onContextMenu={(event) => {
+      onContextMenu={event => {
         // From the keyboard (Shift+F10, the menu key): the focused row's menu.
-        const row = rows[focusIndex];
+        const row = rows[focusIndex]
         if (event.target !== event.currentTarget || !row) {
-          return;
+          return
         }
-        event.preventDefault();
-        const rect = document.getElementById(rowId(row.entry.path))?.getBoundingClientRect();
+        event.preventDefault()
+        const rect = document.getElementById(rowId(row.entry.path))?.getBoundingClientRect()
         if (!row.entry.directory && rect) {
-          openFileMenu(rect.left + rect.width / 3, rect.bottom, row.entry.path);
+          openFileMenu(rect.left + rect.width / 3, rect.bottom, row.entry.path)
         }
       }}
     >
@@ -162,42 +162,42 @@ export function ExplorerPanel() {
           style={{ paddingLeft: `calc(${row.depth} * var(--space-3) + var(--space-2))` }}
           title={row.entry.path}
           onClick={() => activate(row)}
-          onContextMenu={(event) => {
-            event.preventDefault();
-            setFocused(row.entry.path);
+          onContextMenu={event => {
+            event.preventDefault()
+            setFocused(row.entry.path)
             if (!row.entry.directory) {
-              openFileMenu(event.clientX, event.clientY, row.entry.path);
+              openFileMenu(event.clientX, event.clientY, row.entry.path)
             }
           }}
         >
           <span className="explorer-tree__chevron" aria-hidden="true">
-            {row.entry.directory ? (row.expanded ? "▾" : "▸") : ""}
+            {row.entry.directory ? (row.expanded ? '▾' : '▸') : ''}
           </span>
           <span className="explorer-tree__name">{row.entry.name}</span>
         </li>
       ))}
       {rows.length === 0 && (
         <li className="panel-empty" role="none">
-          {rootListing ? "This folder is empty." : "Loading…"}
+          {rootListing ? 'This folder is empty.' : 'Loading…'}
         </li>
       )}
     </ul>
-  );
+  )
 }
 
 /** Explorer actions shown in the side bar header. */
 export function ExplorerActions() {
-  const { info } = useStore(workspaceStore);
-  const collapse = getCommand("explorer.collapseAll");
-  const open = getCommand("file.openFolder");
+  const { info } = useStore(workspaceStore)
+  const collapse = getCommand('explorer.collapseAll')
+  const open = getCommand('file.openFolder')
   return (
     <>
       <button
         type="button"
         className="sidebar__action"
-        title={`Open Folder…${primaryKeybinding(open) ? ` (${primaryKeybinding(open)})` : ""}`}
+        title={`Open Folder…${primaryKeybinding(open) ? ` (${primaryKeybinding(open)})` : ''}`}
         aria-label="Open Folder"
-        onClick={() => void executeCommand("file.openFolder")}
+        onClick={() => void executeCommand('file.openFolder')}
       >
         ⊕
       </button>
@@ -207,13 +207,13 @@ export function ExplorerActions() {
           className="sidebar__action"
           title="Collapse Folders"
           aria-label="Collapse Folders"
-          onClick={() => void executeCommand("explorer.collapseAll")}
+          onClick={() => void executeCommand('explorer.collapseAll')}
         >
           ⊟
         </button>
       )}
     </>
-  );
+  )
 }
 
 function flatten(
@@ -222,17 +222,17 @@ function flatten(
   expanded: ReadonlySet<string>,
   depth: number,
 ): Row[] {
-  const listing = listings.get(directory);
-  if (!listing || "error" in listing) {
-    return [];
+  const listing = listings.get(directory)
+  if (!listing || 'error' in listing) {
+    return []
   }
-  return listing.flatMap((entry) => {
-    const isOpen = entry.directory && expanded.has(entry.path);
-    const row = { entry, depth, expanded: isOpen };
-    return isOpen ? [row, ...flatten(entry.path, listings, expanded, depth + 1)] : [row];
-  });
+  return listing.flatMap(entry => {
+    const isOpen = entry.directory && expanded.has(entry.path)
+    const row = { entry, depth, expanded: isOpen }
+    return isOpen ? [row, ...flatten(entry.path, listings, expanded, depth + 1)] : [row]
+  })
 }
 
 function rowId(path: string): string {
-  return `explorer-${encodeURIComponent(path)}`;
+  return `explorer-${encodeURIComponent(path)}`
 }

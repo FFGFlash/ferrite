@@ -1,46 +1,46 @@
-import { useEffect, useState } from "react";
-import { getPerfStats, type PerfStats } from "../ipc/perf";
-import { extensionsStore, useExtensionUsage } from "../state/extensions";
-import { perfSnapshot, type SeriesSummary } from "../state/perf";
-import { createStore, useStore } from "../state/store";
-import "./PerfOverlay.css";
+import { useEffect, useState } from 'react'
+import { getPerfStats, type PerfStats } from '../ipc/perf'
+import { extensionsStore, useExtensionUsage } from '../state/extensions'
+import { perfSnapshot, type SeriesSummary } from '../state/perf'
+import { createStore, useStore } from '../state/store'
+import './PerfOverlay.css'
 
-const REFRESH_MS = 1000;
+const REFRESH_MS = 1000
 
-export const perfOverlayStore = createStore(false);
+export const perfOverlayStore = createStore(false)
 
-export const togglePerfOverlay = () => perfOverlayStore.update((open) => !open);
+export const togglePerfOverlay = () => perfOverlayStore.update(open => !open)
 
-const ms = (us: number) => (us / 1000).toFixed(us < 10_000 ? 2 : 0);
-const mb = (bytes: number) => `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+const ms = (us: number) => (us / 1000).toFixed(us < 10_000 ? 2 : 0)
+const mb = (bytes: number) => `${(bytes / (1024 * 1024)).toFixed(1)} MB`
 
 /** Live timing and memory statistics, toggled with "Developer: Toggle Performance Overlay". */
 export function PerfOverlay() {
-  const open = useStore(perfOverlayStore);
-  return open ? <PerfOverlayContent /> : null;
+  const open = useStore(perfOverlayStore)
+  return open ? <PerfOverlayContent /> : null
 }
 
 function PerfOverlayContent() {
-  const [frontend, setFrontend] = useState<SeriesSummary[]>([]);
-  const [backend, setBackend] = useState<PerfStats | null>(null);
+  const [frontend, setFrontend] = useState<SeriesSummary[]>([])
+  const [backend, setBackend] = useState<PerfStats | null>(null)
 
-  const extensions = useStore(extensionsStore);
-  const usage = useExtensionUsage(REFRESH_MS);
+  const extensions = useStore(extensionsStore)
+  const usage = useExtensionUsage(REFRESH_MS)
 
   useEffect(() => {
     const refresh = () => {
-      setFrontend(perfSnapshot());
+      setFrontend(perfSnapshot())
       getPerfStats()
         .then(setBackend)
-        .catch(() => setBackend(null));
-    };
-    refresh();
-    const timer = setInterval(refresh, REFRESH_MS);
-    return () => clearInterval(timer);
-  }, []);
+        .catch(() => setBackend(null))
+    }
+    refresh()
+    const timer = setInterval(refresh, REFRESH_MS)
+    return () => clearInterval(timer)
+  }, [])
 
-  const running = extensions.filter((extension) => (usage.get(extension.id)?.calls ?? 0) > 0);
-  const heap = (performance as Performance & { memory?: { usedJSHeapSize: number } }).memory;
+  const running = extensions.filter(extension => (usage.get(extension.id)?.calls ?? 0) > 0)
+  const heap = (performance as Performance & { memory?: { usedJSHeapSize: number } }).memory
   return (
     <aside className="perf-overlay" aria-label="Performance statistics">
       <header className="perf-overlay__header">
@@ -65,7 +65,7 @@ function PerfOverlayContent() {
           </tr>
         </thead>
         <tbody>
-          {frontend.map((entry) => (
+          {frontend.map(entry => (
             <tr key={entry.name}>
               <td>{entry.name}</td>
               <td>{entry.count}</td>
@@ -85,7 +85,7 @@ function PerfOverlayContent() {
           </tr>
         </thead>
         <tbody>
-          {backend?.timings.map((timing) => (
+          {backend?.timings.map(timing => (
             <tr key={timing.name}>
               <td>{timing.name}</td>
               <td>{timing.count}</td>
@@ -105,7 +105,7 @@ function PerfOverlayContent() {
           </tr>
         </thead>
         <tbody>
-          {backend?.tasks.map((task) => (
+          {backend?.tasks.map(task => (
             <tr key={task.name}>
               <td>
                 {task.name}
@@ -130,8 +130,8 @@ function PerfOverlayContent() {
               </tr>
             </thead>
             <tbody>
-              {running.map((extension) => {
-                const used = usage.get(extension.id)!;
+              {running.map(extension => {
+                const used = usage.get(extension.id)!
                 return (
                   <tr key={extension.id}>
                     <td>
@@ -141,9 +141,9 @@ function PerfOverlayContent() {
                     <td>{used.calls}</td>
                     <td>{used.busyMs.toFixed(used.busyMs < 10 ? 2 : 0)}</td>
                     <td>{used.slowestCallMs.toFixed(used.slowestCallMs < 10 ? 2 : 0)}</td>
-                    <td>{used.memoryBytes > 0 ? mb(used.memoryBytes) : "—"}</td>
+                    <td>{used.memoryBytes > 0 ? mb(used.memoryBytes) : '—'}</td>
                   </tr>
-                );
+                )
               })}
             </tbody>
           </>
@@ -154,15 +154,15 @@ function PerfOverlayContent() {
         {heap && <>JS heap {mb(heap.usedJSHeapSize)} · </>}
         {backend && (
           <>
-            {backend.openDocuments} documents ({mb(backend.openDocumentBytes)}) ·{" "}
+            {backend.openDocuments} documents ({mb(backend.openDocumentBytes)}) ·{' '}
             {backend.queuedTasks} queued
           </>
         )}
       </p>
     </aside>
-  );
+  )
 }
 
-function format(value: number, unit: SeriesSummary["unit"]): string {
-  return unit === "ms" ? value.toFixed(value < 10 ? 2 : 0) : String(Math.round(value));
+function format(value: number, unit: SeriesSummary['unit']): string {
+  return unit === 'ms' ? value.toFixed(value < 10 ? 2 : 0) : String(Math.round(value))
 }

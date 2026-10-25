@@ -1,17 +1,17 @@
-import { Component, type ErrorInfo, type ReactNode } from "react";
-import { log } from "../ipc";
-import "./ErrorBoundary.css";
+import { Component, type ErrorInfo, type ReactNode } from 'react'
+import { log } from '../ipc'
+import './ErrorBoundary.css'
 
 interface ErrorBoundaryProps {
   /** What failed, as shown to the user: "The editor", "The Explorer view". */
-  name: string;
+  name: string
   /** A change of this value (e.g. another document) clears the error. */
-  resetKey?: unknown;
-  children: ReactNode;
+  resetKey?: unknown
+  children: ReactNode
 }
 
 interface ErrorBoundaryState {
-  error: Error | null;
+  error: Error | null
 }
 
 /**
@@ -21,27 +21,27 @@ interface ErrorBoundaryState {
  * changes, so reloading loses nothing).
  */
 export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
-  override state: ErrorBoundaryState = { error: null };
+  override state: ErrorBoundaryState = { error: null }
 
   static getDerivedStateFromError(error: unknown): ErrorBoundaryState {
-    return { error: error instanceof Error ? error : new Error(String(error)) };
+    return { error: error instanceof Error ? error : new Error(String(error)) }
   }
 
   override componentDidCatch(error: unknown, info: ErrorInfo): void {
-    const detail = error instanceof Error ? (error.stack ?? error.message) : String(error);
-    log("error", `${this.props.name} failed to render: ${detail}${info.componentStack ?? ""}`);
+    const detail = error instanceof Error ? (error.stack ?? error.message) : String(error)
+    log('error', `${this.props.name} failed to render: ${detail}${info.componentStack ?? ''}`)
   }
 
   override componentDidUpdate(previous: ErrorBoundaryProps): void {
     if (this.state.error && previous.resetKey !== this.props.resetKey) {
-      this.setState({ error: null });
+      this.setState({ error: null })
     }
   }
 
   override render(): ReactNode {
-    const { error } = this.state;
+    const { error } = this.state
     if (!error) {
-      return this.props.children;
+      return this.props.children
     }
     return (
       <div className="error-boundary" role="alert">
@@ -66,6 +66,6 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
           </button>
         </div>
       </div>
-    );
+    )
   }
 }

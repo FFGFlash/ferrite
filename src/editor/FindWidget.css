@@ -86,7 +86,7 @@
   color: var(--color-text);
 }
 
-.find-widget__option[aria-pressed="true"] {
+.find-widget__option[aria-pressed='true'] {
   border-color: var(--color-focus-ring);
   color: var(--color-text);
 }

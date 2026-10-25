@@ -1,28 +1,28 @@
-import { memo } from "react";
-import { executeCommand } from "../commands/registry";
-import type { AppInfo } from "../ipc";
-import type { LanguageStatus } from "../ipc/editor";
-import type { StatusItem } from "../ipc/extensions";
-import { documentsStore } from "../state/documents";
-import { editorStatus } from "../state/editorStatus";
-import { statusItemsStore } from "../state/extensions";
-import { useStore } from "../state/store";
-import "./StatusBar.css";
+import { memo } from 'react'
+import { executeCommand } from '../commands/registry'
+import type { AppInfo } from '../ipc'
+import type { LanguageStatus } from '../ipc/editor'
+import type { StatusItem } from '../ipc/extensions'
+import { documentsStore } from '../state/documents'
+import { editorStatus } from '../state/editorStatus'
+import { statusItemsStore } from '../state/extensions'
+import { useStore } from '../state/store'
+import './StatusBar.css'
 
 interface StatusBarProps {
-  appInfo: AppInfo | null;
+  appInfo: AppInfo | null
 }
 
 export const StatusBar = memo(function StatusBar({ appInfo }: StatusBarProps) {
-  const status = useStore(editorStatus);
-  const { documents, activeId } = useStore(documentsStore);
-  const active = documents.find((document) => document.id === activeId);
-  const items = useStore(statusItemsStore);
-  const side = (alignment: StatusItem["alignment"]) =>
+  const status = useStore(editorStatus)
+  const { documents, activeId } = useStore(documentsStore)
+  const active = documents.find(document => document.id === activeId)
+  const items = useStore(statusItemsStore)
+  const side = (alignment: StatusItem['alignment']) =>
     items
-      .filter((item) => item.alignment === alignment)
+      .filter(item => item.alignment === alignment)
       .sort((a, b) => b.priority - a.priority)
-      .map((item) => <ExtensionItem key={item.id} item={item} />);
+      .map(item => <ExtensionItem key={item.id} item={item} />)
 
   return (
     <footer className="statusbar">
@@ -33,10 +33,10 @@ export const StatusBar = memo(function StatusBar({ appInfo }: StatusBarProps) {
             {status.selectionCount > 1 && ` (${status.selectionCount} selections)`}
           </span>
         )}
-        {side("left")}
+        {side('left')}
       </div>
       <div className="statusbar__group">
-        {side("right")}
+        {side('right')}
         {status?.language && <LanguageItems status={status.language} />}
         {active && (
           <>
@@ -55,13 +55,13 @@ export const StatusBar = memo(function StatusBar({ appInfo }: StatusBarProps) {
         )}
       </div>
     </footer>
-  );
-});
+  )
+})
 
 /** A status bar item contributed by an extension; plain text, never markup. */
 function ExtensionItem({ item }: { item: StatusItem }) {
-  const title = item.tooltip ?? item.extension;
-  const command = item.command;
+  const title = item.tooltip ?? item.extension
+  const command = item.command
   if (command) {
     return (
       <button
@@ -72,34 +72,34 @@ function ExtensionItem({ item }: { item: StatusItem }) {
       >
         {item.text}
       </button>
-    );
+    )
   }
   return (
     <span className="statusbar__item" title={title}>
       {item.text}
     </span>
-  );
+  )
 }
 
-function serverText(server: NonNullable<LanguageStatus["server"]>): string {
+function serverText(server: NonNullable<LanguageStatus['server']>): string {
   switch (server.state) {
-    case "starting":
-      return `${server.name}: starting…`;
-    case "busy":
-      return `${server.name}: ${server.message ?? "working"}…`;
-    case "failed":
-      return `${server.name}: unavailable`;
-    case "ready":
-      return server.name;
+    case 'starting':
+      return `${server.name}: starting…`
+    case 'busy':
+      return `${server.name}: ${server.message ?? 'working'}…`
+    case 'failed':
+      return `${server.name}: unavailable`
+    case 'ready':
+      return server.name
   }
 }
 
 /** Problem counts, language, and language server for the active document. */
 function LanguageItems({ status }: { status: LanguageStatus }) {
-  const { server } = status;
+  const { server } = status
   return (
     <>
-      {server && server.state !== "failed" && (
+      {server && server.state !== 'failed' && (
         <span
           className="statusbar__item"
           title={`${status.errors} errors, ${status.warnings} warnings`}
@@ -121,5 +121,5 @@ function LanguageItems({ status }: { status: LanguageStatus }) {
         </span>
       )}
     </>
-  );
+  )
 }

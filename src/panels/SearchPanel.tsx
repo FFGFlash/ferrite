@@ -1,33 +1,33 @@
-import { useEffect, useState } from "react";
-import type { SearchQuery } from "../ipc/editor";
-import type { LineMatch } from "../ipc/workspace";
-import { openPath } from "../state/documents";
-import { runSearch, searchStore, setSearchQuery, type FileResults } from "../state/search";
-import { useStore } from "../state/store";
-import { openFolder, workspaceStore } from "../state/workspace";
-import "./SearchPanel.css";
+import { useEffect, useState } from 'react'
+import type { SearchQuery } from '../ipc/editor'
+import type { LineMatch } from '../ipc/workspace'
+import { openPath } from '../state/documents'
+import { runSearch, searchStore, setSearchQuery, type FileResults } from '../state/search'
+import { useStore } from '../state/store'
+import { openFolder, workspaceStore } from '../state/workspace'
+import './SearchPanel.css'
 
-const SEARCH_DELAY_MS = 250;
+const SEARCH_DELAY_MS = 250
 
-const toggles: { key: keyof Omit<SearchQuery, "pattern">; label: string; glyph: string }[] = [
-  { key: "caseSensitive", label: "Match Case", glyph: "Aa" },
-  { key: "wholeWord", label: "Match Whole Word", glyph: "ab" },
-  { key: "regex", label: "Use Regular Expression", glyph: ".*" },
-];
+const toggles: { key: keyof Omit<SearchQuery, 'pattern'>; label: string; glyph: string }[] = [
+  { key: 'caseSensitive', label: 'Match Case', glyph: 'Aa' },
+  { key: 'wholeWord', label: 'Match Whole Word', glyph: 'ab' },
+  { key: 'regex', label: 'Use Regular Expression', glyph: '.*' },
+]
 
 /** Find in files across the open workspace. */
 export function SearchPanel() {
-  const { info } = useStore(workspaceStore);
-  const { query, running, files, summary, error } = useStore(searchStore);
+  const { info } = useStore(workspaceStore)
+  const { query, running, files, summary, error } = useStore(searchStore)
 
   // Search as the query settles.
   useEffect(() => {
     if (!info) {
-      return;
+      return
     }
-    const timer = setTimeout(() => void runSearch(), SEARCH_DELAY_MS);
-    return () => clearTimeout(timer);
-  }, [query, info]);
+    const timer = setTimeout(() => void runSearch(), SEARCH_DELAY_MS)
+    return () => clearTimeout(timer)
+  }, [query, info])
 
   if (!info) {
     return (
@@ -37,7 +37,7 @@ export function SearchPanel() {
           Open Folder…
         </button>
       </div>
-    );
+    )
   }
 
   return (
@@ -51,14 +51,14 @@ export function SearchPanel() {
           spellCheck={false}
           value={query.pattern}
           title={error ?? undefined}
-          onChange={(event) => setSearchQuery({ pattern: event.target.value })}
-          onKeyDown={(event) => {
-            if (event.key === "Enter") {
-              void runSearch();
+          onChange={event => setSearchQuery({ pattern: event.target.value })}
+          onKeyDown={event => {
+            if (event.key === 'Enter') {
+              void runSearch()
             }
           }}
         />
-        {toggles.map((toggle) => (
+        {toggles.map(toggle => (
           <button
             key={toggle.key}
             type="button"
@@ -76,17 +76,17 @@ export function SearchPanel() {
         {describe(query.pattern, running, files, summary, error)}
       </p>
       <ul className="search-results" aria-label="Search results">
-        {files.map((file) => (
+        {files.map(file => (
           <FileResult key={file.path} file={file} />
         ))}
       </ul>
     </div>
-  );
+  )
 }
 
 function FileResult({ file }: { file: FileResults }) {
-  const [open, setOpen] = useState(true);
-  const slash = file.relative.lastIndexOf("/");
+  const [open, setOpen] = useState(true)
+  const slash = file.relative.lastIndexOf('/')
   return (
     <li className="search-results__file">
       <button
@@ -97,7 +97,7 @@ function FileResult({ file }: { file: FileResults }) {
         onClick={() => setOpen(!open)}
       >
         <span className="search-results__chevron" aria-hidden="true">
-          {open ? "▾" : "▸"}
+          {open ? '▾' : '▸'}
         </span>
         <span className="search-results__name">{file.relative.slice(slash + 1)}</span>
         {slash > 0 && <span className="search-results__dir">{file.relative.slice(0, slash)}</span>}
@@ -111,12 +111,12 @@ function FileResult({ file }: { file: FileResults }) {
         </ul>
       )}
     </li>
-  );
+  )
 }
 
 function MatchResult({ path, match }: { path: string; match: LineMatch }) {
-  const units = match.preview;
-  const before = units.slice(0, match.previewStart).trimStart();
+  const units = match.preview
+  const before = units.slice(0, match.previewStart).trimStart()
   return (
     <li>
       <button
@@ -135,7 +135,7 @@ function MatchResult({ path, match }: { path: string; match: LineMatch }) {
         {units.slice(match.previewEnd)}
       </button>
     </li>
-  );
+  )
 }
 
 function describe(
@@ -143,30 +143,30 @@ function describe(
   running: boolean,
   files: readonly FileResults[],
   summary: {
-    matches: number;
-    filesWithMatches: number;
-    truncated: boolean;
-    cancelled: boolean;
+    matches: number
+    filesWithMatches: number
+    truncated: boolean
+    cancelled: boolean
   } | null,
   error: string | null,
 ): string {
   if (!pattern) {
-    return "";
+    return ''
   }
   if (error) {
-    return error;
+    return error
   }
   if (running) {
-    const found = files.reduce((sum, file) => sum + file.matches.length, 0);
-    return found > 0 ? `Searching… ${found} results so far` : "Searching…";
+    const found = files.reduce((sum, file) => sum + file.matches.length, 0)
+    return found > 0 ? `Searching… ${found} results so far` : 'Searching…'
   }
   if (!summary || summary.cancelled) {
-    return "";
+    return ''
   }
   if (summary.matches === 0) {
-    return "No results.";
+    return 'No results.'
   }
-  const results = `${summary.matches} result${summary.matches === 1 ? "" : "s"}`;
-  const inFiles = `in ${summary.filesWithMatches} file${summary.filesWithMatches === 1 ? "" : "s"}`;
-  return `${results} ${inFiles}${summary.truncated ? " (search stopped at the result limit)" : ""}`;
+  const results = `${summary.matches} result${summary.matches === 1 ? '' : 's'}`
+  const inFiles = `in ${summary.filesWithMatches} file${summary.filesWithMatches === 1 ? '' : 's'}`
+  return `${results} ${inFiles}${summary.truncated ? ' (search stopped at the result limit)' : ''}`
 }

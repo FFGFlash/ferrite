@@ -6,9 +6,9 @@
 
 :root {
   /* Typography */
-  --font-ui: system-ui, -apple-system, "Segoe UI", Roboto, Ubuntu, Cantarell, sans-serif;
+  --font-ui: system-ui, -apple-system, 'Segoe UI', Roboto, Ubuntu, Cantarell, sans-serif;
   --font-mono:
-    ui-monospace, "Cascadia Code", "SF Mono", Menlo, Consolas, "DejaVu Sans Mono", monospace;
+    ui-monospace, 'Cascadia Code', 'SF Mono', Menlo, Consolas, 'DejaVu Sans Mono', monospace;
   --font-size-ui: 13px;
   --font-size-ui-small: 12px;
   --font-size-editor: 14px;
@@ -33,7 +33,7 @@
 }
 
 :root,
-[data-theme="dark"] {
+[data-theme='dark'] {
   color-scheme: dark;
 
   --color-accent: #f08a4b;
@@ -119,7 +119,7 @@
   --color-syntax-module: #c8c0a0;
 }
 
-[data-theme="light"] {
+[data-theme='light'] {
   color-scheme: light;
 
   --color-accent: #b9501f;

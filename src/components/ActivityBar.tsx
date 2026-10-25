@@ -1,12 +1,12 @@
-import { memo } from "react";
-import type { ViewDescriptor } from "../app/views";
-import { Icon } from "./Icon";
-import "./ActivityBar.css";
+import { memo } from 'react'
+import type { ViewDescriptor } from '../app/views'
+import { Icon } from './Icon'
+import './ActivityBar.css'
 
 interface ActivityBarProps {
-  views: readonly ViewDescriptor[];
-  activeViewId: string | null;
-  onSelect: (id: string) => void;
+  views: readonly ViewDescriptor[]
+  activeViewId: string | null
+  onSelect: (id: string) => void
 }
 
 export const ActivityBar = memo(function ActivityBar({
@@ -16,7 +16,7 @@ export const ActivityBar = memo(function ActivityBar({
 }: ActivityBarProps) {
   return (
     <nav className="activitybar" aria-label="Views">
-      {views.map((view) => (
+      {views.map(view => (
         <button
           key={view.id}
           type="button"
@@ -30,5 +30,5 @@ export const ActivityBar = memo(function ActivityBar({
         </button>
       ))}
     </nav>
-  );
-});
+  )
+})

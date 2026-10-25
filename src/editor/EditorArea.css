@@ -28,17 +28,17 @@
   cursor: pointer;
 }
 
-.editor-tab[aria-selected="true"] {
+.editor-tab[aria-selected='true'] {
   background: var(--color-tab-active-background);
   color: var(--color-tab-active-foreground);
   box-shadow: inset 0 1px 0 var(--color-tab-active-indicator);
 }
 
-.editor-tab[data-drop="before"] {
+.editor-tab[data-drop='before'] {
   box-shadow: inset 2px 0 0 var(--color-focus-ring);
 }
 
-.editor-tab[data-drop="after"] {
+.editor-tab[data-drop='after'] {
   box-shadow: inset -2px 0 0 var(--color-focus-ring);
 }
 
@@ -76,7 +76,7 @@
   background: currentColor;
 }
 
-.editor-tab:not(:hover, [aria-selected="true"]) .editor-tab__x {
+.editor-tab:not(:hover, [aria-selected='true']) .editor-tab__x {
   visibility: hidden;
 }
 

@@ -1,109 +1,109 @@
-import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent } from "react";
-import { reportError } from "../state/notifications";
-import { useStore } from "../state/store";
+import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent } from 'react'
+import { reportError } from '../state/notifications'
+import { useStore } from '../state/store'
 import {
   closeContextMenu,
   contextMenuStore,
   type ContextMenuState,
   type MenuAction,
-} from "./contextMenuState";
-import "./ContextMenu.css";
+} from './contextMenuState'
+import './ContextMenu.css'
 
 /** The open context menu, if any. */
 export function ContextMenu() {
-  const state = useStore(contextMenuStore);
-  return state ? <Menu key={`${state.x},${state.y}`} state={state} /> : null;
+  const state = useStore(contextMenuStore)
+  return state ? <Menu key={`${state.x},${state.y}`} state={state} /> : null
 }
 
 function Menu({ state }: { state: ContextMenuState }) {
-  const ref = useRef<HTMLUListElement>(null);
-  const actions = state.entries.filter((entry): entry is MenuAction => entry !== null);
-  const [selected, setSelected] = useState(() => actions.findIndex((a) => !a.disabled));
-  const [position, setPosition] = useState({ left: state.x, top: state.y });
+  const ref = useRef<HTMLUListElement>(null)
+  const actions = state.entries.filter((entry): entry is MenuAction => entry !== null)
+  const [selected, setSelected] = useState(() => actions.findIndex(a => !a.disabled))
+  const [position, setPosition] = useState({ left: state.x, top: state.y })
 
   // Keep the menu inside the window.
   useLayoutEffect(() => {
-    const menu = ref.current;
+    const menu = ref.current
     if (!menu) {
-      return;
+      return
     }
-    const { width, height } = menu.getBoundingClientRect();
+    const { width, height } = menu.getBoundingClientRect()
     setPosition({
       left: Math.max(0, Math.min(state.x, window.innerWidth - width - 4)),
       top: Math.max(0, Math.min(state.y, window.innerHeight - height - 4)),
-    });
-    menu.focus();
-  }, [state]);
+    })
+    menu.focus()
+  }, [state])
 
   useEffect(() => {
     const close = (event: Event) => {
       if (!(event.target instanceof Node && ref.current?.contains(event.target))) {
-        closeContextMenu();
+        closeContextMenu()
       }
-    };
-    window.addEventListener("mousedown", close, true);
-    window.addEventListener("blur", closeContextMenu);
-    window.addEventListener("resize", closeContextMenu);
+    }
+    window.addEventListener('mousedown', close, true)
+    window.addEventListener('blur', closeContextMenu)
+    window.addEventListener('resize', closeContextMenu)
     return () => {
-      window.removeEventListener("mousedown", close, true);
-      window.removeEventListener("blur", closeContextMenu);
-      window.removeEventListener("resize", closeContextMenu);
-    };
-  }, []);
+      window.removeEventListener('mousedown', close, true)
+      window.removeEventListener('blur', closeContextMenu)
+      window.removeEventListener('resize', closeContextMenu)
+    }
+  }, [])
 
   const dismiss = () => {
-    closeContextMenu();
+    closeContextMenu()
     if (state.returnFocus instanceof HTMLElement) {
-      state.returnFocus.focus();
+      state.returnFocus.focus()
     }
-  };
+  }
 
   const run = (action: MenuAction | undefined) => {
     if (!action || action.disabled) {
-      return;
+      return
     }
-    dismiss();
-    Promise.resolve(action.run()).catch((error: unknown) => reportError(action.label, error));
-  };
+    dismiss()
+    Promise.resolve(action.run()).catch((error: unknown) => reportError(action.label, error))
+  }
 
   const step = (direction: number) => {
     if (actions.length === 0) {
-      return;
+      return
     }
-    let index = selected;
+    let index = selected
     for (let i = 0; i < actions.length; i++) {
-      index = (index + direction + actions.length) % actions.length;
+      index = (index + direction + actions.length) % actions.length
       if (!actions[index]?.disabled) {
-        setSelected(index);
-        return;
+        setSelected(index)
+        return
       }
     }
-  };
+  }
 
   const onKeyDown = (event: KeyboardEvent<HTMLUListElement>) => {
     switch (event.key) {
-      case "ArrowDown":
-        event.preventDefault();
-        step(1);
-        break;
-      case "ArrowUp":
-        event.preventDefault();
-        step(-1);
-        break;
-      case "Enter":
-      case " ":
-        event.preventDefault();
-        run(actions[selected]);
-        break;
-      case "Escape":
-      case "Tab":
-        event.preventDefault();
-        dismiss();
-        break;
+      case 'ArrowDown':
+        event.preventDefault()
+        step(1)
+        break
+      case 'ArrowUp':
+        event.preventDefault()
+        step(-1)
+        break
+      case 'Enter':
+      case ' ':
+        event.preventDefault()
+        run(actions[selected])
+        break
+      case 'Escape':
+      case 'Tab':
+        event.preventDefault()
+        dismiss()
+        break
     }
-  };
+  }
 
-  let actionIndex = -1;
+  let actionIndex = -1
   return (
     <ul
       ref={ref}
@@ -112,16 +112,16 @@ function Menu({ state }: { state: ContextMenuState }) {
       tabIndex={-1}
       style={position}
       onKeyDown={onKeyDown}
-      onContextMenu={(event) => event.preventDefault()}
+      onContextMenu={event => event.preventDefault()}
     >
       {state.entries.map((entry, index) => {
         if (entry === null) {
           return (
             <li key={`separator-${index}`} role="separator" className="context-menu__separator" />
-          );
+          )
         }
-        actionIndex++;
-        const mine = actionIndex;
+        actionIndex++
+        const mine = actionIndex
         return (
           <li
             key={`${entry.label}-${index}`}
@@ -135,8 +135,8 @@ function Menu({ state }: { state: ContextMenuState }) {
             <span className="context-menu__label">{entry.label}</span>
             {entry.hint && <span className="context-menu__hint">{entry.hint}</span>}
           </li>
-        );
+        )
       })}
     </ul>
-  );
+  )
 }

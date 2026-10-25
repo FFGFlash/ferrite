@@ -1,15 +1,15 @@
-import { useRef, type KeyboardEvent, type PointerEvent } from "react";
-import "./Sash.css";
+import { useRef, type KeyboardEvent, type PointerEvent } from 'react'
+import './Sash.css'
 
-const KEY_STEP = 16;
-const KEY_STEP_LARGE = 64;
+const KEY_STEP = 16
+const KEY_STEP_LARGE = 64
 
 interface SashProps {
-  label: string;
-  value: number;
-  min: number;
-  max: number;
-  onChange: (value: number) => void;
+  label: string
+  value: number
+  min: number
+  max: number
+  onChange: (value: number) => void
 }
 
 /**
@@ -17,48 +17,48 @@ interface SashProps {
  * dragging and keyboard adjustment (arrows, Shift+arrows, Home, End).
  */
 export function Sash({ label, value, min, max, onChange }: SashProps) {
-  const drag = useRef<{ startX: number; startValue: number } | null>(null);
-  const change = (next: number) => onChange(Math.min(max, Math.max(min, Math.round(next))));
+  const drag = useRef<{ startX: number; startValue: number } | null>(null)
+  const change = (next: number) => onChange(Math.min(max, Math.max(min, Math.round(next))))
 
   const onPointerDown = (event: PointerEvent<HTMLDivElement>) => {
     if (event.button !== 0) {
-      return;
+      return
     }
-    event.preventDefault();
-    event.currentTarget.setPointerCapture(event.pointerId);
-    drag.current = { startX: event.clientX, startValue: value };
-  };
+    event.preventDefault()
+    event.currentTarget.setPointerCapture(event.pointerId)
+    drag.current = { startX: event.clientX, startValue: value }
+  }
 
   const onPointerMove = (event: PointerEvent<HTMLDivElement>) => {
     if (drag.current) {
-      change(drag.current.startValue + event.clientX - drag.current.startX);
+      change(drag.current.startValue + event.clientX - drag.current.startX)
     }
-  };
+  }
 
   const endDrag = () => {
-    drag.current = null;
-  };
+    drag.current = null
+  }
 
   const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
-    const step = event.shiftKey ? KEY_STEP_LARGE : KEY_STEP;
+    const step = event.shiftKey ? KEY_STEP_LARGE : KEY_STEP
     switch (event.key) {
-      case "ArrowLeft":
-        change(value - step);
-        break;
-      case "ArrowRight":
-        change(value + step);
-        break;
-      case "Home":
-        change(min);
-        break;
-      case "End":
-        change(max);
-        break;
+      case 'ArrowLeft':
+        change(value - step)
+        break
+      case 'ArrowRight':
+        change(value + step)
+        break
+      case 'Home':
+        change(min)
+        break
+      case 'End':
+        change(max)
+        break
       default:
-        return;
+        return
     }
-    event.preventDefault();
-  };
+    event.preventDefault()
+  }
 
   return (
     <div
@@ -76,5 +76,5 @@ export function Sash({ label, value, min, max, onChange }: SashProps) {
       onPointerCancel={endDrag}
       onKeyDown={onKeyDown}
     />
-  );
+  )
 }

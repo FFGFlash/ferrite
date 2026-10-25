@@ -21,12 +21,12 @@
 }
 
 .activitybar__item:hover,
-.activitybar__item[aria-pressed="true"] {
+.activitybar__item[aria-pressed='true'] {
   color: var(--color-activitybar-active-foreground);
 }
 
-.activitybar__item[aria-pressed="true"]::before {
-  content: "";
+.activitybar__item[aria-pressed='true']::before {
+  content: '';
   position: absolute;
   inset: var(--space-2) auto var(--space-2) 0;
   width: 2px;

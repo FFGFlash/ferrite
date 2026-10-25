@@ -73,16 +73,16 @@
   white-space: nowrap;
 }
 
-.extension[data-state="active"] .extension__state {
+.extension[data-state='active'] .extension__state {
   color: var(--color-text);
 }
 
-.extension[data-state="failed"] .extension__state,
-.extension[data-state="invalid"] .extension__state {
+.extension[data-state='failed'] .extension__state,
+.extension[data-state='invalid'] .extension__state {
   color: var(--color-error);
 }
 
-.extension[data-state="awaitingPermission"] .extension__state {
+.extension[data-state='awaitingPermission'] .extension__state {
   color: var(--color-diagnostic-warning);
 }
 

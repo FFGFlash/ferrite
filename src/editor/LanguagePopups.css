@@ -30,12 +30,12 @@
   margin-top: var(--space-1);
 }
 
-.hover-card__diagnostic[data-severity="warning"] {
+.hover-card__diagnostic[data-severity='warning'] {
   border-color: var(--color-diagnostic-warning);
 }
 
-.hover-card__diagnostic[data-severity="info"],
-.hover-card__diagnostic[data-severity="hint"] {
+.hover-card__diagnostic[data-severity='info'],
+.hover-card__diagnostic[data-severity='hint'] {
   border-color: var(--color-diagnostic-info);
 }
 
@@ -99,7 +99,7 @@
   background: var(--color-list-hover-background);
 }
 
-.completion-list__item[aria-selected="true"] {
+.completion-list__item[aria-selected='true'] {
   background: var(--color-list-active-background);
 }
 
@@ -112,20 +112,20 @@
   text-align: center;
 }
 
-.completion-list__kind[data-kind="variable"],
-.completion-list__kind[data-kind="field"],
-.completion-list__kind[data-kind="property"] {
+.completion-list__kind[data-kind='variable'],
+.completion-list__kind[data-kind='field'],
+.completion-list__kind[data-kind='property'] {
   color: var(--color-syntax-property);
 }
 
-.completion-list__kind[data-kind="struct"],
-.completion-list__kind[data-kind="class"],
-.completion-list__kind[data-kind="interface"],
-.completion-list__kind[data-kind="enum"] {
+.completion-list__kind[data-kind='struct'],
+.completion-list__kind[data-kind='class'],
+.completion-list__kind[data-kind='interface'],
+.completion-list__kind[data-kind='enum'] {
   color: var(--color-syntax-type);
 }
 
-.completion-list__kind[data-kind="keyword"] {
+.completion-list__kind[data-kind='keyword'] {
   color: var(--color-syntax-keyword);
 }
 

@@ -12,70 +12,70 @@
  * The textarea never edits itself: typed text is applied to the document,
  * and the mirror follows the view the backend returns.
  */
-import type { EditorView, Position } from "../ipc/editor";
+import type { EditorView, Position } from '../ipc/editor'
 
 /** At most this many lines (around the cursor) are mirrored. */
-export const MIRROR_MAX_LINES = 100;
+export const MIRROR_MAX_LINES = 100
 /** Lines longer than this aren't mirrored, so the text stays aligned. */
-const MIRROR_MAX_LINE_LENGTH = 10_000;
+const MIRROR_MAX_LINE_LENGTH = 10_000
 
 export interface InputMirror {
   /** The first mirrored line. */
-  line: number;
-  value: string;
-  selectionStart: number;
-  selectionEnd: number;
-  direction: "forward" | "backward";
+  line: number
+  value: string
+  selectionStart: number
+  selectionEnd: number
+  direction: 'forward' | 'backward'
 }
 
 const before = (a: Position, b: Position) =>
-  a.line < b.line || (a.line === b.line && a.column < b.column);
+  a.line < b.line || (a.line === b.line && a.column < b.column)
 
 /**
  * The mirror for `view`, or `null` when the cursor's line isn't in the
  * view or is too long.
  */
 export function inputMirror(view: EditorView): InputMirror | null {
-  const primary = view.selections.find((selection) => selection.primary);
+  const primary = view.selections.find(selection => selection.primary)
   if (!primary) {
-    return null;
+    return null
   }
-  const { anchor, head } = primary;
-  const lastInView = view.startLine + view.lines.length - 1;
+  const { anchor, head } = primary
+  const lastInView = view.startLine + view.lines.length - 1
   if (head.line < view.startLine || head.line > lastInView) {
-    return null;
+    return null
   }
-  const reach = Math.floor(MIRROR_MAX_LINES / 2);
-  const first = Math.max(view.startLine, Math.min(anchor.line, head.line), head.line - reach);
-  const last = Math.min(lastInView, Math.max(anchor.line, head.line), head.line + reach);
-  const lines = view.lines.slice(first - view.startLine, last - view.startLine + 1);
-  if (lines.some((line) => line.fullLength !== null || line.text.length > MIRROR_MAX_LINE_LENGTH)) {
-    return null;
+  const reach = Math.floor(MIRROR_MAX_LINES / 2)
+  const first = Math.max(view.startLine, Math.min(anchor.line, head.line), head.line - reach)
+  const last = Math.min(lastInView, Math.max(anchor.line, head.line), head.line + reach)
+  const lines = view.lines.slice(first - view.startLine, last - view.startLine + 1)
+  if (lines.some(line => line.fullLength !== null || line.text.length > MIRROR_MAX_LINE_LENGTH)) {
+    return null
   }
-  const texts = lines.map((line) => line.text);
-  const value = texts.join("\n");
+  const texts = lines.map(line => line.text)
+  const value = texts.join('\n')
   const offsetOf = (position: Position) => {
     if (position.line < first) {
-      return 0;
+      return 0
     }
     if (position.line > last) {
-      return value.length;
+      return value.length
     }
-    let offset = 0;
+    let offset = 0
     for (let line = first; line < position.line; line++) {
-      offset += texts[line - first]!.length + 1;
+      offset += texts[line - first]!.length + 1
     }
-    return offset + Math.min(position.column, texts[position.line - first]!.length);
-  };
-  const backward = before(head, anchor);
-  const [start, end] = backward ? [head, anchor] : [anchor, head];
+    return offset + Math.min(position.column, texts[position.line - first]!.length)
+  }
+  const backward = before(head, anchor)
+  const [start, end] = backward ? [head, anchor] : [anchor, head]
   return {
     line: first,
     value,
     selectionStart: offsetOf(start),
     selectionEnd: offsetOf(end),
-    direction: backward ? "backward" : "forward",
-  };
+    direction: backward ? 'backward' : 'forward',
+  }
 }
 
 /**
@@ -85,14 +85,14 @@ export function inputMirror(view: EditorView): InputMirror | null {
  * cancelled).
  */
 export function typedText(mirror: InputMirror, value: string): string | null {
-  const prefix = mirror.value.slice(0, mirror.selectionStart);
-  const suffix = mirror.value.slice(mirror.selectionEnd);
+  const prefix = mirror.value.slice(0, mirror.selectionStart)
+  const suffix = mirror.value.slice(mirror.selectionEnd)
   if (
     value.length < prefix.length + suffix.length ||
     !value.startsWith(prefix) ||
     !value.endsWith(suffix)
   ) {
-    return null;
+    return null
   }
-  return value.slice(prefix.length, value.length - suffix.length);
+  return value.slice(prefix.length, value.length - suffix.length)
 }

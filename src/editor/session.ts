@@ -15,11 +15,11 @@ import type {
   SearchQuery,
   Viewport,
   WireView,
-} from "../ipc/editor";
-import * as ipc from "../ipc/editor";
-import { log } from "../ipc";
-import { recordCount, recordTiming } from "../state/perf";
-import { applyUpdate, knownLines, type LineCache } from "./lineCache";
+} from '../ipc/editor'
+import * as ipc from '../ipc/editor'
+import { log } from '../ipc'
+import { recordCount, recordTiming } from '../state/perf'
+import { applyUpdate, knownLines, type LineCache } from './lineCache'
 
 export interface EditorTransport {
   apply(
@@ -28,39 +28,39 @@ export interface EditorTransport {
     viewport: Viewport,
     known: KnownLines | null,
     search: SearchQuery | null,
-  ): Promise<WireView>;
+  ): Promise<WireView>
   view(
     id: number,
     viewport: Viewport,
     known: KnownLines | null,
     search: SearchQuery | null,
-  ): Promise<WireView>;
+  ): Promise<WireView>
   clipboard(
     id: number,
     action: ClipboardAction,
     viewport: Viewport,
     known: KnownLines | null,
     search: SearchQuery | null,
-  ): Promise<WireView>;
+  ): Promise<WireView>
 }
 
 export const ipcTransport: EditorTransport = {
   apply: ipc.applyOps,
   view: ipc.getView,
   clipboard: ipc.clipboard,
-};
+}
 
-type Job = { kind: "ops"; ops: EditorOp[] } | { kind: "clipboard"; action: ClipboardAction };
+type Job = { kind: 'ops'; ops: EditorOp[] } | { kind: 'clipboard'; action: ClipboardAction }
 
 export class EditorSession {
-  private readonly queue: Job[] = [];
-  private viewport: Viewport;
-  private search: SearchQuery | null = null;
-  private cache: LineCache | null = null;
-  private viewportStale = true;
-  private busy = false;
-  private disposed = false;
-  private idleWaiters: (() => void)[] = [];
+  private readonly queue: Job[] = []
+  private viewport: Viewport
+  private search: SearchQuery | null = null
+  private cache: LineCache | null = null
+  private viewportStale = true
+  private busy = false
+  private disposed = false
+  private idleWaiters: (() => void)[] = []
 
   constructor(
     private readonly documentId: number,
@@ -69,31 +69,31 @@ export class EditorSession {
     private readonly onError: (error: unknown) => void,
     private readonly transport: EditorTransport = ipcTransport,
   ) {
-    this.viewport = viewport;
+    this.viewport = viewport
     // Start on a microtask so operations dispatched right after construction
     // (e.g. a selection to restore) go out with the first request.
-    queueMicrotask(() => this.pump());
+    queueMicrotask(() => this.pump())
   }
 
   dispatch(op: EditorOp): void {
-    const last = this.queue.at(-1);
-    if (last?.kind === "ops") {
-      const previous = last.ops.at(-1);
+    const last = this.queue.at(-1)
+    if (last?.kind === 'ops') {
+      const previous = last.ops.at(-1)
       // While dragging, only the latest pointer position matters.
       if (isDragExtend(previous) && isDragExtend(op)) {
-        last.ops[last.ops.length - 1] = op;
+        last.ops[last.ops.length - 1] = op
       } else {
-        last.ops.push(op);
+        last.ops.push(op)
       }
     } else {
-      this.queue.push({ kind: "ops", ops: [op] });
+      this.queue.push({ kind: 'ops', ops: [op] })
     }
-    this.pump();
+    this.pump()
   }
 
   clipboard(action: ClipboardAction): void {
-    this.queue.push({ kind: "clipboard", action });
-    this.pump();
+    this.queue.push({ kind: 'clipboard', action })
+    this.pump()
   }
 
   setViewport(viewport: Viewport): void {
@@ -101,11 +101,11 @@ export class EditorSession {
       viewport.startLine === this.viewport.startLine &&
       viewport.endLine === this.viewport.endLine
     ) {
-      return;
+      return
     }
-    this.viewport = viewport;
-    this.viewportStale = true;
-    this.pump();
+    this.viewport = viewport
+    this.viewportStale = true
+    this.pump()
   }
 
   /**
@@ -113,100 +113,100 @@ export class EditorSession {
    * for none. Fetches a fresh view.
    */
   setSearch(search: SearchQuery | null): void {
-    const next = search && search.pattern ? search : null;
+    const next = search && search.pattern ? search : null
     if (JSON.stringify(next) === JSON.stringify(this.search)) {
-      return;
+      return
     }
-    this.search = next;
-    this.refresh();
+    this.search = next
+    this.refresh()
   }
 
   /** Fetches a fresh view, e.g. after the document changed elsewhere. */
   refresh(): void {
-    this.viewportStale = true;
-    this.pump();
+    this.viewportStale = true
+    this.pump()
   }
 
   /** Resolves once every queued operation has been applied. */
   idle(): Promise<void> {
     if (!this.busy && this.queue.length === 0) {
-      return Promise.resolve();
+      return Promise.resolve()
     }
-    return new Promise((resolve) => this.idleWaiters.push(resolve));
+    return new Promise(resolve => this.idleWaiters.push(resolve))
   }
 
   dispose(): void {
-    this.disposed = true;
-    this.queue.length = 0;
-    this.resolveIdle();
+    this.disposed = true
+    this.queue.length = 0
+    this.resolveIdle()
   }
 
   private pump(): void {
     if (this.busy || this.disposed) {
-      return;
+      return
     }
-    const job = this.queue.shift();
+    const job = this.queue.shift()
     if (!job && !this.viewportStale) {
-      this.resolveIdle();
-      return;
+      this.resolveIdle()
+      return
     }
-    const { viewport, search } = this;
-    const known = knownLines(this.cache);
-    this.viewportStale = false;
-    this.busy = true;
-    const sent = performance.now();
+    const { viewport, search } = this
+    const known = knownLines(this.cache)
+    this.viewportStale = false
+    this.busy = true
+    const sent = performance.now()
     const request = !job
       ? this.transport.view(this.documentId, viewport, known, search)
-      : job.kind === "ops"
+      : job.kind === 'ops'
         ? this.transport.apply(this.documentId, job.ops, viewport, known, search)
-        : this.transport.clipboard(this.documentId, job.action, viewport, known, search);
+        : this.transport.clipboard(this.documentId, job.action, viewport, known, search)
     request
-      .then((wire) => {
-        recordTiming("ipc.roundTrip", performance.now() - sent);
+      .then(wire => {
+        recordTiming('ipc.roundTrip', performance.now() - sent)
         if (!this.disposed) {
-          this.receive(wire);
+          this.receive(wire)
         }
       })
       .catch((error: unknown) => {
         if (!this.disposed) {
           // Resynchronize with the backend's state after a failure.
-          this.cache = null;
-          this.viewportStale = true;
-          this.onError(error);
+          this.cache = null
+          this.viewportStale = true
+          this.onError(error)
         }
       })
       .finally(() => {
-        this.busy = false;
-        this.pump();
-      });
+        this.busy = false
+        this.pump()
+      })
   }
 
   private receive(wire: WireView): void {
     recordCount(
-      "lines.received",
+      'lines.received',
       wire.lines.chunks.reduce((sum, chunk) => sum + chunk.lines.length, 0),
-    );
-    const cache = applyUpdate(this.cache, wire);
+    )
+    const cache = applyUpdate(this.cache, wire)
     if (!cache) {
       // Should not happen; recover by asking for every line again.
-      log("warn", `Editor ${this.documentId}: line update did not apply; refetching`);
-      this.cache = null;
-      this.viewportStale = true;
-      return;
+      log('warn', `Editor ${this.documentId}: line update did not apply; refetching`)
+      this.cache = null
+      this.viewportStale = true
+      return
     }
-    this.cache = cache;
-    this.onView({ ...wire, lines: cache.lines });
+    this.cache = cache
+    this.onView({ ...wire, lines: cache.lines })
   }
 
   private resolveIdle(): void {
-    const waiters = this.idleWaiters;
-    this.idleWaiters = [];
+    const waiters = this.idleWaiters
+    this.idleWaiters = []
     for (const resolve of waiters) {
-      resolve();
+      resolve()
     }
   }
 }
 
 function isDragExtend(op: EditorOp | undefined): boolean {
-  return op?.type === "setCursor" && op.extend && !op.add;
+  return op?.type === 'setCursor' && op.extend && !op.add
 }

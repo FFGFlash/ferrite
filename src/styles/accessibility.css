@@ -54,12 +54,12 @@
   }
 
   /* Selected and focused items in lists, menus, and tabs. */
-  .editor-tab[aria-selected="true"],
-  .palette__item[aria-selected="true"],
-  .completion-list__item[aria-selected="true"],
+  .editor-tab[aria-selected='true'],
+  .palette__item[aria-selected='true'],
+  .completion-list__item[aria-selected='true'],
   .context-menu__item[data-selected],
-  .explorer-tree__row[aria-selected="true"],
-  .extension-view__row[aria-selected="true"] {
+  .explorer-tree__row[aria-selected='true'],
+  .extension-view__row[aria-selected='true'] {
     outline: 1px solid Highlight;
     outline-offset: -1px;
   }
@@ -70,7 +70,7 @@
     outline-offset: -2px;
   }
 
-  .activitybar__item[aria-pressed="true"]::before {
+  .activitybar__item[aria-pressed='true']::before {
     forced-color-adjust: none;
     background: Highlight;
   }

@@ -33,7 +33,7 @@
   background: var(--color-list-hover-background);
 }
 
-.extension-view__row[aria-selected="true"] {
+.extension-view__row[aria-selected='true'] {
   background: var(--color-list-active-background);
 }
 

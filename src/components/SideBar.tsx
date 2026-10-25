@@ -1,18 +1,18 @@
-import type { ReactNode } from "react";
-import type { ViewDescriptor } from "../app/views";
-import { ErrorBoundary } from "./ErrorBoundary";
-import "./SideBar.css";
+import type { ReactNode } from 'react'
+import type { ViewDescriptor } from '../app/views'
+import { ErrorBoundary } from './ErrorBoundary'
+import './SideBar.css'
 
 interface SideBarProps {
-  view: ViewDescriptor;
-  width: number;
+  view: ViewDescriptor
+  width: number
   /** The splitter on its edge, inside the landmark so it can be found. */
-  resizer?: ReactNode;
+  resizer?: ReactNode
 }
 
 export function SideBar({ view, width, resizer }: SideBarProps) {
-  const ViewComponent = view.component;
-  const Actions = view.actions;
+  const ViewComponent = view.component
+  const Actions = view.actions
   return (
     <aside className="sidebar" style={{ width }} aria-label={view.title}>
       <header className="sidebar__header">
@@ -30,5 +30,5 @@ export function SideBar({ view, width, resizer }: SideBarProps) {
       </div>
       {resizer}
     </aside>
-  );
+  )
 }

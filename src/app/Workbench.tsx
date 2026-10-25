@@ -1,44 +1,44 @@
-import { useCallback } from "react";
-import { useKeybindings } from "../commands/registry";
-import { ActivityBar } from "../components/ActivityBar";
-import { ContextMenu } from "../components/ContextMenu";
-import { ErrorBoundary } from "../components/ErrorBoundary";
-import { Notifications } from "../components/Notifications";
-import { Palette } from "../components/Palette";
-import { PerfOverlay } from "../components/PerfOverlay";
-import { Sash } from "../components/Sash";
-import { SideBar } from "../components/SideBar";
-import { StatusBar } from "../components/StatusBar";
-import { EditorArea } from "../editor/EditorArea";
-import type { AppInfo } from "../ipc";
-import { SIDEBAR_MAX_WIDTH, SIDEBAR_MIN_WIDTH, layoutStore, updateLayout } from "../state/layout";
-import { useStore } from "../state/store";
-import { useViews } from "./views";
-import "./Workbench.css";
+import { useCallback } from 'react'
+import { useKeybindings } from '../commands/registry'
+import { ActivityBar } from '../components/ActivityBar'
+import { ContextMenu } from '../components/ContextMenu'
+import { ErrorBoundary } from '../components/ErrorBoundary'
+import { Notifications } from '../components/Notifications'
+import { Palette } from '../components/Palette'
+import { PerfOverlay } from '../components/PerfOverlay'
+import { Sash } from '../components/Sash'
+import { SideBar } from '../components/SideBar'
+import { StatusBar } from '../components/StatusBar'
+import { EditorArea } from '../editor/EditorArea'
+import type { AppInfo } from '../ipc'
+import { SIDEBAR_MAX_WIDTH, SIDEBAR_MIN_WIDTH, layoutStore, updateLayout } from '../state/layout'
+import { useStore } from '../state/store'
+import { useViews } from './views'
+import './Workbench.css'
 
 interface WorkbenchProps {
-  appInfo: AppInfo | null;
+  appInfo: AppInfo | null
 }
 
 export function Workbench({ appInfo }: WorkbenchProps) {
-  const { sidebarVisible, sidebarWidth, activeView } = useStore(layoutStore);
-  const views = useViews();
-  useKeybindings();
+  const { sidebarVisible, sidebarWidth, activeView } = useStore(layoutStore)
+  const views = useViews()
+  useKeybindings()
 
   // Selecting the visible view again collapses the side bar.
   const selectView = useCallback((id: string) => {
-    const layout = layoutStore.get();
+    const layout = layoutStore.get()
     updateLayout(
       layout.sidebarVisible && layout.activeView === id
         ? { sidebarVisible: false }
         : { sidebarVisible: true, activeView: id },
-    );
-  }, []);
-  const resize = useCallback((width: number) => updateLayout({ sidebarWidth: width }), []);
+    )
+  }, [])
+  const resize = useCallback((width: number) => updateLayout({ sidebarWidth: width }), [])
 
   const view = sidebarVisible
-    ? (views.find((candidate) => candidate.id === activeView) ?? views[0])
-    : undefined;
+    ? (views.find(candidate => candidate.id === activeView) ?? views[0])
+    : undefined
 
   return (
     <div className="workbench">
@@ -69,5 +69,5 @@ export function Workbench({ appInfo }: WorkbenchProps) {
       <ContextMenu />
       <PerfOverlay />
     </div>
-  );
+  )
 }

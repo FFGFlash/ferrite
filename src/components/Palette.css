@@ -53,7 +53,7 @@
   white-space: nowrap;
 }
 
-.palette__item[aria-selected="true"] {
+.palette__item[aria-selected='true'] {
   background: var(--color-list-active-background);
 }
 

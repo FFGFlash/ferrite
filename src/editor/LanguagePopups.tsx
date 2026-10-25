@@ -1,22 +1,22 @@
 /** The hover card and completion list shown over the editor. */
-import { memo, useEffect, useRef, type CSSProperties } from "react";
-import type { CompletionItem, Hover } from "../ipc/lsp";
-import { renderMarkdown } from "./markdown";
-import "./LanguagePopups.css";
+import { memo, useEffect, useRef, type CSSProperties } from 'react'
+import type { CompletionItem, Hover } from '../ipc/lsp'
+import { renderMarkdown } from './markdown'
+import './LanguagePopups.css'
 
-const SEVERITY = ["", "error", "warning", "info", "hint"] as const;
+const SEVERITY = ['', 'error', 'warning', 'info', 'hint'] as const
 
 export function severityName(severity: number): string {
-  return SEVERITY[severity] ?? "error";
+  return SEVERITY[severity] ?? 'error'
 }
 
 /** Where a popup goes, relative to the editor frame. */
-export type Placement = Pick<CSSProperties, "top" | "bottom" | "left">;
+export type Placement = Pick<CSSProperties, 'top' | 'bottom' | 'left'>
 
 interface HoverCardProps {
-  hover: Hover;
-  placement: Placement;
-  onMouseLeave: () => void;
+  hover: Hover
+  placement: Placement
+  onMouseLeave: () => void
 }
 
 export const HoverCard = memo(function HoverCard({
@@ -30,7 +30,7 @@ export const HoverCard = memo(function HoverCard({
       role="tooltip"
       style={placement}
       onMouseLeave={onMouseLeave}
-      onMouseDown={(event) => event.stopPropagation()}
+      onMouseDown={event => event.stopPropagation()}
     >
       {hover.diagnostics.map((diagnostic, index) => (
         <div
@@ -44,21 +44,21 @@ export const HoverCard = memo(function HoverCard({
       ))}
       {hover.markdown && <div className="hover-card__body">{renderMarkdown(hover.markdown)}</div>}
     </div>
-  );
-});
+  )
+})
 
 interface CompletionListProps {
-  items: CompletionItem[];
-  selected: number;
-  placement: Placement;
-  onPick: (item: CompletionItem) => void;
+  items: CompletionItem[]
+  selected: number
+  placement: Placement
+  onPick: (item: CompletionItem) => void
 }
 
 /** Most rows shown at once; the list scrolls for more. */
-export const COMPLETION_ROWS = 10;
+export const COMPLETION_ROWS = 10
 /** Row height and width of the completion list, as in the CSS. */
-export const COMPLETION_ROW_HEIGHT = 22;
-export const COMPLETION_WIDTH = 360;
+export const COMPLETION_ROW_HEIGHT = 22
+export const COMPLETION_WIDTH = 360
 
 export const CompletionList = memo(function CompletionList({
   items,
@@ -66,10 +66,10 @@ export const CompletionList = memo(function CompletionList({
   placement,
   onPick,
 }: CompletionListProps) {
-  const listRef = useRef<HTMLUListElement>(null);
+  const listRef = useRef<HTMLUListElement>(null)
   useEffect(() => {
-    listRef.current?.children[selected]?.scrollIntoView({ block: "nearest" });
-  }, [selected]);
+    listRef.current?.children[selected]?.scrollIntoView({ block: 'nearest' })
+  }, [selected])
   return (
     <ul
       ref={listRef}
@@ -78,7 +78,7 @@ export const CompletionList = memo(function CompletionList({
       aria-label="Suggestions"
       style={placement}
       // Keep focus in the editor.
-      onMouseDown={(event) => event.preventDefault()}
+      onMouseDown={event => event.preventDefault()}
     >
       {items.map((item, index) => (
         <li
@@ -88,7 +88,7 @@ export const CompletionList = memo(function CompletionList({
           className="completion-list__item"
           onClick={() => onPick(item)}
         >
-          <span className="completion-list__kind" data-kind={item.kind ?? "text"}>
+          <span className="completion-list__kind" data-kind={item.kind ?? 'text'}>
             {kindIcon(item.kind)}
           </span>
           <span className="completion-list__label">{item.label}</span>
@@ -96,38 +96,38 @@ export const CompletionList = memo(function CompletionList({
         </li>
       ))}
     </ul>
-  );
-});
+  )
+})
 
 function kindIcon(kind: string | null): string {
   switch (kind) {
-    case "function":
-    case "method":
-    case "constructor":
-      return "ƒ";
-    case "variable":
-      return "x";
-    case "field":
-    case "property":
-      return "◆";
-    case "struct":
-    case "class":
-    case "interface":
-    case "enum":
-    case "typeParameter":
-      return "T";
-    case "module":
-    case "file":
-    case "folder":
-      return "{}";
-    case "keyword":
-      return "k";
-    case "constant":
-    case "enumMember":
-      return "c";
-    case "snippet":
-      return "…";
+    case 'function':
+    case 'method':
+    case 'constructor':
+      return 'ƒ'
+    case 'variable':
+      return 'x'
+    case 'field':
+    case 'property':
+      return '◆'
+    case 'struct':
+    case 'class':
+    case 'interface':
+    case 'enum':
+    case 'typeParameter':
+      return 'T'
+    case 'module':
+    case 'file':
+    case 'folder':
+      return '{}'
+    case 'keyword':
+      return 'k'
+    case 'constant':
+    case 'enumMember':
+      return 'c'
+    case 'snippet':
+      return '…'
     default:
-      return "·";
+      return '·'
   }
 }

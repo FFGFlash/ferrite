@@ -11,7 +11,7 @@
 }
 
 .welcome__title::after {
-  content: ".";
+  content: '.';
   color: var(--color-accent);
 }
 

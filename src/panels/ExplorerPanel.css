@@ -19,7 +19,7 @@
   background: var(--color-list-hover-background);
 }
 
-.explorer-tree__row[aria-selected="true"] {
+.explorer-tree__row[aria-selected='true'] {
   background: var(--color-list-active-background);
 }
 
