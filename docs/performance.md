@@ -322,6 +322,28 @@ generate + open, which was 11% faster.
   saved to compare against. Saving Criterion baselines per milestone (`--save-baseline m8`)
   makes such drift attributable from now on.
 
+## Minimap
+
+Measured on 2026-10-25 with a release build ([ADR 0010](adr/0010-minimap.md)). The document was
+a 200,000-line Rust file of 10 MB, so it was syntax highlighted. Each run paged through the file
+40 times in steps of 2,500 lines, then typed 10 characters. The app was restarted between runs
+because `perf_stats` can't be reset.
+
+| Backend timing (`perf_stats`)         | Minimap shown            | Minimap hidden  |
+| ------------------------------------- | ------------------------ | --------------- |
+| `editor.apply` (keystroke)            | 1.54 ms p50, 4.1 ms p95  | 1.54 ms, 4.3 ms |
+| `editor.view` (scroll)                | 1.44 ms p50, 2.1 ms p95  | 1.45 ms, 2.8 ms |
+| `editor.minimap` (≈570 lines, worker) | 11.7 ms p50, 14.0 ms p95 | —               |
+| `editor.minimap.lock` (snapshot)      | 6 µs p50, 15 µs max      | —               |
+
+- **Editing doesn't wait for it.** The minimap's work runs with the editor lock released, so
+  keystrokes and scrolling cost the same either way. Most of their time in this file goes to
+  syntax highlighting (`syntax.highlight`, 1.4 ms p50 in both runs).
+- **Highlighting dominates.** About 20 µs per line, the same rate as the editor's view.
+- **Under the lock first.** The first version built the minimap under the editor lock, at
+  13.6 ms p50 and 60 ms p95 per request in a debug build. That held up edits, which is why it
+  now snapshots instead.
+
 ## Optimizations made from these measurements
 
 1. **Parallel find in files.** On one thread, searching 10,000 small files took

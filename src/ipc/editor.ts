@@ -225,6 +225,19 @@ export interface EditorView extends ViewFields {
   lines: DisplayLine[]
 }
 
+/**
+ * Lines `startLine..startLine + lines.length` drawn small for the minimap:
+ * each line's runs of non-blank columns as `[start, end, kind, ...]`, in
+ * visual columns. Kind 0 is plain text; others index `TOKEN_KINDS` from 1.
+ */
+export interface MinimapView {
+  documentId: number
+  version: number
+  lineCount: number
+  startLine: number
+  lines: number[][]
+}
+
 export const listDocuments = () => call<DocumentSummary[]>('document_list')
 /** Creates an untitled document, optionally with `text`. */
 export const newDocument = (text?: string) =>
@@ -242,6 +255,8 @@ export const getView = (
   known: KnownLines | null,
   search: SearchQuery | null,
 ) => call<WireView>('editor_view', { id, viewport, known, search })
+export const getMinimap = (id: number, startLine: number, endLine: number) =>
+  call<MinimapView>('editor_minimap', { id, startLine, endLine })
 export const applyOps = (
   id: number,
   ops: EditorOp[],

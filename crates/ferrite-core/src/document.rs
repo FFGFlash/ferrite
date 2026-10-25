@@ -293,6 +293,11 @@ impl Document {
     (!parts.is_empty()).then(|| parts.join(self.line_ending.as_str()))
   }
 
+  /// Columns between tab stops.
+  pub fn tab_size(&self) -> usize {
+    self.tab_size
+  }
+
   /// The visual column of `offset`: grapheme clusters since the start of the
   /// line, with tabs advancing to the next tab stop.
   ///

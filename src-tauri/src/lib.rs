@@ -135,6 +135,7 @@ pub fn run() {
       editor::document_save_as,
       editor::document_close,
       editor::editor_view,
+      editor::editor_minimap,
       editor::editor_apply,
       editor::editor_clipboard,
       events::events_subscribe,

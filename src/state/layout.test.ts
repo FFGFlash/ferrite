@@ -9,8 +9,15 @@ describe('parseLayout', () => {
         sidebarWidth: 300,
         activeView: 'search',
         expanded: ['/a'],
+        minimapVisible: false,
       }),
-    ).toEqual({ sidebarVisible: false, sidebarWidth: 300, activeView: 'search', expanded: ['/a'] })
+    ).toEqual({
+      sidebarVisible: false,
+      sidebarWidth: 300,
+      activeView: 'search',
+      expanded: ['/a'],
+      minimapVisible: false,
+    })
   })
 
   it('falls back to defaults for missing or invalid fields', () => {
@@ -21,6 +28,7 @@ describe('parseLayout', () => {
         sidebarWidth: 'wide',
         activeView: 3,
         expanded: [1, '/b'],
+        minimapVisible: 'no',
       }),
     ).toEqual({ ...DEFAULT_LAYOUT, expanded: ['/b'] })
   })

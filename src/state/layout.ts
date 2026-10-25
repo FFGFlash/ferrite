@@ -19,6 +19,7 @@ export interface Layout {
   activeView: string
   /** Expanded explorer folders (absolute paths). */
   expanded: string[]
+  minimapVisible: boolean
 }
 
 export const DEFAULT_LAYOUT: Layout = {
@@ -26,6 +27,7 @@ export const DEFAULT_LAYOUT: Layout = {
   sidebarWidth: SIDEBAR_DEFAULT_WIDTH,
   activeView: 'explorer',
   expanded: [],
+  minimapVisible: true,
 }
 
 export const layoutStore = createStore<Layout>(DEFAULT_LAYOUT)
@@ -55,6 +57,10 @@ export function parseLayout(input: unknown): Layout {
           .filter((path): path is string => typeof path === 'string')
           .slice(0, MAX_EXPANDED)
       : [],
+    minimapVisible:
+      typeof saved.minimapVisible === 'boolean'
+        ? saved.minimapVisible
+        : DEFAULT_LAYOUT.minimapVisible,
   }
 }
 

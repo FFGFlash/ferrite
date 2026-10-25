@@ -16,6 +16,7 @@ use tauri::{AppHandle, Manager, State, WebviewWindow};
 use tauri_plugin_clipboard_manager::ClipboardExt;
 
 use super::EditorState;
+use super::minimap::{MinimapDto, Snapshot};
 use super::protocol::{
   DocumentSummary, EditorView, KnownDto, MAX_OPS_PER_BATCH, OpDto, SearchQueryDto, SearchView,
   Viewport,
@@ -189,6 +190,34 @@ pub fn editor_view(
   let editor = state.lock();
   let document = editor.document(DocumentId::from_raw(id))?;
   Ok(build_view(&app, document, viewport, known, search))
+}
+
+/// The minimap for lines `start_line..end_line`, clamped to the document and
+/// to `MAX_MINIMAP_LINES`. Runs on a worker thread, and highlights from a
+/// snapshot after releasing the editor lock, so editing never waits for it.
+#[tauri::command]
+pub async fn editor_minimap(
+  app: AppHandle,
+  id: u64,
+  start_line: usize,
+  end_line: usize,
+) -> Result<MinimapDto, CommandError> {
+  tauri::async_runtime::spawn_blocking(move || {
+    let started = std::time::Instant::now();
+    let state = app.state::<EditorState>();
+    let snapshot = {
+      let editor = state.lock();
+      let document = editor.document(DocumentId::from_raw(id))?;
+      Snapshot::of(document, state.syntax.tree(&app, document))
+    };
+    let perf = app.state::<Perf>();
+    perf.record("editor.minimap.lock", started.elapsed());
+    let minimap = snapshot.build(start_line..end_line);
+    perf.record("editor.minimap", started.elapsed());
+    Ok(minimap)
+  })
+  .await
+  .map_err(CommandError::internal)?
 }
 
 /// Applies a batch of operations in order and returns the resulting view.

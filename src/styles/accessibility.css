@@ -85,6 +85,14 @@
   .completion-list {
     border: 1px solid CanvasText;
   }
+
+  /* The minimap's slider is only a background. */
+  .minimap__slider {
+    forced-color-adjust: none;
+    background: none;
+    outline: 1px solid CanvasText;
+    outline-offset: -1px;
+  }
 }
 
 /* Nothing animates today; keep it that way for people who ask for it. */

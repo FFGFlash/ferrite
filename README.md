@@ -68,6 +68,11 @@ preserved exactly, and new lines use the file's existing line ending.
 | Go to definition                    | F12, Ctrl+click                  | F12, ⌘click              |
 | Trigger suggestions                 | Ctrl+Space                       | ⌃Space                   |
 
+A minimap beside the scrollbar shows the whole document small, in its syntax colors. Click it to
+jump to that part of the file, or drag its slider to scroll. **View: Toggle Minimap** hides or
+shows it. The editor scrolls past the last line until it's the only one visible, and clicking
+below the text moves the cursor to the end of the last line.
+
 In the find widget, Alt+C, Alt+W, and Alt+R toggle Match Case, Whole Word, and Regular
 Expression; in the replace field, Enter replaces and Ctrl+Enter replaces all. Regex
 replacements can use `$1` and `${name}`.

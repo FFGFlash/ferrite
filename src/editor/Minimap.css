@@ -1,0 +1,32 @@
+/* Over the editor's right edge, beside its vertical scrollbar. */
+.minimap {
+  position: absolute;
+  top: 0;
+  z-index: 3;
+  overflow: hidden;
+  background: var(--color-editor-background);
+  cursor: default;
+}
+
+.minimap__canvas {
+  display: block;
+}
+
+/* Shown while the pointer is over the minimap, as in VS Code. */
+.minimap__slider {
+  position: absolute;
+  right: 0;
+  left: 0;
+  background: var(--color-minimap-slider-background);
+  opacity: 0;
+}
+
+.minimap:hover .minimap__slider,
+.minimap[data-dragging] .minimap__slider {
+  opacity: 1;
+}
+
+.minimap__slider:hover,
+.minimap[data-dragging] .minimap__slider {
+  background: var(--color-minimap-slider-hover-background);
+}

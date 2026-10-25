@@ -4,6 +4,7 @@
 
 mod commands;
 mod counts;
+mod minimap;
 pub(crate) mod protocol;
 mod syntax;
 

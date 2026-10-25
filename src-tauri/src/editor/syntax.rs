@@ -290,35 +290,63 @@ impl SyntaxStates {
     known: Option<KnownDto>,
     chunks: &[Range<usize>],
   ) -> Vec<LineHighlightsDto> {
-    let id = document.id();
-    let buffer = document.buffer();
-    let language = document
-      .path()
-      .and_then(LanguageId::from_path)
-      .filter(|_| buffer.len() <= MAX_SYNTAX_BYTES);
     let mut documents = self.lock();
-    let Some(language) = language else {
-      documents.remove(&id);
+    let Some(syntax) = Self::entry(&mut documents, document) else {
       return Vec::new();
     };
-    let syntax = documents
-      .entry(id)
-      .and_modify(|syntax| {
-        if syntax.language != language {
-          *syntax = DocumentSyntax::new(language);
-        }
-      })
-      .or_insert_with(|| DocumentSyntax::new(language));
     let started = Instant::now();
-    let job = syntax.update(buffer);
-    let highlights = syntax.highlights(buffer, lines, known, chunks);
+    let job = syntax.update(document.buffer());
+    let highlights = syntax.highlights(document.buffer(), lines, known, chunks);
     drop(documents);
     let perf = app.state::<Perf>();
     perf.record("syntax.highlight", started.elapsed());
     if let Some(job) = job {
-      spawn_parse(app, id, job);
+      spawn_parse(app, document.id(), job);
     }
     highlights
+  }
+
+  /// A copy of `document`'s syntax tree, edited to its current text, for
+  /// highlighting without the editor lock (the minimap). Unlike
+  /// [`Self::highlights`], this leaves alone what the editor's view has been
+  /// sent. Called with the editor locked.
+  pub fn tree(&self, app: &AppHandle, document: &Document) -> Option<(LanguageId, Tree)> {
+    let mut documents = self.lock();
+    let syntax = Self::entry(&mut documents, document)?;
+    let job = syntax.update(document.buffer());
+    let tree = syntax.tree.clone().map(|tree| (syntax.language, tree));
+    drop(documents);
+    if let Some(job) = job {
+      spawn_parse(app, document.id(), job);
+    }
+    tree
+  }
+
+  /// The syntax state of `document`, created or reset for its language; or
+  /// `None`, dropping any state, if it isn't highlighted.
+  fn entry<'a>(
+    documents: &'a mut HashMap<DocumentId, DocumentSyntax>,
+    document: &Document,
+  ) -> Option<&'a mut DocumentSyntax> {
+    let id = document.id();
+    let language = document
+      .path()
+      .and_then(LanguageId::from_path)
+      .filter(|_| document.buffer().len() <= MAX_SYNTAX_BYTES);
+    let Some(language) = language else {
+      documents.remove(&id);
+      return None;
+    };
+    Some(
+      documents
+        .entry(id)
+        .and_modify(|syntax| {
+          if syntax.language != language {
+            *syntax = DocumentSyntax::new(language);
+          }
+        })
+        .or_insert_with(|| DocumentSyntax::new(language)),
+    )
   }
 
   /// Drops the syntax state of a closed document.

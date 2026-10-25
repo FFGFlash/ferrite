@@ -30,6 +30,7 @@ import {
   setDirty,
 } from '../state/documents'
 import { editorStatus } from '../state/editorStatus'
+import { layoutStore } from '../state/layout'
 import { notify, reportError } from '../state/notifications'
 import { notifyPainted, recordTiming } from '../state/perf'
 import { useStore } from '../state/store'
@@ -38,6 +39,8 @@ import { isWordChar, visibleCompletions, wordAround } from './completion'
 import { FindWidget, type FindState } from './FindWidget'
 import { inputMirror, typedText, type InputMirror } from './inputMirror'
 import { isMac, keyToCommand } from './keymap'
+import { Minimap } from './Minimap'
+import { MINIMAP_WIDTH } from './minimapGeometry'
 import {
   COMPLETION_ROW_HEIGHT,
   COMPLETION_ROWS,
@@ -151,6 +154,9 @@ export function EditorView({ documentId, title, transport = ipcTransport }: Edit
   const restoreScrollRef = useRef(scrollPositions.get(documentId) ?? null)
 
   const { lineHeight } = useStore(appearance)
+  const { minimapVisible } = useStore(layoutStore)
+  /** Bumped when the view refreshes without an edit, for the minimap. */
+  const [refreshTick, setRefreshTick] = useState(0)
   const lineHeightRef = useRef(lineHeight)
   lineHeightRef.current = lineHeight
   const [view, setView] = useState<View | null>(null)
@@ -246,7 +252,10 @@ export function EditorView({ documentId, title, transport = ipcTransport }: Edit
       dispatch,
       openFind: replace => openFind(replace),
       findNext: backward => findNext(backward),
-      refresh: () => sessionRef.current?.refresh(),
+      refresh: () => {
+        sessionRef.current?.refresh()
+        setRefreshTick(tick => tick + 1)
+      },
       focus: () => focusInput(),
       lineCount: () => viewRef.current?.lineCount ?? 0,
       scrollToLine: line => {
@@ -342,7 +351,7 @@ export function EditorView({ documentId, title, transport = ipcTransport }: Edit
         view.primary.position.line * lineHeight,
         lineHeight,
         caret?.left,
-        gutterRef.current?.offsetWidth ?? 0,
+        (gutterRef.current?.offsetWidth ?? 0) + (minimapVisible ? MINIMAP_WIDTH : 0),
       )
     }
     return () => cancelAnimationFrame(frame)
@@ -1053,6 +1062,12 @@ export function EditorView({ documentId, title, transport = ipcTransport }: Edit
           </div>
           <div
             className="editor-view__content"
+            // Room to scroll the ends of long lines out from under the minimap.
+            style={
+              minimapVisible
+                ? { paddingRight: `calc(var(--space-8) + ${MINIMAP_WIDTH}px)` }
+                : undefined
+            }
             onMouseDown={onMouseDown}
             onMouseMove={onContentMouseMove}
             onMouseLeave={onContentMouseLeave}
@@ -1160,6 +1175,16 @@ export function EditorView({ documentId, title, transport = ipcTransport }: Edit
           </div>
         </div>
       </div>
+      {minimapVisible && view && (
+        <Minimap
+          documentId={documentId}
+          version={view.version}
+          lineCount={view.lineCount}
+          refreshTick={refreshTick}
+          scroller={scrollRef}
+          lineHeight={lineHeight}
+        />
+      )}
       {hover && (
         <HoverCard hover={hover.hover} placement={hover.placement} onMouseLeave={hideHover} />
       )}
@@ -1295,7 +1320,8 @@ function reveal(
   top: number,
   lineHeight: number,
   left: number | undefined,
-  gutterWidth: number,
+  /** The width the gutter and the minimap cover. */
+  coveredWidth: number,
 ): void {
   if (top < scroller.scrollTop) {
     scroller.scrollTop = top
@@ -1306,7 +1332,7 @@ function reveal(
     return
   }
   const margin = 2 * lineHeight
-  const textWidth = scroller.clientWidth - gutterWidth
+  const textWidth = scroller.clientWidth - coveredWidth
   if (left < scroller.scrollLeft) {
     scroller.scrollLeft = Math.max(0, left - margin)
   } else if (left > scroller.scrollLeft + textWidth - margin) {

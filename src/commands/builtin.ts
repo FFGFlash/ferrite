@@ -107,6 +107,12 @@ export const builtinCommands: Command[] = [
     run: () => updateLayout({ sidebarVisible: !layoutStore.get().sidebarVisible }),
   },
   {
+    id: 'view.toggleMinimap',
+    category: 'View',
+    title: 'Toggle Minimap',
+    run: () => updateLayout({ minimapVisible: !layoutStore.get().minimapVisible }),
+  },
+  {
     id: 'workbench.showExplorer',
     category: 'View',
     title: 'Show Explorer',

@@ -1,0 +1,225 @@
+//! The minimap: a document's lines drawn small beside the editor.
+//!
+//! A line is sent as the shape of its text rather than the text itself: runs
+//! of non-blank columns, colored by token kind. Tabs advance to tab stops,
+//! as in the editor, and only the first [`MINIMAP_COLUMNS`] columns are kept.
+//! Highlights come from the document's syntax tree without touching what
+//! the editor's view has been sent.
+//!
+//! A minimap covers many more lines than the editor shows, so it is built
+//! from a [`Snapshot`] taken under the editor lock, and the lock is released
+//! while lines are highlighted.
+
+use std::ops::Range;
+
+use ferrite_core::Document;
+use ferrite_syntax::{LanguageId, Span, Tree, highlight_lines};
+use ferrite_text::TextBuffer;
+use serde::Serialize;
+
+/// Columns drawn per line.
+pub const MINIMAP_COLUMNS: usize = 120;
+/// Bytes of each line read: its columns, even if every character is wide.
+pub const MINIMAP_LINE_BYTES: usize = MINIMAP_COLUMNS * 4;
+/// Most lines sent at once.
+pub const MAX_MINIMAP_LINES: usize = 1000;
+
+/// Lines `start_line..start_line + lines.len()` of a document, each as runs
+/// `[start, end, kind, ...]` in visual columns. Kind 0 is text without a
+/// highlight; others are token kinds as in the view's highlights.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MinimapDto {
+  pub document_id: u64,
+  pub version: u64,
+  pub line_count: usize,
+  pub start_line: usize,
+  pub lines: Vec<Vec<u32>>,
+}
+
+/// What a minimap needs from a document. Cheap to take: the text is a rope
+/// and the tree is reference counted.
+pub struct Snapshot {
+  document_id: u64,
+  version: u64,
+  tab_size: usize,
+  buffer: TextBuffer,
+  /// The syntax tree, edited to match `buffer`.
+  syntax: Option<(LanguageId, Tree)>,
+}
+
+impl Snapshot {
+  pub fn of(document: &Document, syntax: Option<(LanguageId, Tree)>) -> Self {
+    Self {
+      document_id: document.id().get(),
+      version: document.version().get(),
+      tab_size: document.tab_size(),
+      buffer: document.buffer().clone(),
+      syntax,
+    }
+  }
+
+  /// The minimap for `lines`, clamped to the document and to
+  /// [`MAX_MINIMAP_LINES`].
+  pub fn build(&self, lines: Range<usize>) -> MinimapDto {
+    self.build_with(lines, |range| match &self.syntax {
+      Some((language, tree)) => {
+        highlight_lines(*language, tree, &self.buffer, range, MINIMAP_LINE_BYTES)
+      }
+      None => vec![Vec::new(); range.len()],
+    })
+  }
+
+  /// [`Self::build`], with `spans` highlighting a range of lines (each cut to
+  /// [`MINIMAP_LINE_BYTES`]).
+  fn build_with(
+    &self,
+    lines: Range<usize>,
+    spans: impl FnOnce(Range<usize>) -> Vec<Vec<Span>>,
+  ) -> MinimapDto {
+    let line_count = self.buffer.line_count();
+    let start = lines.start.min(line_count);
+    let end = lines
+      .end
+      .clamp(start, line_count)
+      .min(start + MAX_MINIMAP_LINES);
+    let spans = spans(start..end);
+    let lines = (start..end)
+      .map(|line| {
+        let (text, _) = self.buffer.line_prefix(line, MINIMAP_LINE_BYTES);
+        let line_spans = spans.get(line - start).map_or(&[][..], Vec::as_slice);
+        line_runs(&text, line_spans, self.tab_size)
+      })
+      .collect();
+    MinimapDto {
+      document_id: self.document_id,
+      version: self.version,
+      line_count,
+      start_line: start,
+      lines,
+    }
+  }
+}
+
+/// The runs of `text` as `[start, end, kind, ...]`: stretches of non-blank
+/// characters of one kind, in visual columns up to [`MINIMAP_COLUMNS`].
+/// `spans` are byte ranges of `text`, in order.
+fn line_runs(text: &str, spans: &[Span], tab_size: usize) -> Vec<u32> {
+  let tab_size = tab_size.max(1);
+  let mut runs: Vec<u32> = Vec::new();
+  let mut spans = spans.iter().peekable();
+  let mut column = 0;
+  for (byte, ch) in text.char_indices() {
+    if column >= MINIMAP_COLUMNS {
+      break;
+    }
+    let width = if ch == '\t' {
+      tab_size - column % tab_size
+    } else {
+      1
+    };
+    if !ch.is_whitespace() {
+      while spans.next_if(|span| span.end <= byte).is_some() {}
+      let kind = spans
+        .peek()
+        .filter(|span| span.start <= byte)
+        .map_or(0, |span| span.kind as u32);
+      let (start, end) = (column as u32, (column + width).min(MINIMAP_COLUMNS) as u32);
+      match runs.as_mut_slice() {
+        // Continue the previous run if it ends here with the same kind.
+        [.., last_end, last_kind] if *last_end == start && *last_kind == kind => *last_end = end,
+        _ => runs.extend([start, end, kind]),
+      }
+    }
+    column += width;
+  }
+  runs
+}
+
+#[cfg(test)]
+mod tests {
+  use ferrite_core::{Editor, EditorConfig, EditorOp};
+  use ferrite_syntax::TokenKind;
+
+  use super::*;
+
+  fn span(start: usize, end: usize, kind: TokenKind) -> Span {
+    Span { start, end, kind }
+  }
+
+  #[test]
+  fn runs_split_at_blanks_and_kinds() {
+    let spans = [
+      span(0, 2, TokenKind::Keyword),
+      span(3, 7, TokenKind::Function),
+    ];
+    // "fn" keyword, "main" function, then "()" plain, " {" plain.
+    let runs = line_runs("fn main() {", &spans, 4);
+    let keyword = TokenKind::Keyword as u32;
+    let function = TokenKind::Function as u32;
+    assert_eq!(runs, [0, 2, keyword, 3, 7, function, 7, 9, 0, 10, 11, 0]);
+  }
+
+  #[test]
+  fn tabs_advance_to_tab_stops() {
+    assert_eq!(line_runs("\tx\ty", &[], 4), [4, 5, 0, 8, 9, 0]);
+    assert_eq!(line_runs("ab\tc", &[], 4), [0, 2, 0, 4, 5, 0]);
+    assert_eq!(line_runs("\tx", &[], 0), [1, 2, 0]);
+  }
+
+  #[test]
+  fn counts_characters_not_bytes_and_stops_at_the_last_column() {
+    let spans = [span(4, 8, TokenKind::String)];
+    // "é" is 2 bytes; the string span starts at byte 4, the third character.
+    let runs = line_runs("éa \"x\"", &spans, 4);
+    assert_eq!(runs, [0, 2, 0, 3, 6, TokenKind::String as u32]);
+
+    let long = "x".repeat(MINIMAP_COLUMNS + 50);
+    assert_eq!(line_runs(&long, &[], 4), [0, MINIMAP_COLUMNS as u32, 0]);
+    let tab_at_edge = format!("{}\ty", "x".repeat(MINIMAP_COLUMNS - 2));
+    assert_eq!(
+      line_runs(&tab_at_edge, &[], 4),
+      [0, MINIMAP_COLUMNS as u32 - 2, 0]
+    );
+  }
+
+  #[test]
+  fn builds_clamped_ranges_with_the_document_tab_size() {
+    let mut editor = Editor::new(EditorConfig {
+      tab_size: 2,
+      ..EditorConfig::default()
+    });
+    let id = editor.create_untitled();
+    let document = editor.document_mut(id).expect("open");
+    document
+      .apply(EditorOp::Insert("a\n\tb\n\nc".into()))
+      .expect("applies");
+
+    let snapshot = Snapshot::of(document, None);
+    let mut asked = None;
+    let minimap = snapshot.build_with(1..99, |lines| {
+      asked = Some(lines.clone());
+      lines.map(|_| Vec::new()).collect()
+    });
+    assert_eq!(asked, Some(1..4));
+    assert_eq!(minimap.start_line, 1);
+    assert_eq!(minimap.line_count, 4);
+    assert_eq!(minimap.lines, vec![vec![2, 3, 0], vec![], vec![0, 1, 0]]);
+
+    let past_the_end = snapshot.build(10..20);
+    assert_eq!(past_the_end.start_line, 4);
+    assert!(past_the_end.lines.is_empty());
+  }
+
+  #[test]
+  fn sends_at_most_the_line_limit() {
+    let mut editor = Editor::default();
+    let id = editor.create_untitled();
+    let document = editor.document_mut(id).expect("open");
+    document
+      .apply(EditorOp::Insert("x\n".repeat(MAX_MINIMAP_LINES * 2)))
+      .expect("applies");
+    let minimap = Snapshot::of(document, None).build(0..usize::MAX);
+    assert_eq!(minimap.lines.len(), MAX_MINIMAP_LINES);
+  }
+}

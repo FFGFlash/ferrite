@@ -370,6 +370,7 @@ EditorView = { version, lineCount, startLine, endLine,
 | `document_save`, `document_save_as`                           | Save, prompting for a path or an overwrite when needed |
 | `document_close`                                              | Close, asking about unsaved changes                    |
 | `editor_view`                                                 | View for a viewport (after scrolling)                  |
+| `editor_minimap`                                              | Lines drawn small for the minimap                      |
 | `editor_apply`                                                | Apply a batch of operations, return the new view       |
 | `editor_clipboard`                                            | Copy or cut the selection to the system clipboard      |
 | `workspace_get`, `workspace_open[_dialog]`, `workspace_close` | The open folder                                        |
@@ -417,6 +418,10 @@ language (`editor/syntax.rs`), detected from the file name and re-detected after
   captures first and narrow ones over them, with earlier query patterns winning for the same
   node, which is the convention highlight queries are written for. Capture names map to a fixed
   set of token kinds (`TokenKind`), styled by `--color-syntax-*` tokens.
+- **The minimap highlights from a snapshot.** It covers many more lines than the viewport, so
+  `editor_minimap` copies the rope and the edited tree under the editor lock and runs the query
+  after releasing it ([ADR 0010](adr/0010-minimap.md)). It doesn't touch the highlights mirror
+  that keeps the editor's views incremental.
 - Grammars and queries are compiled once, on first use of each language. Documents over 16 MiB
   aren't highlighted.
 
@@ -567,13 +572,19 @@ them. Extensions fill in content through the `workbench` interface (API 1.1).
 - **`commands/`**: the command registry, keybinding matching, fuzzy matching, and the built-in
   commands. `editor/activeEditor.ts` exposes the active editor to commands (find, go to line,
   next match) without coupling them to React.
-- **`editor/EditorView`**: a scroll container sized to `lineCount × lineHeight`. Only the
+- **`editor/EditorView`**: a scroll container sized to `lineCount × lineHeight`, plus the view's
+  height less one line so the last line can scroll to the top. Only the
   viewport's lines are in the DOM, positioned with a single `translateY`. Each line is a run of
   text nodes, plain or in `tok-*` spans for highlighting. Carets, selection rectangles, find
   matches, and diagnostic squiggles are measured from the DOM with `Range` after each render
   (`editor/measure.ts` maps UTF-16 columns across a line's text nodes), and clicks map back to
   columns with `caretPositionFromPoint`, so proportional glyphs, tabs, and wide characters line
   up without a custom text-layout engine.
+- **`editor/Minimap`**: a canvas over the editor's right edge
+  ([ADR 0010](adr/0010-minimap.md)). It fetches the lines it shows, plus 100 on each side, from
+  `editor_minimap`, at once when scrolled past them and at most every 100 ms while the document
+  changes. `editor/minimapGeometry.ts` holds VS Code's geometry: the proportional scroll, the
+  slider, click-to-center, and drag scale.
 - **Language features**: resting the pointer on text shows a hover card (diagnostics at that
   point plus the server's Markdown, rendered as React elements, never HTML); F12 or Ctrl/Cmd+click
   goes to the definition; completion opens on the server's trigger characters, on typing a word,
