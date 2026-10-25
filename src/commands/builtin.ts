@@ -12,8 +12,10 @@ import {
   openPath,
   save,
 } from "../state/documents";
+import { addDevelopmentExtension, reloadExtensions } from "../ipc/extensions";
 import { setTheme, settingsFilePath } from "../ipc/workspace";
 import { layoutStore, updateLayout } from "../state/layout";
+import { notify } from "../state/notifications";
 import { closeFolder, collapseAll, openFolder, workspaceStore } from "../state/workspace";
 import type { Command } from "./registry";
 
@@ -114,6 +116,32 @@ export const builtinCommands: Command[] = [
     title: "Search in Files",
     keybinding: "mod+shift+f",
     run: () => showView("search"),
+  },
+  {
+    id: "workbench.showExtensions",
+    category: "View",
+    title: "Extensions",
+    keybinding: "mod+shift+x",
+    run: () => showView("extensions"),
+  },
+  {
+    id: "extensions.reload",
+    category: "Extensions",
+    title: "Reload Extensions",
+    run: async () => {
+      await reloadExtensions();
+      notify("info", "Extensions reloaded.");
+    },
+  },
+  {
+    id: "extensions.addDevelopment",
+    category: "Extensions",
+    title: "Load Development Extension…",
+    run: async () => {
+      if (await addDevelopmentExtension()) {
+        showView("extensions");
+      }
+    },
   },
   {
     id: "explorer.collapseAll",

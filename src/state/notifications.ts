@@ -1,19 +1,30 @@
 import { CommandError, log } from "../ipc";
 import { createStore } from "./store";
 
+export interface NotificationAction {
+  label: string;
+  run: () => void | Promise<void>;
+}
+
 export interface Notification {
   id: number;
-  kind: "error" | "info";
+  kind: "error" | "warning" | "info";
   message: string;
+  /** Buttons; a notification with actions stays until it is acted on or dismissed. */
+  actions?: readonly NotificationAction[];
 }
 
 export const notifications = createStore<readonly Notification[]>([]);
 
 let nextId = 1;
 
-export function notify(kind: Notification["kind"], message: string): number {
+export function notify(
+  kind: Notification["kind"],
+  message: string,
+  actions?: readonly NotificationAction[],
+): number {
   const id = nextId++;
-  notifications.update((current) => [...current, { id, kind, message }]);
+  notifications.update((current) => [...current, { id, kind, message, actions }]);
   return id;
 }
 

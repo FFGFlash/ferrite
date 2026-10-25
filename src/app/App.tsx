@@ -7,6 +7,7 @@ import { getSettings } from "../ipc/workspace";
 import { applySettings } from "../state/appearance";
 import { loadDocuments } from "../state/documents";
 import { listenToBackend } from "../state/events";
+import { refreshExtensions } from "../state/extensions";
 import { restoreLayout } from "../state/layout";
 import { reportError } from "../state/notifications";
 import { loadWorkspace } from "../state/workspace";
@@ -26,7 +27,7 @@ async function restoreSession(): Promise<void> {
   } catch (error) {
     reportError("Restoring the layout", error);
   }
-  await Promise.all([loadWorkspace(), loadDocuments(activeFile)]);
+  await Promise.all([loadWorkspace(), loadDocuments(activeFile), refreshExtensions()]);
   await runRequestedBenchmark();
 }
 

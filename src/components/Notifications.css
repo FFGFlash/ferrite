@@ -26,8 +26,44 @@
   border-left: 3px solid var(--color-error);
 }
 
-.notification__message {
+.notification[data-kind="warning"] {
+  border-left: 3px solid var(--color-diagnostic-warning);
+}
+
+.notification__body {
+  display: flex;
   flex: 1;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.notification__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.notification__action {
+  padding: var(--space-1) var(--space-3);
+  border: none;
+  border-radius: var(--radius-control);
+  background: var(--color-button-background);
+  color: var(--color-button-foreground);
+  font: inherit;
+  cursor: pointer;
+}
+
+.notification__action:hover {
+  background: var(--color-button-hover-background);
+}
+
+.notification__action:focus-visible {
+  outline: 1px solid var(--color-focus-ring);
+  outline-offset: 1px;
+}
+
+.notification__message {
   margin: 0;
   line-height: 1.4;
   overflow-wrap: anywhere;

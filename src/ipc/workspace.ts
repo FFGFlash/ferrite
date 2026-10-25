@@ -5,6 +5,7 @@
 import { Channel } from "@tauri-apps/api/core";
 import type { DocumentSummary, SearchQuery } from "./editor";
 import { call, isDesktop } from "./index";
+import type { MessageLevel } from "./extensions";
 
 export interface WorkspaceInfo {
   root: string;
@@ -77,7 +78,11 @@ export type AppEvent =
   | { type: "diagnosticsChanged"; documentId: number }
   | { type: "languageServerChanged" }
   | { type: "documentOpened"; document: DocumentSummary; active: boolean }
-  | { type: "indexStatus"; indexing: boolean; files: number; truncated: boolean };
+  | { type: "indexStatus"; indexing: boolean; files: number; truncated: boolean }
+  | { type: "extensionsChanged" }
+  | { type: "extensionMessage"; extension: string; level: MessageLevel; message: string }
+  | { type: "extensionFailed"; id: string; name: string; reason: string }
+  | { type: "documentEdited"; documentId: number };
 
 export const getWorkspace = () => call<WorkspaceInfo | null>("workspace_get");
 export const openWorkspaceDialog = () => call<WorkspaceInfo | null>("workspace_open_dialog");

@@ -1,0 +1,983 @@
+//! The extension host: discovery, lifecycle, permission decisions, document
+//! notifications, and extension diagnostics.
+//!
+//! Lock order: the editor lock (held by the embedder around `sync` and the
+//! diagnostics queries, and taken by host functions through
+//! [`Embedder::with_editor`]), then the host's state lock. Nothing waits on
+//! an extension while holding either; notifications to the embedder are
+//! sent after the state lock is released.
+
+use std::collections::{BTreeMap, HashMap, VecDeque};
+use std::ops::Range;
+use std::path::{Path, PathBuf};
+use std::sync::atomic::AtomicBool;
+use std::sync::mpsc::{self, Receiver};
+use std::sync::{Arc, Mutex, MutexGuard, OnceLock, PoisonError, RwLock, Weak};
+use std::time::{Duration, Instant};
+
+use ferrite_core::{Document, DocumentId};
+use ferrite_text::{TextBuffer, TextSnapshot, Version, map_offset_through};
+
+use crate::api::{self, document_info, to_position};
+use crate::bindings::ferrite::extension::types::{
+  ApiError, CommandContext, DocumentInfo, Range as WitRange, TextChange,
+};
+use crate::config::{self, ConfigValue};
+use crate::manifest::{self, MANIFEST_FILE, Manifest};
+use crate::permissions::{Decision, Decisions, Permission};
+use crate::runtime::Runtime;
+use crate::worker::{
+  self, Budgets, Event, Failure, MAX_PENDING_CHANGE_BYTES, Queue, Setup, Worker,
+};
+use crate::{
+  CommandInfo, Embedder, ExtensionDiagnostic, ExtensionState, ExtensionStatus, HostOptions,
+  Notification, PermissionStatus, Severity,
+};
+
+/// Synced versions kept per document, to interpret diagnostics published
+/// for slightly older text.
+const SYNC_HISTORY: usize = 8;
+/// How long shutdown waits for extensions to deactivate.
+const SHUTDOWN_WAIT: Duration = Duration::from_millis(1500);
+
+/// A diagnostic as byte ranges in the text at its set's version.
+#[derive(Debug, Clone)]
+pub struct StoredDiagnostic {
+  pub range: Range<usize>,
+  pub severity: Severity,
+  pub message: String,
+  pub code: Option<String>,
+}
+
+struct DiagnosticSet {
+  version: Version,
+  items: Vec<StoredDiagnostic>,
+}
+
+impl DiagnosticSet {
+  /// Maps the ranges through the edits since they were stored.
+  fn catch_up(&mut self, buffer: &TextBuffer) {
+    if self.version == buffer.version() {
+      return;
+    }
+    match buffer.edits_since(self.version) {
+      Some(edits) => {
+        for item in &mut self.items {
+          let start = map_offset_through(&edits, item.range.start, true);
+          let end = map_offset_through(&edits, item.range.end, false).max(start);
+          item.range = start..end;
+        }
+      }
+      None => self.items.clear(),
+    }
+    self.version = buffer.version();
+  }
+}
+
+/// What the host knows about an open document.
+struct DocumentRecord {
+  info: DocumentInfo,
+  /// The path `info` was built for.
+  path: Option<PathBuf>,
+  /// Recently synced texts, oldest first; the last is the current one.
+  history: VecDeque<TextSnapshot>,
+  /// Diagnostics by extension id.
+  diagnostics: BTreeMap<String, DiagnosticSet>,
+}
+
+impl DocumentRecord {
+  fn synced(&self) -> Option<&TextSnapshot> {
+    self.history.back()
+  }
+}
+
+enum Run {
+  /// Not running: waiting for an activation event (or a permission
+  /// decision, or enabling).
+  Idle,
+  Running {
+    worker: Worker,
+    active: bool,
+  },
+  Failed(String),
+}
+
+struct Entry {
+  manifest: Arc<Manifest>,
+  development: bool,
+  config: Arc<RwLock<BTreeMap<String, ConfigValue>>>,
+  config_errors: Vec<String>,
+  run: Run,
+}
+
+/// A folder that could not be loaded as an extension.
+struct Invalid {
+  dir: PathBuf,
+  development: bool,
+  error: String,
+}
+
+struct State {
+  options: HostOptions,
+  decisions: Decisions,
+  extensions: Vec<Entry>,
+  invalid: Vec<Invalid>,
+  documents: HashMap<DocumentId, DocumentRecord>,
+  next_generation: u64,
+  shutting_down: bool,
+}
+
+pub struct Shared {
+  me: Weak<Shared>,
+  pub embedder: Arc<dyn Embedder>,
+  runtime: OnceLock<Result<Arc<Runtime>, String>>,
+  state: Mutex<State>,
+}
+
+/// Notifications collected under the state lock, sent after it is released.
+#[derive(Default)]
+struct Outbox(Vec<Notification>);
+
+impl Outbox {
+  fn push(&mut self, notification: Notification) {
+    self.0.push(notification);
+  }
+
+  fn send(self, embedder: &dyn Embedder) {
+    for notification in self.0 {
+      embedder.notify(notification);
+    }
+  }
+}
+
+impl Shared {
+  fn lock(&self) -> MutexGuard<'_, State> {
+    self.state.lock().unwrap_or_else(PoisonError::into_inner)
+  }
+
+  /// The runtime, created on first use.
+  pub fn runtime(&self) -> Result<Arc<Runtime>, String> {
+    self
+      .runtime
+      .get_or_init(|| Runtime::new().map(Arc::new))
+      .clone()
+  }
+
+  pub fn budgets(&self) -> Budgets {
+    let limits = &self.lock().options.limits;
+    Budgets {
+      activation: limits.activation_time,
+      command: limits.command_time,
+      event: limits.event_time,
+      memory: limits.memory_bytes,
+    }
+  }
+
+  /// Starts the extension at `index` unless it is running, disabled,
+  /// waiting for a permission decision, or the host is shutting down.
+  fn start(&self, state: &mut State, index: usize, outbox: &mut Outbox) {
+    let entry = &state.extensions[index];
+    let decision = state.decisions.get(&entry.manifest.id);
+    if state.shutting_down
+      || decision.disabled
+      || !decision.pending(&entry.manifest.permissions).is_empty()
+      || matches!(entry.run, Run::Running { .. })
+    {
+      return;
+    }
+    let granted = decision.effective(&entry.manifest.permissions);
+    let queue = Arc::new(Queue::new(state.options.limits.queue_capacity));
+    if granted.contains(&Permission::DocumentsRead) {
+      let mut infos: Vec<&DocumentInfo> = state
+        .documents
+        .values()
+        .map(|record| &record.info)
+        .collect();
+      infos.sort_by_key(|info| info.id);
+      for info in infos {
+        queue.push_document(Event::Opened(info.clone()));
+      }
+    }
+    state.next_generation += 1;
+    let setup = Setup {
+      manifest: entry.manifest.clone(),
+      generation: state.next_generation,
+      granted,
+      config: entry.config.clone(),
+      queue,
+      cancel: Arc::new(AtomicBool::new(false)),
+    };
+    tracing::info!(extension = %setup.manifest.id, "starting extension");
+    let worker = worker::spawn(self.me.clone(), setup);
+    state.extensions[index].run = Run::Running {
+      worker,
+      active: false,
+    };
+    outbox.push(Notification::ExtensionsChanged);
+  }
+
+  /// Stops the extension at `index` and forgets its diagnostics.
+  fn stop(state: &mut State, index: usize, outbox: &mut Outbox) {
+    let entry = &mut state.extensions[index];
+    if let Run::Running { worker, .. } = std::mem::replace(&mut entry.run, Run::Idle) {
+      worker.stop(true);
+    }
+    let id = entry.manifest.id.clone();
+    Self::forget_diagnostics(state, &id, outbox);
+    outbox.push(Notification::ExtensionsChanged);
+  }
+
+  fn forget_diagnostics(state: &mut State, id: &str, outbox: &mut Outbox) {
+    for (&document, record) in &mut state.documents {
+      if record.diagnostics.remove(id).is_some() {
+        outbox.push(Notification::DiagnosticsChanged(document));
+      }
+    }
+  }
+
+  pub fn worker_active(&self, id: &str, generation: u64) {
+    let mut state = self.lock();
+    let Some(entry) = state
+      .extensions
+      .iter_mut()
+      .find(|entry| entry.manifest.id == id)
+    else {
+      return;
+    };
+    if let Run::Running { worker, active } = &mut entry.run
+      && worker.generation == generation
+    {
+      *active = true;
+      tracing::info!(extension = %id, "extension active");
+      drop(state);
+      self.embedder.notify(Notification::ExtensionsChanged);
+    }
+  }
+
+  pub fn worker_finished(&self, id: &str, generation: u64, outcome: Result<(), Failure>) {
+    let mut outbox = Outbox::default();
+    let mut reply = None;
+    {
+      let mut state = self.lock();
+      let index = state.extensions.iter().position(|entry| {
+        entry.manifest.id == id
+          && matches!(&entry.run, Run::Running { worker, .. } if worker.generation == generation)
+      });
+      if let Some(index) = index {
+        let entry = &mut state.extensions[index];
+        let name = entry.manifest.name.clone();
+        let (run, stopped) = match outcome {
+          Ok(()) => (Run::Idle, "The extension stopped.".to_owned()),
+          Err(failure) => {
+            tracing::warn!(extension = %id, reason = %failure.reason, "extension failed");
+            reply = failure.reply.map(|reply| (reply, failure.reason.clone()));
+            outbox.push(Notification::ExtensionFailed {
+              id: id.to_owned(),
+              name,
+              reason: failure.reason.clone(),
+            });
+            let stopped = format!("The extension stopped: {}", failure.reason);
+            (Run::Failed(failure.reason), stopped)
+          }
+        };
+        if let Run::Running { worker, .. } = std::mem::replace(&mut entry.run, run) {
+          worker.queue.stop(&stopped);
+        }
+        Self::forget_diagnostics(&mut state, id, &mut outbox);
+        outbox.push(Notification::ExtensionsChanged);
+      } else if let Err(failure) = outcome {
+        // Stopped or restarted meanwhile.
+        reply = failure.reply.map(|reply| (reply, failure.reason));
+      }
+    }
+    if let Some((reply, reason)) = reply {
+      let _ = reply.send(Err(format!("The extension stopped: {reason}")));
+    }
+    outbox.send(self.embedder.as_ref());
+  }
+
+  /// Brings the host's view of `document` up to date and notifies
+  /// extensions that read documents. Called with the editor locked.
+  pub fn sync(&self, document: &Document) {
+    let mut outbox = Outbox::default();
+    {
+      let mut guard = self.lock();
+      let state = &mut *guard;
+      if state.shutting_down {
+        return;
+      }
+      let id = document.id();
+      let buffer = document.buffer();
+      // Most syncs (every view) find nothing new.
+      if let Some(record) = state.documents.get(&id)
+        && record.info.version == document.version().get()
+        && record.info.dirty == document.is_dirty()
+        && record.path.as_deref() == document.path()
+      {
+        return;
+      }
+      let info = document_info(self, document);
+      match state.documents.get_mut(&id) {
+        None => {
+          let language = info.language.clone();
+          state.documents.insert(
+            id,
+            DocumentRecord {
+              info: info.clone(),
+              path: document.path().map(Path::to_path_buf),
+              history: VecDeque::from([buffer.snapshot()]),
+              diagnostics: BTreeMap::new(),
+            },
+          );
+          for entry in &state.extensions {
+            if let Run::Running { worker, .. } = &entry.run
+              && worker.reads_documents()
+            {
+              worker.queue.push_document(Event::Opened(info.clone()));
+            }
+          }
+          if let Some(language) = language {
+            let wanting: Vec<usize> = (0..state.extensions.len())
+              .filter(|&index| {
+                state.extensions[index]
+                  .manifest
+                  .activates_for_language(&language)
+              })
+              .collect();
+            for index in wanting {
+              self.start(state, index, &mut outbox);
+            }
+          }
+        }
+        Some(record) => {
+          let synced_version = record.synced().map(TextSnapshot::version);
+          record.info = info.clone();
+          record.path = document.path().map(Path::to_path_buf);
+          if synced_version != Some(buffer.version()) {
+            let readers: Vec<&Worker> = state
+              .extensions
+              .iter()
+              .filter_map(|entry| match &entry.run {
+                Run::Running { worker, .. } if worker.reads_documents() => Some(worker),
+                _ => None,
+              })
+              .collect();
+            let changes = synced_version
+              .filter(|_| !readers.is_empty())
+              .and_then(|version| buffer.edits_since(version))
+              .map(|edits| {
+                edits
+                  .into_iter()
+                  .map(|edit| TextChange {
+                    range: WitRange {
+                      start: point(edit.start_point),
+                      end: point(edit.old_end_point),
+                    },
+                    text: edit.text,
+                  })
+                  .collect::<Vec<_>>()
+              })
+              .filter(|changes| {
+                changes
+                  .iter()
+                  .map(|change| change.text.len())
+                  .sum::<usize>()
+                  <= MAX_PENDING_CHANGE_BYTES
+              });
+            if record.history.len() == SYNC_HISTORY {
+              record.history.pop_front();
+            }
+            record.history.push_back(buffer.snapshot());
+            for worker in readers {
+              worker.queue.push_document(Event::Changed {
+                document: id.get(),
+                version: info.version,
+                changes: changes.clone(),
+              });
+            }
+          }
+        }
+      }
+    }
+    outbox.send(self.embedder.as_ref());
+  }
+
+  /// Stores an extension's diagnostics, converting their ranges in the
+  /// text at `version`: the current text, or a recently synced one.
+  /// Called with the editor locked.
+  pub fn store_diagnostics(
+    &self,
+    document: &Document,
+    extension: &str,
+    version: u64,
+    convert: impl FnOnce(&TextBuffer) -> Result<Vec<StoredDiagnostic>, ApiError>,
+  ) -> Result<(), ApiError> {
+    let mut state = self.lock();
+    let current = document.version().get();
+    let running = state
+      .extensions
+      .iter()
+      .any(|entry| entry.manifest.id == extension && matches!(entry.run, Run::Running { .. }));
+    if !running {
+      return Err(ApiError::InvalidArgument(
+        "the extension is not running".into(),
+      ));
+    }
+    let record = state
+      .documents
+      .get_mut(&document.id())
+      .ok_or(ApiError::UnknownDocument)?;
+    let (items, at) = if version == current {
+      (convert(document.buffer())?, document.version())
+    } else {
+      let snapshot = record
+        .history
+        .iter()
+        .find(|snapshot| snapshot.version().get() == version)
+        .ok_or(ApiError::StaleVersion(current))?;
+      (
+        convert(&TextBuffer::from_snapshot(snapshot))?,
+        snapshot.version(),
+      )
+    };
+    record
+      .diagnostics
+      .insert(extension.to_owned(), DiagnosticSet { version: at, items });
+    Ok(())
+  }
+}
+
+fn point(point: ferrite_text::TextPoint) -> crate::bindings::ferrite::extension::types::Position {
+  crate::bindings::ferrite::extension::types::Position {
+    line: u32::try_from(point.row).unwrap_or(u32::MAX),
+    column: u32::try_from(point.column).unwrap_or(u32::MAX),
+  }
+}
+
+/// A command run waiting for its result.
+pub struct CommandTicket {
+  receiver: Receiver<Result<(), String>>,
+  timeout: Duration,
+}
+
+impl CommandTicket {
+  /// Waits for the command to finish. Fails with the extension's error, or
+  /// if it doesn't finish in time.
+  pub fn wait(self) -> Result<(), String> {
+    match self.receiver.recv_timeout(self.timeout) {
+      Ok(result) => result,
+      Err(mpsc::RecvTimeoutError::Timeout) => Err("The command did not finish in time.".into()),
+      Err(mpsc::RecvTimeoutError::Disconnected) => Err("The extension stopped.".into()),
+    }
+  }
+}
+
+/// Loads and runs extensions for an editor. See the crate documentation.
+pub struct ExtensionHost {
+  shared: Arc<Shared>,
+}
+
+impl ExtensionHost {
+  /// Creates a host. Nothing is loaded until [`Self::load`].
+  pub fn new(embedder: Arc<dyn Embedder>, options: HostOptions) -> Self {
+    let decisions = Decisions::load(options.permissions_file.clone());
+    let shared = Arc::new_cyclic(|me| Shared {
+      me: me.clone(),
+      embedder,
+      runtime: OnceLock::new(),
+      state: Mutex::new(State {
+        options,
+        decisions,
+        extensions: Vec::new(),
+        invalid: Vec::new(),
+        documents: HashMap::new(),
+        next_generation: 0,
+        shutting_down: false,
+      }),
+    });
+    Self { shared }
+  }
+
+  /// (Re)discovers extensions and starts those that activate on startup or
+  /// for an open document's language. Running extensions are restarted.
+  /// Reads the disk; call without holding the editor lock.
+  pub fn load(&self) {
+    let (dirs, editor_version) = {
+      let state = self.shared.lock();
+      let mut dirs: Vec<(PathBuf, bool)> = state
+        .options
+        .development
+        .iter()
+        .map(|dir| (dir.clone(), true))
+        .collect();
+      if let Some(root) = &state.options.extensions_dir {
+        dirs.extend(installed_dirs(root).into_iter().map(|dir| (dir, false)));
+      }
+      (dirs, state.options.editor_version.clone())
+    };
+    let mut loaded: Vec<(Manifest, bool)> = Vec::new();
+    let mut invalid = Vec::new();
+    for (dir, development) in dirs {
+      match manifest::load(&dir, &editor_version, development) {
+        Ok(manifest) => {
+          if loaded.iter().any(|(other, _)| other.id == manifest.id) {
+            invalid.push(Invalid {
+              dir,
+              development,
+              error: format!(
+                "another extension with the id {:?} is already loaded",
+                manifest.id
+              ),
+            });
+          } else {
+            tracing::info!(extension = %manifest.id, version = %manifest.version, development, "found extension");
+            loaded.push((manifest, development));
+          }
+        }
+        Err(error) => {
+          tracing::warn!(dir = %dir.display(), %error, "invalid extension");
+          invalid.push(Invalid {
+            dir,
+            development,
+            error: error.to_string(),
+          });
+        }
+      }
+    }
+    loaded.sort_by_key(|(manifest, _)| manifest.name.to_lowercase());
+
+    let mut outbox = Outbox::default();
+    {
+      let mut state = self.shared.lock();
+      if state.shutting_down {
+        return;
+      }
+      for index in 0..state.extensions.len() {
+        Shared::stop(&mut state, index, &mut outbox);
+      }
+      state.extensions = loaded
+        .into_iter()
+        .map(|(manifest, development)| {
+          let (values, config_errors) = config::resolve(
+            &manifest.configuration,
+            state.options.settings.get(&manifest.id),
+          );
+          Entry {
+            manifest: Arc::new(manifest),
+            development,
+            config: Arc::new(RwLock::new(values)),
+            config_errors,
+            run: Run::Idle,
+          }
+        })
+        .collect();
+      state.invalid = invalid;
+      self.start_wanted(&mut state, &mut outbox);
+      outbox.push(Notification::ExtensionsChanged);
+    }
+    outbox.send(self.shared.embedder.as_ref());
+  }
+
+  /// Starts idle extensions that activate on startup or for the language
+  /// of an open document.
+  fn start_wanted(&self, state: &mut State, outbox: &mut Outbox) {
+    let languages: Vec<String> = state
+      .documents
+      .values()
+      .filter_map(|record| record.info.language.clone())
+      .collect();
+    for index in 0..state.extensions.len() {
+      let manifest = &state.extensions[index].manifest;
+      let wanted = manifest.activates_on_startup()
+        || languages
+          .iter()
+          .any(|language| manifest.activates_for_language(language));
+      if wanted && matches!(state.extensions[index].run, Run::Idle) {
+        self.shared.start(state, index, outbox);
+      }
+    }
+  }
+
+  /// Applies new options: rediscovers extensions if the folders changed,
+  /// and updates configuration values in place otherwise.
+  pub fn configure(&self, options: HostOptions) {
+    let reload = {
+      let mut guard = self.shared.lock();
+      let state = &mut *guard;
+      let reload = state.options.extensions_dir != options.extensions_dir
+        || state.options.development != options.development;
+      state.options = options;
+      for entry in &mut state.extensions {
+        let (values, errors) = config::resolve(
+          &entry.manifest.configuration,
+          state.options.settings.get(&entry.manifest.id),
+        );
+        *entry.config.write().unwrap_or_else(PoisonError::into_inner) = values;
+        entry.config_errors = errors;
+      }
+      reload
+    };
+    if reload {
+      self.load();
+    } else {
+      self.shared.embedder.notify(Notification::ExtensionsChanged);
+    }
+  }
+
+  pub fn statuses(&self) -> Vec<ExtensionStatus> {
+    let state = self.shared.lock();
+    let mut statuses: Vec<ExtensionStatus> = state
+      .extensions
+      .iter()
+      .map(|entry| {
+        let manifest = &entry.manifest;
+        let decision = state.decisions.get(&manifest.id);
+        let (status, error) = match &entry.run {
+          _ if decision.disabled => (ExtensionState::Disabled, None),
+          Run::Idle if !decision.pending(&manifest.permissions).is_empty() => {
+            (ExtensionState::AwaitingPermission, None)
+          }
+          Run::Idle => (ExtensionState::Inactive, None),
+          Run::Running { active: false, .. } => (ExtensionState::Starting, None),
+          Run::Running { active: true, .. } => (ExtensionState::Active, None),
+          Run::Failed(reason) => (ExtensionState::Failed, Some(reason.clone())),
+        };
+        ExtensionStatus {
+          id: manifest.id.clone(),
+          name: manifest.name.clone(),
+          version: manifest.version.to_string(),
+          description: manifest.description.clone(),
+          path: manifest.dir.to_string_lossy().into_owned(),
+          development: entry.development,
+          state: status,
+          error,
+          permissions: manifest
+            .permissions
+            .iter()
+            .map(|&permission| PermissionStatus {
+              permission,
+              description: permission.description(),
+              granted: decision.granted.contains(&permission),
+              decided: decision.granted.contains(&permission)
+                || decision.denied.contains(&permission),
+            })
+            .collect(),
+          commands: manifest
+            .commands
+            .iter()
+            .map(|command| CommandInfo {
+              id: command.id.clone(),
+              title: command.title.clone(),
+              category: command.category.clone(),
+            })
+            .collect(),
+          config_errors: entry.config_errors.clone(),
+        }
+      })
+      .collect();
+    statuses.extend(state.invalid.iter().map(|invalid| {
+      let name = invalid.dir.file_name().map_or_else(
+        || invalid.dir.to_string_lossy().into_owned(),
+        |name| name.to_string_lossy().into_owned(),
+      );
+      ExtensionStatus {
+        id: invalid.dir.to_string_lossy().into_owned(),
+        name,
+        version: String::new(),
+        description: String::new(),
+        path: invalid.dir.to_string_lossy().into_owned(),
+        development: invalid.development,
+        state: ExtensionState::Invalid,
+        error: Some(invalid.error.clone()),
+        permissions: Vec::new(),
+        commands: Vec::new(),
+        config_errors: Vec::new(),
+      }
+    }));
+    statuses
+  }
+
+  /// Runs an extension command, starting the extension if needed.
+  /// `document` is the active document, whose selections are passed along.
+  /// Call without holding the editor lock.
+  pub fn run_command(
+    &self,
+    command: &str,
+    document: Option<DocumentId>,
+  ) -> Result<CommandTicket, String> {
+    let selections = document
+      .and_then(|id| {
+        api::with_editor(&self.shared, |editor| {
+          editor.document(id).ok().map(|document| {
+            let buffer = document.buffer();
+            let selections = document.selections();
+            let primary = selections.primary();
+            std::iter::once(primary)
+              .chain(selections.iter().copied().filter(|s| *s != primary))
+              .map(|selection| {
+                let range = selection.range();
+                WitRange {
+                  start: to_position(buffer, range.start),
+                  end: to_position(buffer, range.end),
+                }
+              })
+              .collect::<Vec<_>>()
+          })
+        })
+        .flatten()
+      })
+      .unwrap_or_default();
+    let mut outbox = Outbox::default();
+    let result = {
+      let mut state = self.shared.lock();
+      let index = state
+        .extensions
+        .iter()
+        .position(|entry| entry.manifest.declares_command(command))
+        .ok_or_else(|| format!("No extension provides the command {command}."))?;
+      let entry = &state.extensions[index];
+      let name = entry.manifest.name.clone();
+      let decision = state.decisions.get(&entry.manifest.id);
+      if decision.disabled {
+        return Err(format!("{name} is disabled."));
+      }
+      if !decision.pending(&entry.manifest.permissions).is_empty() {
+        return Err(format!(
+          "{name} is waiting for you to allow or deny its permissions."
+        ));
+      }
+      if let Run::Failed(reason) = &entry.run {
+        return Err(format!(
+          "{name} has stopped ({reason}). Restart it to try again."
+        ));
+      }
+      self.shared.start(&mut state, index, &mut outbox);
+      let command_time = state.options.limits.command_time;
+      match &state.extensions[index].run {
+        Run::Running { worker, .. } => {
+          let (reply, receiver) = mpsc::channel();
+          let context = CommandContext {
+            document: document.map(DocumentId::get),
+            selections,
+          };
+          worker
+            .queue
+            .push_command(Event::Command {
+              command: command.to_owned(),
+              context,
+              reply,
+            })
+            .map(|()| CommandTicket {
+              receiver,
+              // Starting the extension and waiting behind other events count too.
+              timeout: command_time + state.options.limits.activation_time + Duration::from_secs(5),
+            })
+        }
+        _ => Err(format!("{name} could not be started.")),
+      }
+    };
+    outbox.send(self.shared.embedder.as_ref());
+    result
+  }
+
+  /// Records the user's permission decision for an extension: `granted`
+  /// are allowed, its other requested permissions denied. A running
+  /// extension is restarted with the new permissions.
+  pub fn set_permissions(&self, id: &str, granted: &[Permission]) {
+    self.update_decision(id, |decision, requested| {
+      decision.granted = requested
+        .iter()
+        .copied()
+        .filter(|p| granted.contains(p))
+        .collect();
+      decision.denied = requested
+        .iter()
+        .copied()
+        .filter(|p| !granted.contains(p))
+        .collect();
+    });
+  }
+
+  pub fn set_enabled(&self, id: &str, enabled: bool) {
+    self.update_decision(id, |decision, _| decision.disabled = !enabled);
+  }
+
+  fn update_decision(&self, id: &str, change: impl FnOnce(&mut Decision, &[Permission])) {
+    let mut outbox = Outbox::default();
+    {
+      let mut state = self.shared.lock();
+      let Some(index) = state
+        .extensions
+        .iter()
+        .position(|entry| entry.manifest.id == id)
+      else {
+        return;
+      };
+      let mut decision = state.decisions.get(id);
+      let before = decision.clone();
+      change(&mut decision, &state.extensions[index].manifest.permissions);
+      if decision == before {
+        return;
+      }
+      state.decisions.set(id, decision);
+      Shared::stop(&mut state, index, &mut outbox);
+      self.start_wanted(&mut state, &mut outbox);
+    }
+    outbox.send(self.shared.embedder.as_ref());
+  }
+
+  /// Restarts an extension (e.g. after it failed, or was rebuilt).
+  pub fn restart(&self, id: &str) {
+    let mut outbox = Outbox::default();
+    {
+      let mut state = self.shared.lock();
+      let Some(index) = state
+        .extensions
+        .iter()
+        .position(|entry| entry.manifest.id == id)
+      else {
+        return;
+      };
+      Shared::stop(&mut state, index, &mut outbox);
+      self.shared.start(&mut state, index, &mut outbox);
+    }
+    outbox.send(self.shared.embedder.as_ref());
+  }
+
+  /// Brings the host's view of `document` up to date: announces new
+  /// documents and sends changes to extensions. Call with the editor
+  /// locked, whenever a document may have changed (e.g. on every view).
+  pub fn sync(&self, document: &Document) {
+    self.shared.sync(document);
+  }
+
+  /// Forgets a closed document and tells extensions.
+  pub fn closed(&self, id: DocumentId) {
+    let mut state = self.shared.lock();
+    if state.documents.remove(&id).is_none() {
+      return;
+    }
+    for entry in &state.extensions {
+      if let Run::Running { worker, .. } = &entry.run
+        && worker.reads_documents()
+      {
+        worker.queue.push_document(Event::Closed(id.get()));
+      }
+    }
+  }
+
+  /// Extension diagnostics overlapping `bytes`, mapped to the current text.
+  /// Call with the editor locked.
+  pub fn diagnostics(&self, document: &Document, bytes: Range<usize>) -> Vec<ExtensionDiagnostic> {
+    self.collect(document, |range| {
+      range.start <= bytes.end && range.end >= bytes.start
+    })
+  }
+
+  /// Extension diagnostics covering `offset`.
+  pub fn diagnostics_at(&self, document: &Document, offset: usize) -> Vec<ExtensionDiagnostic> {
+    self.collect(document, |range| {
+      range.start <= offset && offset <= range.end
+    })
+  }
+
+  /// The number of extension errors and warnings in a document.
+  pub fn problem_counts(&self, document: &Document) -> (usize, usize) {
+    let state = self.shared.lock();
+    let Some(record) = state.documents.get(&document.id()) else {
+      return (0, 0);
+    };
+    let items = record.diagnostics.values().flat_map(|set| &set.items);
+    items.fold((0, 0), |(errors, warnings), item| match item.severity {
+      Severity::Error => (errors + 1, warnings),
+      Severity::Warning => (errors, warnings + 1),
+      _ => (errors, warnings),
+    })
+  }
+
+  fn collect(
+    &self,
+    document: &Document,
+    wanted: impl Fn(&Range<usize>) -> bool,
+  ) -> Vec<ExtensionDiagnostic> {
+    let mut state = self.shared.lock();
+    let names: HashMap<String, String> = state
+      .extensions
+      .iter()
+      .map(|entry| (entry.manifest.id.clone(), entry.manifest.name.clone()))
+      .collect();
+    let Some(record) = state.documents.get_mut(&document.id()) else {
+      return Vec::new();
+    };
+    let mut found = Vec::new();
+    for (id, set) in &mut record.diagnostics {
+      set.catch_up(document.buffer());
+      let source = names.get(id).cloned().unwrap_or_else(|| id.clone());
+      found.extend(
+        set
+          .items
+          .iter()
+          .filter(|item| wanted(&item.range))
+          .map(|item| ExtensionDiagnostic {
+            range: item.range.clone(),
+            severity: item.severity,
+            message: item.message.clone(),
+            code: item.code.clone(),
+            source: source.clone(),
+          }),
+      );
+    }
+    found
+  }
+
+  /// Stops every extension, giving each a moment to deactivate.
+  pub fn shutdown(&self) {
+    let workers: Vec<Worker> = {
+      let mut state = self.shared.lock();
+      state.shutting_down = true;
+      state
+        .extensions
+        .iter_mut()
+        .filter_map(|entry| match std::mem::replace(&mut entry.run, Run::Idle) {
+          Run::Running { worker, .. } => Some(worker),
+          other => {
+            entry.run = other;
+            None
+          }
+        })
+        .collect()
+    };
+    for worker in &workers {
+      worker.stop(false);
+    }
+    let deadline = Instant::now() + SHUTDOWN_WAIT;
+    for mut worker in workers {
+      let Some(thread) = worker.thread.take() else {
+        continue;
+      };
+      while !thread.is_finished() && Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(5));
+      }
+      if thread.is_finished() {
+        let _ = thread.join();
+      } else {
+        worker.stop(true);
+        tracing::warn!("an extension did not stop in time");
+      }
+    }
+  }
+}
+
+/// Subfolders of `root` that contain a manifest, sorted by name.
+fn installed_dirs(root: &Path) -> Vec<PathBuf> {
+  let Ok(entries) = std::fs::read_dir(root) else {
+    return Vec::new();
+  };
+  let mut dirs: Vec<PathBuf> = entries
+    .filter_map(Result::ok)
+    .map(|entry| entry.path())
+    .filter(|path| path.join(MANIFEST_FILE).is_file())
+    .collect();
+  dirs.sort();
+  dirs
+}

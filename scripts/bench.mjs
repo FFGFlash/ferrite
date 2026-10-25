@@ -12,6 +12,7 @@
  *   node scripts/bench.mjs all            # startup, typing, and scroll
  *
  * Options: --runs N and --pause MS between runs (startup), --binary PATH,
+ * --extensions (load extensions, which runs skip by default),
  * --json PATH (default
  * target/bench/results.json). The app runs with `--bench <name>`, writes its
  * report to the file in FERRITE_BENCH_OUT, and stays up briefly so this
@@ -44,6 +45,8 @@ const jsonOut = path.resolve(option("json", path.join(root, "target", "bench", "
 const runs = Number(option("runs", "5"));
 const pauseMs = Number(option("pause", "3000"));
 const file = option("file", null);
+/** `--extensions`: load installed and development extensions too. */
+const withExtensions = args.includes("--extensions");
 
 if (!fs.existsSync(binary)) {
   console.error(`No release build at ${binary}. Run: pnpm tauri build --no-bundle`);
@@ -108,7 +111,8 @@ function processTreeMemory(pid) {
 async function runOnce(name, extra = []) {
   const out = path.join(os.tmpdir(), `ferrite-bench-${process.pid}-${Date.now()}.json`);
   const started = performance.now();
-  const child = spawn(binary, ["--bench", name, ...extra], {
+  const flags = withExtensions ? ["--bench-extensions"] : [];
+  const child = spawn(binary, ["--bench", name, ...extra, ...flags], {
     env: { ...process.env, FERRITE_BENCH_OUT: out },
     stdio: "ignore",
   });

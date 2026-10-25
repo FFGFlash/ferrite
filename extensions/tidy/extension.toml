@@ -1,0 +1,37 @@
+# Manifest of the example extension. See docs/extensions.md.
+id = "example.tidy"
+name = "Tidy"
+version = "0.1.0"
+description = "Flags trailing whitespace and overlong lines, and trims trailing whitespace."
+api_version = "1"
+# Built by `cargo build --release` in extensions/. Installed extensions keep
+# the .wasm file next to this manifest instead.
+entrypoint = "../target/wasm32-unknown-unknown/release/tidy.wasm"
+activation = ["on-startup"]
+
+[engines]
+ferrite = ">=0.1.0"
+
+[permissions]
+documents_read = true
+documents_write = true
+
+[[commands]]
+id = "example.tidy.trimTrailingWhitespace"
+title = "Trim Trailing Whitespace"
+
+[[commands]]
+id = "example.tidy.countWords"
+title = "Count Words"
+
+[configuration.max_line_length]
+type = "integer"
+default = 100
+minimum = 0
+description = "Lines longer than this many characters are flagged; 0 turns the check off."
+
+[configuration.severity]
+type = "string"
+default = "warning"
+choices = ["error", "warning", "information", "hint"]
+description = "How problems are shown."

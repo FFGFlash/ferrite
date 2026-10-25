@@ -1,0 +1,20 @@
+# Extensions build to WebAssembly in their own workspace, separate from the
+# editor (see `.cargo/config.toml` for the target).
+[workspace]
+resolver = "3"
+members = ["tidy", "test-fixtures/misbehaving"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+publish = false
+
+[workspace.dependencies]
+ferrite-extension-api = { path = "../crates/ferrite-extension-api" }
+
+[profile.release]
+opt-level = "s"
+lto = true
+codegen-units = 1
+strip = true

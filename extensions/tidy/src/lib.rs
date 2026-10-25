@@ -1,0 +1,429 @@
+//! Tidy: an example Ferrite extension.
+//!
+//! It flags trailing whitespace and lines longer than a configurable limit
+//! (as diagnostics), and adds two commands: one trims trailing whitespace
+//! (a validated, versioned edit) and one counts words.
+//!
+//! It shows how to keep per-document state up to date from change
+//! notifications without re-reading whole documents: problems are stored
+//! per line, a change marks only the lines it touches as unchecked, and only
+//! those lines are read again.
+
+use std::cell::RefCell;
+use std::collections::HashMap;
+
+use ferrite_extension_api::types::{
+  Activation, ApiError, CommandContext, ConfigValue, Diagnostic, DocumentChange, DocumentId,
+  DocumentInfo, LogLevel, MessageLevel, Permission, Position, Range, Severity, TextEdit,
+};
+use ferrite_extension_api::{Guest, export_extension, host};
+
+/// Lines read per request.
+const CHUNK_LINES: u32 = 2_000;
+/// Diagnostics published per document, at most.
+const MAX_DIAGNOSTICS: usize = 1_000;
+/// Attempts at an edit when the document changes in between.
+const ATTEMPTS: usize = 3;
+
+#[derive(Debug, Clone, Copy)]
+enum Kind {
+  TrailingWhitespace,
+  TooLong { length: usize, limit: usize },
+}
+
+/// A problem on one line, as byte columns.
+#[derive(Debug, Clone, Copy)]
+struct Problem {
+  start: u32,
+  end: u32,
+  kind: Kind,
+}
+
+struct Document {
+  /// Problems by line; `None` for lines not checked since they changed.
+  lines: Vec<Option<Vec<Problem>>>,
+  /// The version `lines` describes.
+  version: u64,
+}
+
+thread_local! {
+  static DOCUMENTS: RefCell<HashMap<DocumentId, Document>> = RefCell::new(HashMap::new());
+}
+
+struct Settings {
+  max_line_length: usize,
+  severity: Severity,
+}
+
+/// Read on every check, so changed settings apply on the next edit.
+fn settings() -> Settings {
+  let max_line_length = match host::configuration("max_line_length") {
+    Some(ConfigValue::Integer(value)) => usize::try_from(value).unwrap_or(0),
+    _ => 100,
+  };
+  let severity = match host::configuration("severity") {
+    Some(ConfigValue::Text(value)) => match value.as_str() {
+      "error" => Severity::Error,
+      "information" => Severity::Information,
+      "hint" => Severity::Hint,
+      _ => Severity::Warning,
+    },
+    _ => Severity::Warning,
+  };
+  Settings {
+    max_line_length,
+    severity,
+  }
+}
+
+fn column(value: usize) -> u32 {
+  u32::try_from(value).unwrap_or(u32::MAX)
+}
+
+fn check_line(text: &str, settings: &Settings) -> Vec<Problem> {
+  let mut problems = Vec::new();
+  let trimmed = text.trim_end_matches([' ', '\t']);
+  if trimmed.len() < text.len() {
+    problems.push(Problem {
+      start: column(trimmed.len()),
+      end: column(text.len()),
+      kind: Kind::TrailingWhitespace,
+    });
+  }
+  let limit = settings.max_line_length;
+  if limit > 0
+    && let Some((start, _)) = text.char_indices().nth(limit)
+  {
+    problems.push(Problem {
+      start: column(start),
+      end: column(text.len()),
+      kind: Kind::TooLong {
+        length: text.chars().count(),
+        limit,
+      },
+    });
+  }
+  problems
+}
+
+/// Line breaks in `text`: `\r\n`, `\n`, or `\r`.
+fn line_breaks(text: &str) -> usize {
+  let bytes = text.as_bytes();
+  let mut count = 0;
+  let mut i = 0;
+  while i < bytes.len() {
+    match bytes[i] {
+      b'\r' if bytes.get(i + 1) == Some(&b'\n') => {
+        count += 1;
+        i += 1;
+      }
+      b'\r' | b'\n' => count += 1,
+      _ => {}
+    }
+    i += 1;
+  }
+  count
+}
+
+fn describe(error: &ApiError) -> String {
+  match error {
+    ApiError::PermissionDenied(Permission::DocumentsRead) => {
+      "Tidy is not allowed to read documents (see the Extensions view)".into()
+    }
+    ApiError::PermissionDenied(Permission::DocumentsWrite) => {
+      "Tidy is not allowed to edit documents (see the Extensions view)".into()
+    }
+    ApiError::UnknownDocument => "the document is no longer open".into(),
+    ApiError::StaleVersion(version) => format!("the document changed (now version {version})"),
+    ApiError::InvalidRange(message)
+    | ApiError::TooLarge(message)
+    | ApiError::InvalidArgument(message) => message.clone(),
+  }
+}
+
+fn position(line: u32, column: u32) -> Position {
+  Position { line, column }
+}
+
+/// Checks the document's unchecked lines and publishes its problems.
+fn refresh(id: DocumentId) {
+  let settings = settings();
+  DOCUMENTS.with_borrow_mut(|documents| {
+    let Some(document) = documents.get_mut(&id) else {
+      return;
+    };
+    let mut line = 0;
+    while line < document.lines.len() {
+      if document.lines[line].is_some() {
+        line += 1;
+        continue;
+      }
+      let start = line;
+      while line < document.lines.len()
+        && document.lines[line].is_none()
+        && line - start < CHUNK_LINES as usize
+      {
+        line += 1;
+      }
+      let slice = match host::read_lines(id, column(start), column(line)) {
+        Ok(slice) => slice,
+        Err(error) => {
+          host::log(
+            LogLevel::Warn,
+            &format!("could not read lines: {}", describe(&error)),
+          );
+          return;
+        }
+      };
+      // Newer changes are on their way; check again when they arrive.
+      if slice.version != document.version {
+        return;
+      }
+      for (offset, text) in slice.lines.iter().enumerate() {
+        if let Some(state) = document.lines.get_mut(start + offset) {
+          *state = Some(check_line(text, &settings));
+        }
+      }
+    }
+    publish(id, document, &settings);
+  });
+}
+
+fn publish(id: DocumentId, document: &Document, settings: &Settings) {
+  let diagnostics: Vec<Diagnostic> = document
+    .lines
+    .iter()
+    .enumerate()
+    .flat_map(|(line, problems)| {
+      problems
+        .iter()
+        .flatten()
+        .map(move |problem| (column(line), *problem))
+    })
+    .take(MAX_DIAGNOSTICS)
+    .map(|(line, problem)| {
+      let (message, code) = match problem.kind {
+        Kind::TrailingWhitespace => ("Trailing whitespace".to_owned(), "trailing-whitespace"),
+        Kind::TooLong { length, limit } => (
+          format!("Line is {length} characters long (limit {limit})"),
+          "line-too-long",
+        ),
+      };
+      Diagnostic {
+        range: Range {
+          start: position(line, problem.start),
+          end: position(line, problem.end),
+        },
+        severity: settings.severity,
+        message,
+        code: Some(code.to_owned()),
+      }
+    })
+    .collect();
+  if let Err(error) = host::publish_diagnostics(id, document.version, &diagnostics) {
+    host::log(
+      LogLevel::Debug,
+      &format!("diagnostics not published: {}", describe(&error)),
+    );
+  }
+}
+
+/// Applies `changes` to the per-line state. Returns `false` if they don't
+/// fit it, and the document should be checked from scratch.
+fn apply_changes(document: &mut Document, change: &DocumentChange) -> bool {
+  let Some(changes) = &change.changes else {
+    return false;
+  };
+  for change in changes {
+    let start = change.range.start.line as usize;
+    let end = change.range.end.line as usize;
+    if end < start || end >= document.lines.len() {
+      return false;
+    }
+    let added = line_breaks(&change.text) + 1;
+    document
+      .lines
+      .splice(start..=end, std::iter::repeat_n(None, added));
+  }
+  true
+}
+
+/// Trims trailing whitespace from every line as one edit. Returns a message
+/// for the user.
+fn trim(id: DocumentId) -> Result<String, String> {
+  'attempt: for _ in 0..ATTEMPTS {
+    let info = host::document(id).map_err(|error| describe(&error))?;
+    let mut edits = Vec::new();
+    let mut start = 0;
+    while start < info.line_count {
+      let slice =
+        host::read_lines(id, start, start + CHUNK_LINES).map_err(|error| describe(&error))?;
+      if slice.version != info.version {
+        continue 'attempt;
+      }
+      for (offset, line) in slice.lines.iter().enumerate() {
+        let trimmed = line.trim_end_matches([' ', '\t']);
+        if trimmed.len() < line.len() {
+          let line_number = start + column(offset);
+          edits.push(TextEdit {
+            range: Range {
+              start: position(line_number, column(trimmed.len())),
+              end: position(line_number, column(line.len())),
+            },
+            text: String::new(),
+          });
+        }
+      }
+      if slice.lines.is_empty() {
+        break;
+      }
+      start += column(slice.lines.len());
+    }
+    if edits.is_empty() {
+      return Ok("No trailing whitespace found.".into());
+    }
+    match host::apply_edits(id, info.version, &edits) {
+      Ok(_) => {
+        let lines = if edits.len() == 1 { "line" } else { "lines" };
+        return Ok(format!(
+          "Trimmed trailing whitespace from {} {lines}.",
+          edits.len()
+        ));
+      }
+      Err(ApiError::StaleVersion(_)) => continue,
+      Err(error) => return Err(describe(&error)),
+    }
+  }
+  Err("The document kept changing; try again.".into())
+}
+
+/// Counts words in the primary selection, or the whole document.
+fn count_words(id: DocumentId, context: &CommandContext) -> Result<String, String> {
+  if let Some(selection) = context.selections.first()
+    && (selection.start.line, selection.start.column) != (selection.end.line, selection.end.column)
+  {
+    let text = host::read_range(id, *selection).map_err(|error| describe(&error))?;
+    let words = text.text.split_whitespace().count();
+    return Ok(format!("{words} words in the selection."));
+  }
+  let info = host::document(id).map_err(|error| describe(&error))?;
+  let mut words = 0;
+  let mut start = 0;
+  while start < info.line_count {
+    let slice =
+      host::read_lines(id, start, start + CHUNK_LINES).map_err(|error| describe(&error))?;
+    words += slice
+      .lines
+      .iter()
+      .map(|line| line.split_whitespace().count())
+      .sum::<usize>();
+    if slice.lines.is_empty() {
+      break;
+    }
+    start += column(slice.lines.len());
+  }
+  Ok(format!("{words} words in {} lines.", info.line_count))
+}
+
+struct Tidy;
+
+impl Guest for Tidy {
+  fn activate(context: Activation) -> Result<(), String> {
+    if !context.granted.contains(&Permission::DocumentsRead) {
+      host::log(
+        LogLevel::Info,
+        "not allowed to read documents; problems will not be shown",
+      );
+    }
+    Ok(())
+  }
+
+  fn deactivate() {
+    DOCUMENTS.with_borrow_mut(HashMap::clear);
+  }
+
+  fn run_command(command: String, context: CommandContext) -> Result<(), String> {
+    let Some(id) = context.document else {
+      return Err("Open a document first.".into());
+    };
+    let message = match command.as_str() {
+      "example.tidy.trimTrailingWhitespace" => trim(id)?,
+      "example.tidy.countWords" => count_words(id, &context)?,
+      _ => return Err(format!("unknown command {command}")),
+    };
+    host::show_message(MessageLevel::Info, &message);
+    Ok(())
+  }
+
+  fn document_opened(document: DocumentInfo) {
+    DOCUMENTS.with_borrow_mut(|documents| {
+      documents.insert(
+        document.id,
+        Document {
+          lines: vec![None; document.line_count as usize],
+          version: document.version,
+        },
+      );
+    });
+    refresh(document.id);
+  }
+
+  fn document_changed(change: DocumentChange) {
+    let fits = DOCUMENTS.with_borrow_mut(|documents| {
+      let Some(document) = documents.get_mut(&change.document) else {
+        return true;
+      };
+      document.version = change.version;
+      apply_changes(document, &change)
+    });
+    if !fits {
+      // Start over from the document as it is now.
+      match host::document(change.document) {
+        Ok(info) => Self::document_opened(info),
+        Err(error) => host::log(LogLevel::Warn, &describe(&error)),
+      }
+      return;
+    }
+    refresh(change.document);
+  }
+
+  fn document_closed(document: DocumentId) {
+    DOCUMENTS.with_borrow_mut(|documents| documents.remove(&document));
+  }
+}
+
+export_extension!(Tidy);
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+
+  fn settings(max_line_length: usize) -> Settings {
+    Settings {
+      max_line_length,
+      severity: Severity::Warning,
+    }
+  }
+
+  #[test]
+  fn finds_trailing_whitespace_and_long_lines() {
+    let problems = check_line("let x = 1;  \t", &settings(10));
+    assert_eq!(problems.len(), 2);
+    assert_eq!((problems[0].start, problems[0].end), (10, 13));
+    assert_eq!((problems[1].start, problems[1].end), (10, 13));
+    assert!(check_line("fine", &settings(10)).is_empty());
+    assert!(check_line("long line here", &settings(0)).is_empty());
+  }
+
+  #[test]
+  fn counts_columns_in_bytes_and_limits_in_characters() {
+    let problems = check_line("ééééé", &settings(3));
+    assert_eq!((problems[0].start, problems[0].end), (6, 10));
+  }
+
+  #[test]
+  fn counts_each_kind_of_line_break_once() {
+    assert_eq!(line_breaks("a\r\nb\nc\rd"), 3);
+    assert_eq!(line_breaks("no breaks"), 0);
+  }
+}

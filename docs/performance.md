@@ -18,6 +18,7 @@ compare against, not claims about other machines or other editors.
 | End-to-end: startup and idle memory            | `pnpm tauri build --no-bundle`, then `pnpm bench:app startup`                    |
 | End-to-end: typing latency                     | `pnpm bench:app typing`                                                          |
 | End-to-end: typing in a source file            | `pnpm bench:app typing --file path/to/file.rs`                                   |
+| End-to-end, with your extensions loaded        | add `--extensions` (runs skip extensions otherwise)                              |
 | End-to-end: large-document scrolling           | `pnpm bench:app scroll`                                                          |
 | End-to-end: opening a file                     | `pnpm bench:app open --file path/to/file`                                        |
 | Live statistics while using the app            | Command palette → **Developer: Toggle Performance Overlay**                      |
@@ -182,6 +183,44 @@ Typing in the middle of a 676-line Rust file (a copy of
   process tree used about 2 GB resident, against about 90 MB for Ferrite's
   own process.
 
+## Milestone 6: WebAssembly extensions
+
+Same machine and method, measured on 2026-10-24. Both builds ran back to back on the same day,
+because frame timing shifts between days:
+
+- **Previous build:** Milestone 5 plus the Ctrl+hover change (commit `9228323`).
+- **Milestone 6:** with and without the example extension, Tidy, active.
+
+For the Tidy runs, Tidy was loaded as a development extension with both permissions granted. It
+reads every open document (including the 200,000-line benchmark document) and republishes
+diagnostics after every change.
+
+| Measurement                                   | Previous build  | Milestone 6         | Milestone 6 + Tidy |
+| --------------------------------------------- | --------------- | ------------------- | ------------------ |
+| Startup, later runs (median of 4, two series) | 454 / 465 ms    | 453 / 407 ms        | 468 ms             |
+| Idle memory, whole process tree               | 358–361 MB      | 356–359 MB          | 371 MB             |
+| Idle memory, app process                      | 33 MB           | 31–33 MB            | 44 MB              |
+| Binary size (`ferrite.exe`)                   | 20.7 MB         | 37.3 MB             | —                  |
+| Keystroke → painted, small document           | 13.3 ms p50     | 13.3 ms p50         | 13.3 ms p50        |
+| Keystroke → painted, p95                      | 14.0–14.1 ms    | 13.9–14.1 ms        | 13.8 ms            |
+| Backend `editor_apply` p50 / p95              | 0.115 / 0.35 ms | 0.13 / 0.37–0.40 ms | 0.18 / 0.47 ms     |
+| App memory after the typing benchmark         | 82 MB           | 82 MB               | 97 MB              |
+
+- **Startup and idle memory** are unchanged. Startup was also slower than the Milestone 5
+  numbers on the measurement day for the previous build itself (454–465 ms against 349 ms), so
+  that difference comes from this machine, not from this milestone.
+- **Extensions cost nothing until they activate.** Loading Tidy (read, componentize, compile,
+  instantiate, activate) took 14–20 ms, on its own thread.
+- **Typing stays at one frame** with an extension active. The backend's extra work per keystroke
+  is queueing the change: about 0.01–0.02 ms without extensions and about 0.07 ms with Tidy.
+  Tidy's own work runs on its thread.
+- **Extra views.** Each diagnostics update makes the frontend refresh the active editor, so with
+  Tidy every keystroke is followed by one extra `editor_view` (p50 0.10 ms, p95 0.25 ms; 948
+  in the run against 5 without Tidy). That is the main cost of an extension that republishes
+  diagnostics on every change.
+- **Binary size** grew by 16.6 MB, almost all Wasmtime's Cranelift compiler. Thin LTO or
+  caching compiled extensions are options if size matters; neither is enabled.
+
 ## Optimizations made from these measurements
 
 1. **Parallel find in files.** On one thread, searching 10,000 small files took
@@ -196,6 +235,11 @@ Typing in the middle of a 676-line Rust file (a copy of
 3. **Background match counting.** Counting every find match in a large
    document would scan it on every keystroke. Documents over 1 MiB show
    visible matches at once and count on the worker pool.
+4. **Cheap extension sync.** Every view syncs the document with the extension
+   host. The first version rebuilt the document's description and change list
+   each time. Now views that change nothing return early, and change lists
+   are built only when a running extension reads documents. Without
+   extensions, the remaining cost is 0.01–0.02 ms per keystroke.
 
 One hypothesis turned out to be wrong. Removing an extra animation-frame wait
 before fetching lines on scroll didn't change page-jump latency; the two

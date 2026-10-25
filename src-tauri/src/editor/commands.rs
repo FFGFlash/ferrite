@@ -22,6 +22,7 @@ use super::protocol::{
 };
 use crate::dialogs::{self, UnsavedChoice};
 use crate::error::CommandError;
+use crate::extensions::ExtensionsState;
 use crate::lsp::LspState;
 use crate::paths;
 use crate::perf::Perf;
@@ -33,11 +34,16 @@ pub fn document_list(state: State<'_, EditorState>) -> Vec<DocumentSummary> {
 }
 
 #[tauri::command]
-pub fn document_new(state: State<'_, EditorState>) -> Result<DocumentSummary, CommandError> {
+pub fn document_new(
+  app: AppHandle,
+  state: State<'_, EditorState>,
+) -> Result<DocumentSummary, CommandError> {
   let mut editor = state.lock();
   let id = editor.create_untitled();
   tracing::info!(document = %id, "created untitled document");
-  Ok(DocumentSummary::of(editor.document(id)?))
+  let document = editor.document(id)?;
+  app.state::<ExtensionsState>().sync(document);
+  Ok(DocumentSummary::of(document))
 }
 
 #[tauri::command]
@@ -103,6 +109,7 @@ pub async fn document_close(window: WebviewWindow, id: u64) -> Result<bool, Comm
   state.counts.forget(id);
   state.syntax.forget(id);
   window.state::<LspState>().close(id);
+  window.state::<ExtensionsState>().closed(id);
   tracing::info!(document = %id, "closed document");
   ui_state::record_open_files(window.app_handle());
   Ok(true)
@@ -121,7 +128,9 @@ fn build_view(
 ) -> EditorView {
   let state = app.state::<EditorState>();
   let lsp = app.state::<LspState>();
+  let extensions = app.state::<ExtensionsState>();
   lsp.sync(app, document);
+  extensions.sync(document);
   let mut view = EditorView::of(
     document,
     viewport,
@@ -137,7 +146,14 @@ fn build_view(
     },
     |lines, chunks| state.syntax.highlights(app, document, lines, known, chunks),
   );
-  (view.diagnostics, view.language) = lsp.view(document, view.start_line..view.end_line);
+  let lines = view.start_line..view.end_line;
+  (view.diagnostics, view.language) = lsp.view(document, lines.clone());
+  extensions.add_to_view(
+    document,
+    lines,
+    &mut view.diagnostics,
+    view.language.as_mut(),
+  );
   view
 }
 
@@ -283,7 +299,9 @@ async fn open_path(app: &AppHandle, path: &Path) -> Result<DocumentSummary, Comm
   let bytes = loaded.text.len();
   let id = editor.open(path.clone(), loaded);
   tracing::info!(document = %id, path = %path.display(), bytes, "opened file");
-  let summary = DocumentSummary::of(editor.document(id)?);
+  let document = editor.document(id)?;
+  app.state::<ExtensionsState>().sync(document);
+  let summary = DocumentSummary::of(document);
   drop(editor);
   ui_state::record_open_files(app);
   Ok(summary)

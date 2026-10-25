@@ -1,0 +1,83 @@
+# Used by the extension host's integration tests, which write variants of
+# this manifest (other permissions or settings) next to a copy of the .wasm.
+id = "test.misbehaving"
+name = "Misbehaving"
+version = "0.1.0"
+description = "Breaks rules and limits on request."
+api_version = "1"
+entrypoint = "../../target/wasm32-unknown-unknown/release/misbehaving.wasm"
+
+[permissions]
+documents_read = true
+documents_write = true
+
+[[commands]]
+id = "test.misbehaving.loop"
+title = "Loop Forever"
+
+[[commands]]
+id = "test.misbehaving.alloc"
+title = "Allocate Without Limit"
+
+[[commands]]
+id = "test.misbehaving.panic"
+title = "Panic"
+
+[[commands]]
+id = "test.misbehaving.recurse"
+title = "Recurse Without Limit"
+
+[[commands]]
+id = "test.misbehaving.escape"
+title = "Try the Filesystem and Environment"
+
+[[commands]]
+id = "test.misbehaving.edit"
+title = "Insert at the Start"
+
+[[commands]]
+id = "test.misbehaving.editStale"
+title = "Edit an Old Version"
+
+[[commands]]
+id = "test.misbehaving.editBadRange"
+title = "Edit Outside the Document"
+
+[[commands]]
+id = "test.misbehaving.editOverlapping"
+title = "Make Overlapping Edits"
+
+[[commands]]
+id = "test.misbehaving.read"
+title = "Read the First Line"
+
+[[commands]]
+id = "test.misbehaving.flood"
+title = "Flood the Log and Diagnostics"
+
+[[commands]]
+id = "test.misbehaving.diagnose"
+title = "Publish a Diagnostic"
+
+[[commands]]
+id = "test.misbehaving.config"
+title = "Report Configuration"
+
+[configuration.on_activate]
+type = "string"
+default = "ok"
+choices = ["ok", "error", "loop"]
+description = "What activation does."
+
+[configuration.on_change]
+type = "string"
+default = "report"
+choices = ["report", "loop"]
+description = "What a document change does."
+
+[configuration.limit]
+type = "integer"
+default = 3
+minimum = 1
+maximum = 10
+description = "A number to report."

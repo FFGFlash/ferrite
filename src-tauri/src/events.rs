@@ -7,6 +7,7 @@
 
 use std::sync::{Mutex, PoisonError};
 
+use ferrite_extension_host::MessageLevel;
 use serde::Serialize;
 use tauri::ipc::Channel;
 use tauri::{AppHandle, Manager, State};
@@ -66,6 +67,24 @@ pub enum AppEvent {
     indexing: bool,
     files: usize,
     truncated: bool,
+  },
+  /// Extensions were loaded or changed state.
+  ExtensionsChanged,
+  /// An extension asked to show a message.
+  ExtensionMessage {
+    extension: String,
+    level: MessageLevel,
+    message: String,
+  },
+  /// An extension failed and was stopped.
+  ExtensionFailed {
+    id: String,
+    name: String,
+    reason: String,
+  },
+  /// An extension edited a document.
+  DocumentEdited {
+    document_id: u64,
   },
 }
 

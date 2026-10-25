@@ -1,5 +1,6 @@
 //! End-to-end benchmark support, active only when Ferrite is started with
-//! `--bench <name> [file]` (see `scripts/bench.mjs`).
+//! `--bench <name> [file]` (see `scripts/bench.mjs`). Extensions are not
+//! loaded unless `--bench-extensions` is given too.
 //!
 //! The frontend reads the requested benchmark at startup, runs it against the
 //! real editor (IPC, rendering, and all), and reports its measurements. The
@@ -24,6 +25,8 @@ const EXIT_DELAY: Duration = Duration::from_millis(1500);
 pub struct BenchState {
   name: Option<String>,
   file: Option<PathBuf>,
+  /// `--bench-extensions`: load extensions, which benchmarks skip otherwise.
+  extensions: bool,
   launched_at: Instant,
 }
 
@@ -39,12 +42,17 @@ impl BenchState {
     Self {
       name,
       file,
+      extensions: args.iter().any(|arg| arg == "--bench-extensions"),
       launched_at,
     }
   }
 
   pub fn active(&self) -> bool {
     self.name.is_some()
+  }
+
+  pub fn with_extensions(&self) -> bool {
+    self.extensions
   }
 
   /// Arguments consumed by `--bench`, so they are not opened as files.

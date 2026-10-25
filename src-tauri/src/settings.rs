@@ -57,6 +57,18 @@ const TEMPLATE: &str = r#"# Ferrite settings. Uncomment a line to change it; sav
 # args = ["--stdio"]
 # languages = ["python"]
 # root_markers = ["pyproject.toml"]
+
+[extensions]
+# WebAssembly extensions. Installed extensions are folders in "extensions"
+# next to this file. Each asks before using the permissions it requests.
+# enabled = true
+#
+# Folders of extensions under development, loaded in place:
+# development = ["C:/code/my-extension"]
+#
+# Settings that extensions declare, by extension id:
+# [extensions.settings."example.tidy"]
+# max_line_length = 120
 "#;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
@@ -76,6 +88,27 @@ pub struct Settings {
   pub files: FilesSettings,
   pub search: SearchSettings,
   pub lsp: LspSettings,
+  pub extensions: ExtensionsSettings,
+}
+
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct ExtensionsSettings {
+  pub enabled: bool,
+  /// Folders of development extensions.
+  pub development: Vec<String>,
+  /// Values for the settings extensions declare, by extension id.
+  pub settings: BTreeMap<String, toml::Table>,
+}
+
+impl Default for ExtensionsSettings {
+  fn default() -> Self {
+    Self {
+      enabled: true,
+      development: Vec::new(),
+      settings: BTreeMap::new(),
+    }
+  }
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize)]
@@ -200,6 +233,14 @@ impl Settings {
           known.join(", ")
         ));
       }
+    }
+    if self
+      .extensions
+      .development
+      .iter()
+      .any(|folder| folder.trim().is_empty())
+    {
+      return Err("extensions.development entries must be folder paths".into());
     }
     Ok(())
   }
@@ -343,6 +384,7 @@ fn apply(app: &AppHandle, previous: &Settings, settings: &Settings) {
   if previous.lsp != settings.lsp {
     app.state::<crate::lsp::LspState>().restart_all(app);
   }
+  crate::extensions::settings_changed(app, previous, settings);
   events::emit(
     app,
     AppEvent::SettingsChanged {
@@ -390,6 +432,26 @@ pub fn settings_file(state: State<'_, SettingsState>) -> Result<String, CommandE
 /// formatting, and applies it.
 #[tauri::command]
 pub fn settings_set_theme(app: AppHandle, theme: Theme) -> Result<(), CommandError> {
+  let name = match theme {
+    Theme::System => "system",
+    Theme::Dark => "dark",
+    Theme::Light => "light",
+  };
+  edit(&app, |document| {
+    if !document.contains_table("workbench") {
+      document["workbench"] = toml_edit::table();
+    }
+    document["workbench"]["theme"] = toml_edit::value(name);
+    Ok(())
+  })
+}
+
+/// Changes the settings file with `change`, keeping its comments and
+/// formatting, and applies the result.
+pub fn edit(
+  app: &AppHandle,
+  change: impl FnOnce(&mut toml_edit::DocumentMut) -> Result<(), String>,
+) -> Result<(), CommandError> {
   let path = PathBuf::from(settings_file(app.state())?);
   let text = std::fs::read_to_string(&path)
     .map_err(|error| CommandError::new("settings", format!("Could not read settings: {error}")))?;
@@ -399,18 +461,10 @@ pub fn settings_set_theme(app: AppHandle, theme: Theme) -> Result<(), CommandErr
       format!("Settings file is invalid: {error}"),
     )
   })?;
-  let name = match theme {
-    Theme::System => "system",
-    Theme::Dark => "dark",
-    Theme::Light => "light",
-  };
-  if !document.contains_table("workbench") {
-    document["workbench"] = toml_edit::table();
-  }
-  document["workbench"]["theme"] = toml_edit::value(name);
+  change(&mut document).map_err(|message| CommandError::new("invalidSettings", message))?;
   std::fs::write(&path, document.to_string())
     .map_err(|error| CommandError::new("settings", format!("Could not write settings: {error}")))?;
-  reload(&app)
+  reload(app)
 }
 
 #[cfg(test)]
@@ -445,6 +499,27 @@ mod tests {
     let server =
       Settings::parse("[lsp.servers.mine]\ncommand = \"x\"\n").expect_err("no languages");
     assert!(server.contains("lsp.servers.mine"), "{server}");
+  }
+
+  #[test]
+  fn parses_extension_settings() {
+    let settings = Settings::parse(
+      r#"
+[extensions]
+development = ["C:/code/tidy"]
+[extensions.settings."example.tidy"]
+max_line_length = 80
+"#,
+    )
+    .expect("valid");
+    assert!(settings.extensions.enabled);
+    assert_eq!(settings.extensions.development, ["C:/code/tidy"]);
+    assert_eq!(
+      settings.extensions.settings["example.tidy"]["max_line_length"].as_integer(),
+      Some(80)
+    );
+    let empty = Settings::parse("[extensions]\ndevelopment = [\" \"]\n").expect_err("empty path");
+    assert!(empty.contains("extensions.development"), "{empty}");
   }
 
   #[test]

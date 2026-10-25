@@ -2,7 +2,8 @@
 import { activeEditor } from "../editor/activeEditor";
 import { subscribeToEvents, type AppEvent } from "../ipc/workspace";
 import { applySettings } from "./appearance";
-import { documentsStore, updateSummary } from "./documents";
+import { documentsStore, setDirty, updateSummary } from "./documents";
+import { refreshExtensions, showExtensionFailure, showExtensionMessage } from "./extensions";
 import { notify } from "./notifications";
 import { refreshDirectories, setIndexing, setWorkspace } from "./workspace";
 
@@ -55,6 +56,23 @@ export function handleEvent(event: AppEvent): void {
     case "indexStatus":
       setIndexing(event.indexing);
       break;
+    case "extensionsChanged":
+      void refreshExtensions();
+      break;
+    case "extensionMessage":
+      showExtensionMessage(event.extension, event.level, event.message);
+      break;
+    case "extensionFailed":
+      showExtensionFailure(event.id, event.name, event.reason);
+      break;
+    case "documentEdited": {
+      setDirty(event.documentId, true);
+      const editor = activeEditor.get();
+      if (editor?.documentId === event.documentId) {
+        editor.refresh();
+      }
+      break;
+    }
   }
 }
 

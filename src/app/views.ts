@@ -1,6 +1,7 @@
 import type { ComponentType } from "react";
 import type { IconName } from "../components/Icon";
 import { ExplorerActions, ExplorerPanel } from "../panels/ExplorerPanel";
+import { ExtensionsActions, ExtensionsPanel } from "../panels/ExtensionsPanel";
 import { SearchPanel } from "../panels/SearchPanel";
 
 /**
@@ -34,5 +35,13 @@ export const builtinViews: readonly ViewDescriptor[] = [
     icon: "search",
     component: SearchPanel,
     command: "workbench.showSearch",
+  },
+  {
+    id: "extensions",
+    title: "Extensions",
+    icon: "extensions",
+    component: ExtensionsPanel,
+    actions: ExtensionsActions,
+    command: "workbench.showExtensions",
   },
 ];

@@ -1,6 +1,8 @@
 [workspace]
 resolver = "3"
 members = ["benches", "crates/*", "src-tauri"]
+# Extensions build for wasm32 in their own workspace.
+exclude = ["extensions"]
 
 [workspace.package]
 version = "0.1.0"
@@ -9,6 +11,7 @@ license = "MIT OR Apache-2.0"
 
 [workspace.dependencies]
 ferrite-core = { path = "crates/ferrite-core" }
+ferrite-extension-host = { path = "crates/ferrite-extension-host" }
 ferrite-lsp = { path = "crates/ferrite-lsp" }
 ferrite-syntax = { path = "crates/ferrite-syntax" }
 ferrite-tasks = { path = "crates/ferrite-tasks" }
@@ -25,6 +28,7 @@ nucleo-matcher = "0.3.1"
 regex-automata = "0.4.18"
 regex-cursor = "0.1.5"
 regex-syntax = "0.8.11"
+semver = "1.0.28"
 toml = "1.1.8"
 toml_edit = "0.25.17"
 # Only LF, CR and CRLF break lines (matching LSP), not Unicode line separators.
@@ -49,6 +53,11 @@ tree-sitter-typescript = "0.23.2"
 tracing-appender = "0.2.5"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter", "fmt"] }
 unicode-segmentation = "1.13.3"
+# Only what extensions need: compiling and running components. No WASI,
+# GC, threads, or async.
+wasmtime = { version = "50.0.0", default-features = false, features = ["anyhow", "component-model", "cranelift", "parallel-compilation", "runtime", "std"] }
+wat = "1.262.0"
+wit-component = { version = "0.262.0", default-features = false }
 
 [workspace.lints.rust]
 unsafe_code = "deny"

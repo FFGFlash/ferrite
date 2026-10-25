@@ -1,7 +1,9 @@
 use std::fmt;
 use std::path::{Path, PathBuf};
 
-use ferrite_text::{Bias, ChangeSet, Edit, LineEnding, TextBuffer, TextSnapshot, Version};
+use ferrite_text::{
+  Bias, ChangeSet, Edit, LineEnding, TextBuffer, TextSnapshot, Version, normalize_line_endings,
+};
 use ferrite_workspace::FileStamp;
 
 use crate::error::CoreError;
@@ -232,6 +234,38 @@ impl Document {
     Ok(changed)
   }
 
+  /// Applies edits made outside the editor (e.g. by an extension) as one
+  /// undoable change. Line breaks in inserted text are converted to the
+  /// document's line ending; selections move with the text. Returns whether
+  /// the text changed.
+  pub fn apply_edits(&mut self, edits: Vec<Edit>) -> Result<bool, CoreError> {
+    let edits = edits
+      .into_iter()
+      .map(|edit| {
+        let text = normalize_line_endings(&edit.text, self.line_ending).into_owned();
+        Edit::new(edit.range, text)
+      })
+      .collect();
+    let changes = ChangeSet::new(edits)?;
+    if changes.edits().iter().all(Edit::is_noop) {
+      return Ok(false);
+    }
+    let before = self.selections.clone();
+    let inverse = self.buffer.apply(&changes)?;
+    let after = before.map(|s| {
+      Selection::new(
+        changes.map_offset(s.anchor, Bias::After),
+        changes.map_offset(s.head, Bias::After),
+      )
+    });
+    self.selections = after.clone();
+    self
+      .history
+      .record(changes, inverse, before, after, EditKind::Other, false);
+    self.history.seal();
+    Ok(true)
+  }
+
   pub(crate) fn set_indentation(&mut self, tab_size: usize, insert_spaces: bool) {
     self.tab_size = tab_size.max(1);
     self.insert_spaces = insert_spaces;
@@ -411,5 +445,30 @@ tail",
         .expect("reloads")
     );
     assert!(!document.is_dirty());
+  }
+
+  #[test]
+  fn external_edits_are_one_undo_step_with_document_line_endings() {
+    let config = EditorConfig::default();
+    let mut document = Document::new(DocumentId(1), "one\r\ntwo\r\n", None, 0, &config);
+    document.selections = Selections::single(Selection::cursor(5));
+    let edits = vec![Edit::new(0..3, "ONE\nAND"), Edit::insert(10, "three")];
+    assert!(document.apply_edits(edits).expect("applies"));
+    assert_eq!(document.buffer().contents(), "ONE\r\nAND\r\ntwo\r\nthree");
+    assert_eq!(
+      document.selections().primary().head,
+      10,
+      "the cursor stays on its text"
+    );
+    document.apply(crate::EditorOp::Undo).expect("undoes");
+    assert_eq!(document.buffer().contents(), "one\r\ntwo\r\n");
+
+    let overlapping = vec![Edit::new(0..2, "a"), Edit::new(1..3, "b")];
+    assert!(document.apply_edits(overlapping).is_err());
+    assert!(
+      !document
+        .apply_edits(vec![Edit::new(1..1, "")])
+        .expect("no-op")
+    );
   }
 }

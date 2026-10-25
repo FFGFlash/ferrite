@@ -1,0 +1,169 @@
+.extensions-panel {
+  margin: 0;
+  padding: 0 var(--space-2) var(--space-2);
+  list-style: none;
+}
+
+.extensions-panel__empty {
+  padding: 0 var(--space-4);
+  color: var(--color-text-muted);
+  line-height: 1.5;
+}
+
+.extensions-panel__button {
+  padding: 2px var(--space-2);
+  border: 1px solid var(--color-input-border);
+  border-radius: var(--radius-control);
+  background: none;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.extensions-panel__button:hover:not(:disabled) {
+  background: var(--color-control-hover-background);
+}
+
+.extensions-panel__button:disabled,
+.extension__command:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.extension {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-2);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.extension__header {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.extension__name {
+  overflow: hidden;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.extension__version,
+.extension__path {
+  color: var(--color-text-muted);
+  font-size: var(--font-size-ui-small);
+}
+
+.extension__badge {
+  padding: 0 var(--space-1);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-control);
+  color: var(--color-text-muted);
+  font-size: var(--font-size-ui-small);
+}
+
+.extension__state {
+  margin-left: auto;
+  color: var(--color-text-muted);
+  font-size: var(--font-size-ui-small);
+  white-space: nowrap;
+}
+
+.extension[data-state="active"] .extension__state {
+  color: var(--color-text);
+}
+
+.extension[data-state="failed"] .extension__state,
+.extension[data-state="invalid"] .extension__state {
+  color: var(--color-error);
+}
+
+.extension[data-state="awaitingPermission"] .extension__state {
+  color: var(--color-diagnostic-warning);
+}
+
+.extension__description,
+.extension__error,
+.extension__warning {
+  margin: 0;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+.extension__error {
+  color: var(--color-error);
+}
+
+.extension__warning {
+  color: var(--color-diagnostic-warning);
+}
+
+.extension__permissions {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  margin: 0;
+  padding: 0;
+  border: none;
+}
+
+.extension__permissions legend {
+  margin-bottom: var(--space-1);
+  padding: 0;
+  color: var(--color-text-muted);
+  font-size: var(--font-size-ui-small);
+}
+
+.extension__permission {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  line-height: 1.4;
+  cursor: pointer;
+}
+
+.extension__permission em {
+  color: var(--color-diagnostic-warning);
+  font-style: normal;
+}
+
+.extension__commands {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+}
+
+.extension__command {
+  padding: 2px var(--space-2);
+  border: none;
+  border-radius: var(--radius-control);
+  background: var(--color-button-background);
+  color: var(--color-button-foreground);
+  font: inherit;
+  cursor: pointer;
+}
+
+.extension__command:hover:not(:disabled) {
+  background: var(--color-button-hover-background);
+}
+
+.extension__footer {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.extension__path {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  direction: rtl;
+  text-align: left;
+}

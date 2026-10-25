@@ -3,10 +3,10 @@
 A fast, memory-efficient, extensible code editor built with Rust, Tauri, React, and a sandboxed
 WebAssembly extension system.
 
-> **Status:** Milestone 5 (syntax and language servers) is complete: Tree-sitter highlighting
-> for six languages, and diagnostics, hover, go to definition, and completion through language
-> servers such as rust-analyzer. Extensions come in Milestone 6. See
-> [`docs/DESIGN.md`](docs/DESIGN.md) for the full brief and milestone plan, and
+> **Status:** Milestone 6 (WebAssembly extensions) is complete: sandboxed extensions can add
+> commands, read and edit documents through a validated API, and publish diagnostics, with
+> permissions the user grants and enforced resource limits. The customizable workbench comes in
+> Milestone 7. See [`docs/DESIGN.md`](docs/DESIGN.md) for the full brief and milestone plan, and
 > [`docs/performance.md`](docs/performance.md) for measurements.
 
 ## Prerequisites
@@ -19,7 +19,8 @@ WebAssembly extension system.
 | Platform dependencies for Tauri 2                   | see the [Tauri prerequisites][tauri-prereqs] |
 
 On Windows this means the Visual Studio C++ build tools and the WebView2 runtime (preinstalled on
-Windows 11). Linux needs WebKitGTK 4.1 development packages.
+Windows 11). Linux needs WebKitGTK 4.1 development packages. Building extensions, and the
+extension host's tests, also need `rustup target add wasm32-unknown-unknown`.
 
 [tauri-prereqs]: https://v2.tauri.app/start/prerequisites/
 
@@ -51,6 +52,7 @@ preserved exactly, and new lines use the file's existing line ending.
 | Next / previous match               | F3 / Shift+F3 (Enter in find)    | F3 / ⇧F3                 |
 | Add next occurrence                 | Ctrl+D                           | ⌘D                       |
 | Find in files                       | Ctrl+Shift+F                     | ⇧⌘F                      |
+| Extensions view                     | Ctrl+Shift+X                     | ⇧⌘X                      |
 | Explorer / Toggle side bar          | Ctrl+Shift+E / Ctrl+B            | ⇧⌘E / ⌘B                 |
 | Next / previous tab                 | Ctrl+Tab, Ctrl+PageDown / PageUp | ⌃Tab, ⌃PageDown / PageUp |
 | Settings                            | Ctrl+,                           | ⌘,                       |
@@ -94,6 +96,29 @@ characters, or with Ctrl+Space). Servers start when you open a file that needs o
 The status bar shows the server's state; hover it for details if a server is missing or failed.
 Servers can be changed, added, or turned off in the `[lsp]` section of the settings.
 
+## Extensions
+
+Extensions are WebAssembly modules that run in a sandbox: they can only use Ferrite's
+[extension API](crates/ferrite-extension-api/wit/extension.wit). With it they add commands to
+the palette, read open documents, edit them, and show problems as squiggles. They have no access
+to files, the network, or anything else on your computer. Before an extension starts, Ferrite
+asks you to allow the permissions it requests (reading or editing open documents). The
+Extensions view (`Ctrl+Shift+X`) shows each extension's state and permissions, and lets you
+change them, restart an extension, or turn it off. An extension that crashes, loops, or uses too
+much memory is stopped without affecting the editor.
+
+To try the example extension, [Tidy](extensions/tidy/), which flags trailing whitespace and long
+lines and can trim them:
+
+```sh
+rustup target add wasm32-unknown-unknown
+cd extensions && cargo build --release
+```
+
+Then run **Extensions: Load Development Extension…** and choose `extensions/tidy`. To install
+an extension, copy its folder (manifest and `.wasm`) into the `extensions` folder next to
+`settings.toml`. See [`docs/extensions.md`](docs/extensions.md) for writing your own.
+
 ## Workspace
 
 Open a folder with **File: Open Folder…** (command palette or the Explorer). The explorer shows
@@ -119,6 +144,9 @@ exclude = [".git", "dist"]
 
 [lsp.servers.rust-analyzer]
 command = "C:/tools/rust-analyzer.exe"   # use a specific build
+
+[extensions.settings."example.tidy"]
+max_line_length = 120                    # settings an extension declares
 ```
 
 | Platform | Settings                                            | Session state                                       |
@@ -142,6 +170,8 @@ command = "C:/tools/rust-analyzer.exe"   # use a specific build
 | `pnpm bench`                                            | Criterion microbenchmarks (`benches/`)                          |
 | `pnpm bench:app all`                                    | End-to-end startup, typing, and scrolling benchmarks (release)  |
 | `pnpm bench:app typing --file F`                        | Typing benchmark, also typing into file `F` (e.g. a `.rs` file) |
+| `pnpm bench:app typing --extensions`                    | Typing benchmark with your extensions loaded                    |
+| `cd extensions && cargo build --release`                | Build the example and test extensions to WebAssembly            |
 | `cargo test --workspace`                                | Run Rust tests                                                  |
 | `cargo clippy --workspace --all-targets -- -D warnings` | Lint Rust sources                                               |
 
@@ -175,6 +205,8 @@ package.json          Frontend package and scripts
 benches/              Criterion benchmarks and fixtures
 scripts/              End-to-end benchmark harness
 crates/
+  ferrite-extension-api/   Extension API: WIT interface and Rust bindings for extensions
+  ferrite-extension-host/  Extension loading, permissions, sandbox, limits, host functions
   ferrite-tasks/      Background scheduler and timing metrics
   ferrite-syntax/     Tree-sitter grammars, incremental parsing, highlighting
   ferrite-lsp/        Language server client: processes, JSON-RPC, positions, document sync
@@ -187,12 +219,13 @@ src/                  React + TypeScript workbench
   commands/           Command registry, keybindings, fuzzy matching, built-in commands
   components/         Workbench chrome (activity bar, side bar, palette, notifications, ...)
   editor/             Editor view, find widget, hover and completion, tabs, keymap, session
-  panels/             Side bar views (explorer, search)
+  panels/             Side bar views (explorer, search, extensions)
   state/              Small observable stores (documents, workspace, search, layout, ...)
   ipc/                Typed wrappers for Tauri commands (the only place that calls invoke)
   themes/             Theme selection
   styles/             Design tokens and base styles
-docs/                 Architecture notes and ADRs
+extensions/           Extensions built to WebAssembly: the Tidy example and test fixtures
+docs/                 Architecture notes, ADRs, extension guide
 ```
 
 See [`docs/architecture.md`](docs/architecture.md) for how these pieces fit together and how the

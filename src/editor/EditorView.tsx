@@ -624,7 +624,10 @@ export function EditorView({ documentId, title, transport = ipcTransport }: Edit
       return;
     }
     hideHover();
-    if (!position || !viewRef.current?.language) {
+    // Hover shows language information and diagnostics (which extensions
+    // may publish for any file).
+    const current = viewRef.current;
+    if (!position || !(current?.language || current?.diagnostics.length)) {
       return;
     }
     hoverTimerRef.current = window.setTimeout(() => {

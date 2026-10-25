@@ -11,6 +11,7 @@ mod dialogs;
 mod editor;
 mod error;
 mod events;
+mod extensions;
 mod logging;
 mod lsp;
 mod paths;
@@ -36,6 +37,7 @@ pub fn run() {
     .manage(workspace::WorkspaceState::default())
     .manage(perf::Perf::default())
     .manage(lsp::LspState::default())
+    .manage(extensions::ExtensionsState::default())
     .setup(move |app| {
       let log_dir = match app.path().app_log_dir() {
         Ok(dir) => Some(dir),
@@ -69,10 +71,13 @@ pub fn run() {
       let args: Vec<String> = std::env::args().skip(1).collect();
       let bench = bench::BenchState::from_args(&args, launched_at);
       let benchmarking = bench.active();
+      let load_extensions = !benchmarking || bench.with_extensions();
       app.manage(bench);
       if benchmarking {
         app.state::<ui_state::UiStateStore>().make_ephemeral();
       }
+      // Benchmarks measure the editor alone unless asked otherwise.
+      extensions::init(app.handle(), load_extensions);
 
       // Benchmarks start from a clean session.
       let (previous_files, named) = if benchmarking {
@@ -139,6 +144,13 @@ pub fn run() {
       lsp::lsp_hover,
       lsp::lsp_definition,
       lsp::lsp_completion,
+      extensions::extensions_list,
+      extensions::extensions_reload,
+      extensions::extension_run_command,
+      extensions::extension_set_permissions,
+      extensions::extension_set_enabled,
+      extensions::extension_restart,
+      extensions::extension_add_development,
       perf::perf_stats,
       bench::bench_config,
       bench::bench_generate,
@@ -158,8 +170,9 @@ pub fn run() {
   app.run(|handle, event| {
     if let RunEvent::Exit = event {
       tracing::info!("exiting");
-      // Stop language servers and background work (searches, indexing)
-      // before the process ends.
+      // Stop extensions, language servers, and background work (searches,
+      // indexing) before the process ends.
+      extensions::shutdown(handle);
       if let Some(lsp) = handle.try_state::<lsp::LspState>() {
         lsp.shutdown_all();
       }

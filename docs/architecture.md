@@ -4,7 +4,7 @@ This document describes Ferrite's architecture as it currently exists and how it
 grow. The goals and constraints come from [`DESIGN.md`](DESIGN.md); decisions with lasting
 consequences are recorded as ADRs in [`adr/`](adr/).
 
-## Current state (Milestone 5)
+## Current state (Milestone 6)
 
 ```text
 ┌──────────────────────────── Desktop process (ferrite) ─────────────────────────────┐
@@ -15,7 +15,7 @@ consequences are recorded as ADRs in [`adr/`](adr/).
 │  │  (visible lines, highlights,  │◀─view──│               syntax state          │  │
 │  │   squiggles, hover, suggest)  │        │ lsp/          servers, sync, hover, │  │
 │  │  palette, explorer, search,   │◀─events│               definition, complete  │  │
-│  │  tabs, status bar ◀─ stores   │ channel│ workspace.rs, settings.rs, ...      │  │
+│  │  extensions, status bar       │ channel│ extensions.rs, workspace.rs, ...    │  │
 │  └───────────────────────────────┘        └──┬─────────┬──────────┬─────────┬───┘  │
 │                                              │         │          │         │      │
 │        ┌─────────────────┐  ┌────────────────▼─┐ ┌─────▼────────┐ │  ┌──────▼────┐ │
@@ -30,27 +30,34 @@ consequences are recorded as ADRs in [`adr/`](adr/).
                                            language servers (rust-analyzer, ...)
 ```
 
+Extensions run beside this, in `ferrite-extension-host`, each on its own thread (see
+[Extensions](#extensions)).
+
 ## Crates
 
 Crates use the `ferrite-` prefix. Dependencies point downward only. Only `ferrite-app` depends on
 Tauri, and nothing in Rust depends on the frontend.
 
-| Crate               | Responsibility                                                                                                                                                                                                  | Depends on                                                                     |
-| ------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------ |
-| `ferrite-text`      | Rope-backed `TextBuffer`, validated `ChangeSet`s, versions, the line-splice log, UTF-16 conversion, grapheme/word boundaries, line endings, regex/literal search over the rope                                  | `ropey`, `unicode-segmentation`, `regex-cursor`                                |
-| `ferrite-workspace` | Reading and atomically writing files, directory listings with ignore rules, the Go to File index, find in files, file watching                                                                                  | `ferrite-text`, `ignore`, `globset`, `nucleo-matcher`, `notify-debouncer-mini` |
-| `ferrite-core`      | `Editor` (open documents), `Document`, selections, `EditorOp`s (including find/replace), undo history, dirty state, reload from disk, incremental viewport updates. No I/O.                                     | `ferrite-text`, `ferrite-workspace` (for `FileStamp`)                          |
-| `ferrite-syntax`    | Bundled Tree-sitter grammars and highlight queries (Rust, TypeScript/TSX, JavaScript, JSON, TOML, Python), language detection, incremental and interruptible parsing, per-line highlight spans                  | `ferrite-text`, `tree-sitter`, grammar crates                                  |
-| `ferrite-lsp`       | Language server processes and JSON-RPC over stdio, UTF-8/UTF-16 position conversion, incremental document changes from the edit log, known servers and workspace roots, a scripted test server                  | `ferrite-text`, `lsp-types`, `serde_json`                                      |
-| `ferrite-tasks`     | Bounded background scheduler (priorities, keyed replacement, cancellation) and timing histograms                                                                                                                | `tracing`                                                                      |
-| `ferrite-app`       | Process lifecycle, Tauri commands, dialogs, clipboard, settings, session state, workspace coordination, syntax and language server state per document, backend events, instrumentation, benchmark mode, logging | all of the above, Tauri, `toml`, `toml_edit`, `memory-stats`                   |
-| `ferrite-benches`   | Criterion benchmarks and deterministic fixtures (`benches/`), not part of the app                                                                                                                               | `ferrite-text`, `ferrite-core`, `ferrite-workspace`, `criterion`               |
+| Crate                    | Responsibility                                                                                                                                                                                                                   | Depends on                                                                     |
+| ------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------ |
+| `ferrite-text`           | Rope-backed `TextBuffer`, validated `ChangeSet`s, versions, the line-splice log, UTF-16 conversion, grapheme/word boundaries, line endings, regex/literal search over the rope                                                   | `ropey`, `unicode-segmentation`, `regex-cursor`                                |
+| `ferrite-workspace`      | Reading and atomically writing files, directory listings with ignore rules, the Go to File index, find in files, file watching                                                                                                   | `ferrite-text`, `ignore`, `globset`, `nucleo-matcher`, `notify-debouncer-mini` |
+| `ferrite-core`           | `Editor` (open documents), `Document`, selections, `EditorOp`s (including find/replace), undo history, dirty state, reload from disk, incremental viewport updates. No I/O.                                                      | `ferrite-text`, `ferrite-workspace` (for `FileStamp`)                          |
+| `ferrite-syntax`         | Bundled Tree-sitter grammars and highlight queries (Rust, TypeScript/TSX, JavaScript, JSON, TOML, Python), language detection, incremental and interruptible parsing, per-line highlight spans                                   | `ferrite-text`, `tree-sitter`, grammar crates                                  |
+| `ferrite-lsp`            | Language server processes and JSON-RPC over stdio, UTF-8/UTF-16 position conversion, incremental document changes from the edit log, known servers and workspace roots, a scripted test server                                   | `ferrite-text`, `lsp-types`, `serde_json`                                      |
+| `ferrite-extension-api`  | The extension API: the WIT interface (`wit/extension.wit`) and the Rust bindings extensions build against (`Guest`, `export_extension!`). Standalone, so extensions outside the repository can use it                            | `wit-bindgen`                                                                  |
+| `ferrite-extension-host` | Extension discovery, manifest validation, permission decisions, a worker thread and bounded event queue per extension, Wasmtime with deadlines and memory limits, the host side of the API (validated reads, edits, diagnostics) | `ferrite-core`, `ferrite-text`, `wasmtime`, `wit-component`, `semver`, `toml`  |
+| `ferrite-tasks`          | Bounded background scheduler (priorities, keyed replacement, cancellation) and timing histograms                                                                                                                                 | `tracing`                                                                      |
+| `ferrite-app`            | Process lifecycle, Tauri commands, dialogs, clipboard, settings, session state, workspace coordination, syntax and language server state per document, backend events, instrumentation, benchmark mode, logging                  | all of the above, Tauri, `toml`, `toml_edit`, `memory-stats`                   |
+| `ferrite-benches`        | Criterion benchmarks and deterministic fixtures (`benches/`), not part of the app                                                                                                                                                | `ferrite-text`, `ferrite-core`, `ferrite-workspace`, `criterion`               |
 
-Planned: `ferrite-extensions-api` and `ferrite-extension-host` (M6). The design brief's `editor-app` and `src-tauri` are one crate
+Extensions themselves (the example and test fixtures) build to WebAssembly in a separate
+workspace, `extensions/`. The design brief's `editor-app` and `src-tauri` are one crate
 ([ADR 0001](adr/0001-application-skeleton.md)). Workspace, settings, and command decisions are in
 [ADR 0003](adr/0003-workbench-services.md), and performance decisions in
 [ADR 0004](adr/0004-performance-foundations.md), and syntax and language server decisions in
-[ADR 0005](adr/0005-syntax-and-language-servers.md). Measurements are in
+[ADR 0005](adr/0005-syntax-and-language-servers.md), and extension decisions in
+[ADR 0006](adr/0006-wasm-extensions.md). Measurements are in
 [`performance.md`](performance.md).
 
 ## Background work
@@ -194,6 +201,9 @@ timestamp granularity and with the same length isn't detected.
   written atomically on every change; the frontend debounces its layout updates by 500 ms. On
   launch the folder and files are reopened, then any files named on the command line, the last of
   which becomes active. Unsaved changes are not persisted, so closing still asks about them.
+- **`extension-permissions.json`** next to `settings.toml` holds the user's permission decisions
+  and enabled state for each extension. Installed extensions live in the `extensions` folder
+  there too.
 
 ## Commands and keybindings
 
@@ -203,19 +213,20 @@ macOS, with per-platform overrides), an `enabled` predicate, and an `editorFocus
 editor-only keys. One capture-phase listener runs bound commands. The **command palette** lists
 enabled commands with their shortcuts (`>`), finds files (no prefix), and goes to a line (`:`).
 Editing keys that need the editor's textarea (arrows, Backspace, clipboard) stay in
-`editor/keymap.ts`. Extension contributions (M7) will register into the same registry.
+`editor/keymap.ts`. Extension commands, declared in their manifests, are registered into the
+same registry, so they appear in the palette before their extension starts.
 
 ## The frontend–backend boundary
 
 - **Rust owns authoritative state.** The frontend never holds a document's text; it renders views
   of the lines near the visible area.
 - **Commands are the only entry point.** Tauri commands are defined in `src-tauri/src/`
-  (`commands.rs`, `editor/commands.rs`, `lsp/commands.rs`, `workspace.rs`, `settings.rs`,
-  `ui_state.rs`, `events.rs`). They are mirrored by typed wrappers in `src/ipc/`, the only frontend code that
+  (`commands.rs`, `editor/commands.rs`, `lsp/commands.rs`, `extensions.rs`, `workspace.rs`,
+  `settings.rs`, `ui_state.rs`, `events.rs`). They are mirrored by typed wrappers in `src/ipc/`, the only frontend code that
   calls `invoke`.
 - **Backend events** (workspace changed, files changed, document reloaded or changed on disk,
   settings changed, index status, match counts, syntax parsed, diagnostics changed, language
-  server state) are pushed through one Tauri `Channel` that the frontend
+  server state, extension state, messages, failures, and edits) are pushed through one Tauri `Channel` that the frontend
   registers at startup, so the webview needs no event permissions.
 - **Payloads are explicit DTOs** (`src-tauri/src/editor/protocol.rs`) with camelCase fields, not
   core types.
@@ -377,13 +388,64 @@ server (`lsp/`).
   Opening or closing a folder, or changing `[lsp]` settings, restarts all servers. On exit, the
   app asks every server to shut down and kills those that don't within 2 seconds.
 
+## Extensions
+
+`ferrite-extension-host` loads and runs WebAssembly extensions; `src-tauri/src/extensions.rs`
+connects it to the editor, settings, and frontend. The developer guide is
+[`extensions.md`](extensions.md); the decisions are in [ADR 0006](adr/0006-wasm-extensions.md).
+
+```text
+ editor side                        ferrite-extension-host                  extension thread
+ ───────────                        ──────────────────────                  ────────────────
+ view, open, close ── sync ───────▶ document records ── push ─▶ bounded queue ─▶ document-*
+ palette command ──── run ────────▶ start if needed ── push ─▶ (merges changes)  run-command
+                                                                                │ host calls
+ editor core ◀──── apply-edits: validated, versioned, one undo step ◀───────────┤
+ views ◀────────── publish-diagnostics: stored, mapped through edits ◀───────────┘
+```
+
+- **Discovery.** Installed extensions are the subfolders of `<config dir>/extensions` that hold
+  an `extension.toml`. Development extensions are the folders listed in
+  `extensions.development`, loaded in place. Discovery and manifest validation happen on a
+  background thread at startup and on **Reload Extensions**. Invalid manifests are listed with
+  their error.
+- **Permissions.** An extension that requests permissions the user hasn't decided about isn't
+  started; the frontend asks with a notification. Effective permissions (requested ∩ granted)
+  are passed to `activate` and checked on every host call.
+- **Lifecycle.** Extensions start on their activation event (`on-startup`, a document of a given
+  language, or one of their commands). Each runs on its own thread, owning its Wasmtime store.
+  The thread compiles the module (componentizing a core module with `wit-component`),
+  instantiates, activates, and then processes its queue one event at a time. Stopping deactivates
+  the extension (1 s); shutdown waits up to 1.5 s in total, then cancels.
+- **Notifications.** Every view, open, and close syncs the document with the host under the
+  editor lock. New documents are announced; for changed ones, the edit log since the last sync
+  becomes a list of UTF-8 changes queued to each extension that reads documents. Queued changes to
+  the same document merge.
+- **Host calls** run on the extension's thread and take the editor lock only to read or apply.
+  Lock order: the editor lock, then the host's lock. Notifications to the frontend are sent after
+  the host's lock is released.
+- **Edits** go through `Document::apply_edits`: one `ChangeSet`, one undo step, line endings
+  normalized, selections mapped. A successful edit syncs the document (so extensions see it) and
+  tells the frontend to refresh.
+- **Diagnostics** from extensions are stored per extension and document, like LSP diagnostics,
+  and merged into views, hover cards, and the status bar's counts.
+- **Limits and failures:**
+  - Memory, stack, and table limits come from a `ResourceLimiter`.
+  - Call deadlines (5 s activation, 10 s commands, 1 s notifications) use epoch interruption
+    with a 10 ms ticker.
+  - Output is limited (log and message rate limits; read, edit, and diagnostic sizes).
+  - A failure stops the instance, removes its diagnostics, marks the extension failed, and shows
+    the reason with a **Restart** action.
+- **Benchmarks** run without extensions unless `--extensions` is passed to `scripts/bench.mjs`.
+
 ## Frontend structure
 
 - **`ipc/`**: typed command wrappers. `call()` normalizes failures to `CommandError`.
 - **`state/`**: small observable stores (`createStore` + `useSyncExternalStore`): `documents`
   (tab summaries, order, the active id, and actions), `workspace` (folder and loaded listings),
   `search` (find-in-files results), `layout` (persisted), `appearance` (theme and font),
-  `editorStatus`, and `notifications`. Each component subscribes only to what it reads, so a
+  `editorStatus`, `extensions` (statuses, the commands they contribute, permission prompts), and
+  `notifications` (which can carry action buttons and then stay until acted on). Each component subscribes only to what it reads, so a
   keystroke re-renders the editor view and status bar, not the workbench.
 - **`commands/`**: the command registry, keybinding matching, fuzzy matching, and the built-in
   commands. `editor/activeEditor.ts` exposes the active editor to commands (find, go to line,
@@ -404,6 +466,8 @@ server (`lsp/`).
   inline while composing), and paste. `editor/keymap.ts` maps keys to operations per platform
   (Ctrl on Windows/Linux, Cmd/Option on macOS). Commands' keybindings are handled in the capture
   phase before the editor sees the key.
+- **Extensions view** (`panels/ExtensionsPanel`, `Ctrl+Shift+X`): each extension's state,
+  permissions (checkboxes that grant or deny), commands, errors, and Restart and Disable buttons.
 - **Tabs** can be reordered by dragging, cycled with Ctrl+Tab and Ctrl+PageUp/PageDown, and
   remember their scroll position while the app runs. Clicking a tab returns focus to its editor.
 - **Theming**: `styles/tokens.css` defines semantic tokens for dark and light themes (including
@@ -492,6 +556,12 @@ These are tracked for later milestones:
   aren't open aren't shown.
 - Highlighting uses each grammar's bundled query; there's no injection support (e.g. code in
   Markdown or doc comments) and no language detection beyond file names.
+- Extensions (API version 1) can't contribute keybindings, menus, status bar items, views,
+  themes, or decorations other than diagnostics yet, and have no storage API. They can't
+  depend on other extensions. Components that import WASI are rejected. There's no installer;
+  extensions are installed by copying their folder.
+- Extension diagnostics count toward the status bar's problem counts only in files with a known
+  language, because the counts live in the language status.
 - There's no graphical settings UI; settings are edited as TOML. Keybindings aren't configurable
   yet (M7).
 - Multi-line Tab/Shift+Tab indentation, auto-closing brackets, and copying the whole line when

@@ -1,0 +1,13 @@
+[package]
+name = "tidy"
+description = "Example Ferrite extension: flags trailing whitespace and long lines, and trims trailing whitespace."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+ferrite-extension-api = { workspace = true }

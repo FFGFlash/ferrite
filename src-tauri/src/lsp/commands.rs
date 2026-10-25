@@ -109,11 +109,18 @@ fn prepare(app: &AppHandle, id: DocumentId, position: Position) -> Result<Prepar
   lsp.sync(app, document);
   let buffer = document.buffer();
   let offset = position.to_offset(buffer);
+  let mut diagnostics = lsp.diagnostics_at(document, offset);
+  diagnostics.extend(
+    app
+      .state::<crate::extensions::ExtensionsState>()
+      .messages_at(document, offset),
+  );
+  diagnostics.sort_by_key(|d| d.severity);
   Ok(Prepared {
     target: lsp.target(id),
     offset,
     text: TextBuffer::from_snapshot(&buffer.snapshot()),
-    diagnostics: lsp.diagnostics_at(document, offset),
+    diagnostics,
   })
 }
 

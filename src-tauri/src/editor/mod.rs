@@ -85,7 +85,12 @@ pub fn open_startup_files(app: &AppHandle, files: Vec<PathBuf>) {
           }
           let id = editor.open(path.clone(), loaded);
           tracing::info!(document = %id, path = %path.display(), "opened file at startup");
-          editor.document(id).ok().map(DocumentSummary::of)
+          editor.document(id).ok().map(|document| {
+            task_app
+              .state::<crate::extensions::ExtensionsState>()
+              .sync(document);
+            DocumentSummary::of(document)
+          })
         };
         if let Some(document) = summary {
           let is_active = active.as_deref() == Some(path.as_path());
