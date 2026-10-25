@@ -20,6 +20,7 @@ use super::protocol::{
   DocumentSummary, EditorView, KnownDto, MAX_OPS_PER_BATCH, OpDto, SearchQueryDto, SearchView,
   Viewport,
 };
+use crate::backups::BackupState;
 use crate::dialogs::{self, UnsavedChoice};
 use crate::error::CommandError;
 use crate::extensions::ExtensionsState;
@@ -118,6 +119,7 @@ pub async fn document_close(window: WebviewWindow, id: u64) -> Result<bool, Comm
   }
   let state = window.state::<EditorState>();
   state.lock().close(id)?;
+  window.state::<BackupState>().forget(id);
   state.counts.forget(id);
   state.syntax.forget(id);
   window.state::<LspState>().close(id);
@@ -143,6 +145,7 @@ fn build_view(
   let extensions = app.state::<ExtensionsState>();
   lsp.sync(app, document);
   extensions.sync(document);
+  app.state::<BackupState>().touch();
   let mut view = EditorView::of(
     document,
     viewport,
@@ -418,6 +421,7 @@ async fn save(
     DocumentSummary::of(document)
   };
   let app = window.app_handle();
+  app.state::<BackupState>().touch();
   if !same_file {
     ui_state::record_open_files(app);
   }

@@ -723,6 +723,56 @@ mod tests {
     assert_eq!(next["lines"]["splices"].as_array().map(Vec::len), Some(1));
   }
 
+  /// A performance budget that doesn't depend on timing, so it holds on
+  /// any machine: what a keystroke and a page of scrolling cost on the wire
+  /// in a large document. A change that resends lines or grows the view
+  /// fails here before it shows up in the end-to-end benchmarks.
+  #[test]
+  fn large_documents_cost_the_same_per_keystroke_as_small_ones() {
+    const LINES: usize = 200_000;
+    let mut editor = Editor::default();
+    let id = editor.create_untitled();
+    let document = editor.document_mut(id).expect("open");
+    let line = format!("{}\n", "x".repeat(79));
+    document
+      .apply(EditorOp::Insert(line.repeat(LINES)))
+      .expect("applies");
+    let at = document.buffer().line_start(LINES / 2);
+    document
+      .apply(EditorOp::SetCursor {
+        offset: at,
+        extend: false,
+        add: false,
+      })
+      .expect("moves");
+    let page = viewport(LINES / 2 - 30, LINES / 2 + 30);
+    let first = view(document, page, None);
+    let known = |view: &EditorView| KnownDto {
+      version: view.version,
+      start_line: view.start_line,
+      end_line: view.end_line,
+    };
+
+    document
+      .apply(EditorOp::Insert("y".into()))
+      .expect("applies");
+    let keystroke = view(document, page, Some(known(&first)));
+    let sent: usize = keystroke.lines.chunks.iter().map(|c| c.lines.len()).sum();
+    let bytes = serde_json::to_string(&keystroke).expect("serializes").len();
+    assert_eq!(sent, 1, "a keystroke resends only its line");
+    assert!(bytes < 1024, "a keystroke's view is {bytes} bytes");
+
+    let next_page = viewport(LINES / 2 + 30, LINES / 2 + 90);
+    let scrolled = view(document, next_page, Some(known(&keystroke)));
+    let sent: usize = scrolled.lines.chunks.iter().map(|c| c.lines.len()).sum();
+    let bytes = serde_json::to_string(&scrolled).expect("serializes").len();
+    assert!(sent <= 60, "a page of scrolling sent {sent} lines");
+    assert!(
+      bytes < 60 * 100 + 1024,
+      "a page of scrolling is {bytes} bytes"
+    );
+  }
+
   #[test]
   fn cut_lines_serialize_with_their_full_length() {
     let line = LineDto::from(LineText {

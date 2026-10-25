@@ -189,6 +189,7 @@ struct Setup {
 fn limits() -> Limits {
   Limits {
     memory_bytes: 32 * 1024 * 1024,
+    total_memory_bytes: 48 * 1024 * 1024,
     activation_time: Duration::from_secs(10),
     command_time: Duration::from_millis(1500),
     event_time: Duration::from_millis(1500),
@@ -462,6 +463,31 @@ fn an_infinite_loop_is_stopped_and_the_extension_can_be_restarted() {
   run(&s, "read", Some(id)).expect("works again");
   assert!(s.fake.wait_for_message("read:").contains("[\"text\"]"));
   assert_eq!(s.fake.text(id), "text");
+}
+
+#[test]
+fn resource_use_is_accounted_per_extension() {
+  let s = misbehaving("");
+  let id = s.fake.open(&s.host, "text");
+  s.host.load();
+  run(&s, "read", Some(id)).expect("ran");
+  let usage = s.host.statuses()[0].usage.clone();
+  // Activation, the opened document, and the command.
+  assert!(usage.calls >= 3, "{usage:?}");
+  assert!(usage.busy_ms > 0.0 && usage.slowest_call_ms <= usage.busy_ms);
+  assert!(usage.compile_ms > 0.0);
+  assert!(usage.memory_bytes > 0 && usage.peak_memory_bytes >= usage.memory_bytes);
+
+  run(&s, "alloc", None).expect_err("exceeds its memory");
+  let after = s.host.statuses()[0].usage.clone();
+  assert_eq!(after.memory_bytes, 0, "a stopped instance holds no memory");
+  assert!(after.peak_memory_bytes >= usage.peak_memory_bytes);
+  assert!(after.calls > usage.calls);
+
+  // Totals survive a restart.
+  s.host.restart("test.misbehaving");
+  run(&s, "read", Some(id)).expect("works again");
+  assert!(s.host.statuses()[0].usage.calls > after.calls);
 }
 
 #[test]

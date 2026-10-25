@@ -4,6 +4,7 @@
  * items, views, decoration types, status bar items), permission prompts,
  * and their messages and failures.
  */
+import { useEffect, useState } from "react";
 import { registerCommands, type Command } from "../commands/registry";
 import { activeEditor } from "../editor/activeEditor";
 import {
@@ -16,6 +17,7 @@ import {
   type ExtensionStatus,
   type MenuLocation,
   type MessageLevel,
+  type ResourceUsage,
   type StatusItem,
 } from "../ipc/extensions";
 import { setTheme } from "../ipc/workspace";
@@ -40,6 +42,34 @@ export function usableExtensions(statuses: readonly ExtensionStatus[]): Extensio
   return statuses.filter(
     (extension) => extension.state !== "disabled" && extension.state !== "invalid",
   );
+}
+
+/**
+ * Each extension's resource use by id, polled every `intervalMs` while the
+ * calling component is mounted (usage changes without events).
+ */
+export function useExtensionUsage(intervalMs = 2000): ReadonlyMap<string, ResourceUsage> {
+  const [usage, setUsage] = useState<ReadonlyMap<string, ResourceUsage>>(
+    () => new Map(extensionsStore.get().map((extension) => [extension.id, extension.usage])),
+  );
+  useEffect(() => {
+    let cancelled = false;
+    const poll = () => {
+      listExtensions()
+        .then((statuses) => {
+          if (!cancelled) {
+            setUsage(new Map(statuses.map((extension) => [extension.id, extension.usage])));
+          }
+        })
+        .catch(() => {});
+    };
+    const timer = setInterval(poll, intervalMs);
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
+  }, [intervalMs]);
+  return usage;
 }
 
 export function showView(id: string): void {

@@ -3,11 +3,12 @@
 A fast, memory-efficient, extensible code editor built with Rust, Tauri, React, and a sandboxed
 WebAssembly extension system.
 
-> **Status:** Milestone 7 (customizable workbench) is complete: extensions can contribute color
-> themes, keybindings, context menu items, status bar items, side bar views, and editor
-> decorations, and you can set your own keybindings and theme colors. Hardening comes in
-> Milestone 8. See [`docs/DESIGN.md`](docs/DESIGN.md) for the full brief and milestone plan, and
-> [`docs/performance.md`](docs/performance.md) for measurements.
+> **Status:** All eight milestones of the initial plan are complete. Milestone 8 (hardening)
+> added recovery of unsaved changes after a crash, screen reader and high-contrast support,
+> per-extension resource accounting, CI on Windows, macOS, and Linux, and performance regression
+> checks. See [`docs/DESIGN.md`](docs/DESIGN.md) for the brief and milestone plan,
+> [`docs/performance.md`](docs/performance.md) for measurements, and
+> [`CONTRIBUTING.md`](CONTRIBUTING.md) for how to work on Ferrite.
 
 ## Prerequisites
 
@@ -150,6 +151,29 @@ editor-background = "#101018"            # any token in src/themes/tokens.json
 "workbench.toggleSidebar" = ""           # remove a command's keys
 ```
 
+## Recovering unsaved changes
+
+Unsaved changes are backed up in the background while you work. If Ferrite crashes, is killed,
+or the computer loses power, the next start reopens them as unsaved tabs and says so. Closing
+Ferrite normally still asks about unsaved changes, and changes you choose not to save are not
+brought back.
+
+If part of the window shows "stopped working because of an internal error", choose **Try
+Again**, or **Reload Window** (also **Developer: Reload Window** in the command palette).
+Reloading keeps open documents and unsaved changes. See
+[`docs/troubleshooting.md`](docs/troubleshooting.md) for more.
+
+## Accessibility
+
+- **Screen readers.** The editor exposes the cursor's line and the selection to screen readers,
+  so they can read the line, character, word, or selection as you move. Errors and
+  notifications are announced.
+- **Keyboard.** Commands, views, lists, and menus work from the keyboard. Context menus open
+  with `Shift+F10` or the menu key, and the side bar is resized with the arrow keys on its edge.
+- **System settings.** Windows contrast themes (forced colors) and "reduce motion" are honored.
+- **Fonts and colors.** The editor font is a setting (`editor.font_size`, `editor.font_family`),
+  and any theme color can be overridden (see [Customizing](#customizing)).
+
 ## Workspace
 
 Open a folder with **File: Open Folder…** (command palette or the Explorer). The explorer shows
@@ -202,6 +226,8 @@ max_line_length = 120                    # settings an extension declares
 | `pnpm bench:app all`                                    | End-to-end startup, typing, and scrolling benchmarks (release)  |
 | `pnpm bench:app typing --file F`                        | Typing benchmark, also typing into file `F` (e.g. a `.rs` file) |
 | `pnpm bench:app typing --extensions`                    | Typing benchmark with your extensions loaded                    |
+| `pnpm bench:check`                                      | Compare the last end-to-end run with `benches/baseline.json`    |
+| `node scripts/perf-check.mjs micro`                     | Check Criterion's comparison with a saved baseline              |
 | `cd extensions && cargo build --release`                | Build the example and test extensions to WebAssembly            |
 | `cargo test --workspace`                                | Run Rust tests                                                  |
 | `cargo clippy --workspace --all-targets -- -D warnings` | Lint Rust sources                                               |
@@ -234,7 +260,8 @@ measured from the start of `ferrite_app::run`.
 Cargo.toml            Cargo workspace
 package.json          Frontend package and scripts
 benches/              Criterion benchmarks and fixtures
-scripts/              End-to-end benchmark harness
+scripts/              End-to-end benchmark harness and performance regression checks
+.github/workflows/    CI: formatting, lints, and tests on Windows, macOS, and Linux
 crates/
   ferrite-extension-api/   Extension API: WIT interface and Rust bindings for extensions
   ferrite-extension-host/  Extension loading, permissions, sandbox, limits, host functions
@@ -256,7 +283,7 @@ src/                  React + TypeScript workbench
   themes/             Theme selection
   styles/             Design tokens and base styles
 extensions/           Extensions built to WebAssembly: examples (tidy, todos, themes) and test fixtures
-docs/                 Architecture notes, ADRs, extension guide
+docs/                 Architecture notes, ADRs, extension guide, troubleshooting
 ```
 
 See [`docs/architecture.md`](docs/architecture.md) for how these pieces fit together and how the

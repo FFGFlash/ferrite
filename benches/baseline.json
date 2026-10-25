@@ -1,0 +1,24 @@
+{
+  "machine": {
+    "platform": "win32 10.0.26200",
+    "cpu": "AMD Ryzen 7 5800X 8-Core Processor             ",
+    "cores": 16,
+    "memoryBytes": 34281504768
+  },
+  "date": "2026-10-25T06:06:28.219Z",
+  "metrics": {
+    "Startup, later runs (median)": 638,
+    "Idle memory, process tree": 374026240,
+    "Idle memory, backend": 32518144,
+    "Keystroke → paint, small (p50)": 13.300000011920927,
+    "Keystroke → paint, small (p95)": 13.800000011920927,
+    "Keystroke → paint, 200k lines (p50)": 13.300000011920927,
+    "Keystroke → paint, 200k lines (p95)": 13.899999976158142,
+    "300-character burst": 13.200000047683716,
+    "Backend editor.apply (p95)": 0.4464301886792454,
+    "Page jump → paint (p50)": 26.69999998807907,
+    "Page jump → paint (p95)": 27.19999998807907,
+    "Generate + open 200k lines": 93.80000001192091,
+    "Binary size": 39938048
+  }
+}

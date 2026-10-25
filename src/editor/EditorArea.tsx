@@ -1,4 +1,5 @@
 import { memo, useEffect, useRef, useState, type DragEvent } from "react";
+import { ErrorBoundary } from "../components/ErrorBoundary";
 import type { AppInfo } from "../ipc";
 import type { DocumentSummary } from "../ipc/editor";
 import { activate, close, documentsStore, moveDocument } from "../state/documents";
@@ -37,7 +38,9 @@ export const EditorArea = memo(function EditorArea({ appInfo }: EditorAreaProps)
           id={`editor-panel-${active.id}`}
           aria-labelledby={`editor-tab-${active.id}`}
         >
-          <EditorView key={active.id} documentId={active.id} title={active.title} />
+          <ErrorBoundary name="The editor" resetKey={active.id}>
+            <EditorView key={active.id} documentId={active.id} title={active.title} />
+          </ErrorBoundary>
         </section>
       ) : (
         <section className="editor-area__content editor-area__content--scroll">

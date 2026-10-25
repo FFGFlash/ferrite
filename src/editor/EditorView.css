@@ -136,8 +136,10 @@
   opacity: 0.4;
 }
 
-/* Receives keyboard, IME, and clipboard input. Invisible except while
-   composing, when it shows the IME's in-progress text at the caret. */
+/* Receives keyboard, IME, and clipboard input, and holds the cursor's line
+   for screen readers (see inputMirror.ts), laid over the rendered line so
+   the text lines up. Invisible except while composing, when it shows the
+   IME's in-progress text in place. */
 .editor-view__input {
   position: absolute;
   z-index: 1;
@@ -154,14 +156,24 @@
   font: inherit;
   line-height: inherit;
   white-space: pre;
+  tab-size: var(--editor-tab-size, 4);
   pointer-events: none;
 }
 
+/* The caret and the active line show focus; the input itself never does. */
+.editor-view__input:focus-visible {
+  outline: none;
+}
+
 .editor-view__input[data-composing] {
+  opacity: 1;
+}
+
+/* Without mirrored text, only the composition is shown, at the caret. */
+.editor-view__input[data-composing]:not([data-mirror]) {
   width: auto;
   min-width: 1ch;
   field-sizing: content;
-  opacity: 1;
   text-decoration: underline;
 }
 

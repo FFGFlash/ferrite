@@ -527,7 +527,7 @@ pub fn edit(
     )
   })?;
   change(&mut document).map_err(|message| CommandError::new("invalidSettings", message))?;
-  std::fs::write(&path, document.to_string())
+  ferrite_workspace::write_file_atomically(&path, document.to_string().as_bytes())
     .map_err(|error| CommandError::new("settings", format!("Could not write settings: {error}")))?;
   reload(app)
 }

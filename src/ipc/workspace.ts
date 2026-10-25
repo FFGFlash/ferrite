@@ -92,7 +92,8 @@ export type AppEvent =
   | { type: "extensionViewChanged"; view: string }
   | { type: "extensionShowView"; view: string }
   | { type: "decorationsChanged"; documentId: number }
-  | { type: "extensionReveal"; documentId: number; start: Position; end: Position };
+  | { type: "extensionReveal"; documentId: number; start: Position; end: Position }
+  | { type: "notice"; level: "warning"; message: string };
 
 export const getWorkspace = () => call<WorkspaceInfo | null>("workspace_get");
 export const openWorkspaceDialog = () => call<WorkspaceInfo | null>("workspace_open_dialog");

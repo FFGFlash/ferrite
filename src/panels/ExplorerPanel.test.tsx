@@ -1,4 +1,4 @@
-import { act, render, screen, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { DirectoryEntry } from "../ipc/workspace";
@@ -16,6 +16,7 @@ const editorIpc = await import("../ipc/editor");
 const { setWorkspace } = await import("../state/workspace");
 const { DEFAULT_LAYOUT, layoutStore } = await import("../state/layout");
 const { ExplorerPanel } = await import("./ExplorerPanel");
+const { contextMenuStore } = await import("../components/contextMenuState");
 
 const entry = (path: string, directory = false, ignored = false): DirectoryEntry => ({
   name: path.split("/").pop() ?? path,
@@ -87,5 +88,14 @@ describe("ExplorerPanel", () => {
     expect(within(tree).getByText("src").closest("li")).toHaveAttribute("data-focused");
     await user.keyboard("{ArrowLeft}");
     expect(within(tree).queryByText("main.rs")).not.toBeInTheDocument();
+  });
+
+  it("opens the focused file's menu from the keyboard", async () => {
+    const user = userEvent.setup();
+    const tree = await renderTree();
+    tree.focus();
+    await user.keyboard("{End}");
+    fireEvent.contextMenu(tree);
+    expect(contextMenuStore.get()?.entries[0]).toMatchObject({ label: "Open" });
   });
 });

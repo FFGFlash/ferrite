@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { runRequestedBenchmark } from "../bench/runner";
 import { builtinCommands } from "../commands/builtin";
 import { registerCommands } from "../commands/registry";
+import { ErrorBoundary } from "../components/ErrorBoundary";
 import { getAppInfo, isDesktop, log, notifyFrontendReady, type AppInfo } from "../ipc";
 import { getSettings } from "../ipc/workspace";
 import { applySettings } from "../state/appearance";
@@ -54,5 +55,9 @@ export function App() {
     };
   }, []);
 
-  return <Workbench appInfo={appInfo} />;
+  return (
+    <ErrorBoundary name="Ferrite">
+      <Workbench appInfo={appInfo} />
+    </ErrorBoundary>
+  );
 }

@@ -168,7 +168,8 @@
   text-align: left;
 }
 
-.extension__contributes {
+.extension__contributes,
+.extension__usage {
   margin: 0;
   color: var(--color-text-muted);
   font-size: var(--font-size-ui-small);

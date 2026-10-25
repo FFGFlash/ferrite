@@ -26,7 +26,8 @@ use crate::bindings::ferrite::extension::types::{
 use crate::config::{self, ConfigValue};
 use crate::manifest::{self, MANIFEST_FILE, Manifest};
 use crate::permissions::{Decision, Decisions, Permission};
-use crate::runtime::Runtime;
+use crate::runtime::{MemoryPool, Runtime};
+use crate::usage::{ResourceUsage, Usage};
 use crate::worker::{
   self, Budgets, Event, Failure, MAX_PENDING_CHANGE_BYTES, Queue, Setup, Worker,
 };
@@ -145,6 +146,8 @@ struct Entry {
   config: Arc<RwLock<BTreeMap<String, ConfigValue>>>,
   config_errors: Vec<String>,
   run: Run,
+  /// Kept across restarts and reloads of the extension.
+  usage: Arc<Usage>,
 }
 
 /// A folder that could not be loaded as an extension.
@@ -173,6 +176,8 @@ pub struct Shared {
   me: Weak<Shared>,
   pub embedder: Arc<dyn Embedder>,
   runtime: OnceLock<Result<Arc<Runtime>, String>>,
+  /// Linear memory of all running extensions.
+  memory: Arc<MemoryPool>,
   state: Mutex<State>,
 }
 
@@ -195,6 +200,10 @@ impl Outbox {
 impl Shared {
   fn lock(&self) -> MutexGuard<'_, State> {
     self.state.lock().unwrap_or_else(PoisonError::into_inner)
+  }
+
+  pub fn memory_pool(&self) -> Arc<MemoryPool> {
+    self.memory.clone()
   }
 
   /// The runtime, created on first use.
@@ -229,7 +238,10 @@ impl Shared {
       return;
     }
     let granted = decision.effective(&entry.manifest.permissions);
-    let queue = Arc::new(Queue::new(state.options.limits.queue_capacity));
+    let queue = Arc::new(Queue::new(
+      state.options.limits.queue_capacity,
+      entry.usage.clone(),
+    ));
     if granted.contains(&Permission::DocumentsRead) {
       let mut infos: Vec<&DocumentInfo> = state
         .documents
@@ -249,6 +261,7 @@ impl Shared {
       config: entry.config.clone(),
       queue,
       cancel: Arc::new(AtomicBool::new(false)),
+      usage: entry.usage.clone(),
     };
     tracing::info!(extension = %setup.manifest.id, "starting extension");
     let worker = worker::spawn(self.me.clone(), setup);
@@ -626,10 +639,12 @@ impl ExtensionHost {
   /// Creates a host. Nothing is loaded until [`Self::load`].
   pub fn new(embedder: Arc<dyn Embedder>, options: HostOptions) -> Self {
     let decisions = Decisions::load(options.permissions_file.clone());
+    let memory = Arc::new(MemoryPool::new(options.limits.total_memory_bytes));
     let shared = Arc::new_cyclic(|me| Shared {
       me: me.clone(),
       embedder,
       runtime: OnceLock::new(),
+      memory,
       state: Mutex::new(State {
         options,
         decisions,
@@ -702,6 +717,11 @@ impl ExtensionHost {
       for index in 0..state.extensions.len() {
         Shared::stop(&mut state, index, &mut outbox);
       }
+      let mut usages: HashMap<String, Arc<Usage>> = state
+        .extensions
+        .drain(..)
+        .map(|entry| (entry.manifest.id.clone(), entry.usage))
+        .collect();
       state.extensions = loaded
         .into_iter()
         .map(|(manifest, development)| {
@@ -709,12 +729,14 @@ impl ExtensionHost {
             &manifest.configuration,
             state.options.settings.get(&manifest.id),
           );
+          let usage = usages.remove(&manifest.id).unwrap_or_default();
           Entry {
             manifest: Arc::new(manifest),
             development,
             config: Arc::new(RwLock::new(values)),
             config_errors,
             run: Run::Idle,
+            usage,
           }
         })
         .collect();
@@ -822,6 +844,13 @@ impl ExtensionHost {
             .collect(),
           config_errors: entry.config_errors.clone(),
           contributions: manifest.contributions.clone(),
+          usage: {
+            let mut usage = entry.usage.snapshot();
+            if !matches!(entry.run, Run::Running { .. }) {
+              usage.memory_bytes = 0;
+            }
+            usage
+          },
         }
       })
       .collect();
@@ -843,6 +872,7 @@ impl ExtensionHost {
         commands: Vec::new(),
         config_errors: Vec::new(),
         contributions: crate::Contributions::default(),
+        usage: ResourceUsage::default(),
       }
     }));
     statuses

@@ -27,7 +27,8 @@ use crate::bindings::ferrite::extension::types::{
 use crate::host::Shared;
 use crate::manifest::Manifest;
 use crate::permissions::Permission;
-use crate::runtime::{Call, Interrupt, Limiter, Runtime, StoreState};
+use crate::runtime::{Call, Interrupt, Limiter, MemoryExceeded, Runtime, StoreState};
+use crate::usage::Usage;
 
 /// Changed text kept in one pending notification; beyond this the extension
 /// is told to re-read the document instead.
@@ -104,10 +105,11 @@ pub struct Queue {
   state: Mutex<QueueState>,
   ready: Condvar,
   capacity: usize,
+  usage: Arc<Usage>,
 }
 
 impl Queue {
-  pub fn new(capacity: usize) -> Self {
+  pub fn new(capacity: usize, usage: Arc<Usage>) -> Self {
     Self {
       state: Mutex::new(QueueState {
         events: VecDeque::new(),
@@ -116,6 +118,7 @@ impl Queue {
       }),
       ready: Condvar::new(),
       capacity: capacity.max(1),
+      usage,
     }
   }
 
@@ -181,6 +184,7 @@ impl Queue {
   ) {
     if state.events.len() >= self.capacity {
       tracing::warn!(document, "extension event queue is full; dropping an event");
+      self.usage.record_dropped_event();
       state.dropped.insert(document);
       return;
     }
@@ -246,6 +250,7 @@ pub struct Setup {
     Arc<std::sync::RwLock<std::collections::BTreeMap<String, crate::config::ConfigValue>>>,
   pub queue: Arc<Queue>,
   pub cancel: Arc<AtomicBool>,
+  pub usage: Arc<Usage>,
 }
 
 /// The host's handle on a running worker.
@@ -323,24 +328,23 @@ fn wit_permission(permission: Permission) -> WitPermission {
 /// Runs an extension until its queue is stopped (`Ok`) or it fails.
 fn run(shared: &Weak<Shared>, setup: &Setup) -> Result<(), Failure> {
   // Holding the runtime keeps the deadline ticker alive while this runs.
-  let (runtime, budgets) = {
+  let (runtime, budgets, pool) = {
     let shared = shared.upgrade().ok_or("the editor is closing")?;
-    (shared.runtime()?, shared.budgets())
+    (shared.runtime()?, shared.budgets(), shared.memory_pool())
   };
   let entrypoint = setup
     .manifest
     .entrypoint
     .as_ref()
     .ok_or("has no code to run")?;
+  let compiling = Instant::now();
   let component = runtime.compile(entrypoint)?;
+  setup.usage.record_compile(compiling.elapsed());
   let mut store = Store::new(
     runtime.engine(),
     StoreState {
       api: ApiContext::new(shared.clone(), setup),
-      limiter: Limiter {
-        max_memory: budgets.memory,
-        memory_exceeded: false,
-      },
+      limiter: Limiter::new(budgets.memory, setup.usage.clone(), pool),
       call: None,
       cancel: setup.cancel.clone(),
       interrupt: None,
@@ -440,21 +444,35 @@ fn run(shared: &Weak<Shared>, setup: &Setup) -> Result<(), Failure> {
   Ok(())
 }
 
-/// Runs `f` with a deadline of `budget`. Failures are described for the
-/// user, starting with `what`.
+/// Runs `f` with a deadline of `budget`, and accounts for its time. Calls
+/// that take a large part of their budget are logged. Failures are
+/// described for the user, starting with `what`.
 fn guarded<R>(
   store: &mut Store<StoreState>,
   budget: Duration,
   what: &str,
   f: impl FnOnce(&mut Store<StoreState>) -> wasmtime::Result<R>,
 ) -> Result<R, String> {
+  let started = Instant::now();
   store.data_mut().call = Some(Call {
-    deadline: Instant::now() + budget,
+    deadline: started + budget,
   });
   store.data_mut().interrupt = None;
   store.set_epoch_deadline(1);
   let result = f(store);
   store.data_mut().call = None;
+  let elapsed = started.elapsed();
+  let data = store.data();
+  data.limiter.usage.record_call(elapsed);
+  if elapsed > budget / 4 && result.is_ok() {
+    tracing::warn!(
+      extension = %data.api.extension_id(),
+      call = what,
+      elapsed_ms = elapsed.as_secs_f64() * 1000.0,
+      budget_ms = budget.as_secs_f64() * 1000.0,
+      "slow extension call"
+    );
+  }
   result.map_err(|error| describe_failure(store.data(), &error, budget, what))
 }
 
@@ -474,11 +492,20 @@ fn describe_failure(
     Some(Interrupt::Cancelled) => return format!("{what} was cancelled"),
     None => {}
   }
-  if state.limiter.memory_exceeded {
-    return format!(
-      "exceeded its memory limit of {} MiB",
-      state.limiter.max_memory / 1024 / 1024
-    );
+  match state.limiter.memory_exceeded {
+    Some(MemoryExceeded::Instance) => {
+      return format!(
+        "exceeded its memory limit of {} MiB",
+        state.limiter.max_memory / 1024 / 1024
+      );
+    }
+    Some(MemoryExceeded::Total) => {
+      return format!(
+        "needed more memory than is left for extensions (all extensions together may use {} MiB)",
+        state.limiter.pool.limit() / 1024 / 1024
+      );
+    }
+    None => {}
   }
   match error.downcast_ref::<wasmtime::Trap>() {
     Some(wasmtime::Trap::StackOverflow) => "ran out of stack space (too deep recursion)".into(),
@@ -546,7 +573,7 @@ mod tests {
 
   #[test]
   fn merges_waiting_changes_to_the_same_document() {
-    let queue = Queue::new(10);
+    let queue = Queue::new(10, Arc::default());
     queue.push_document(changed(1, 2, "a"));
     queue.push_document(changed(2, 5, "x"));
     queue.push_document(changed(1, 3, "b"));
@@ -558,7 +585,7 @@ mod tests {
 
   #[test]
   fn large_merged_changes_become_a_reread() {
-    let queue = Queue::new(10);
+    let queue = Queue::new(10, Arc::default());
     let big = "x".repeat(MAX_PENDING_CHANGE_BYTES);
     queue.push_document(changed(1, 2, &big));
     queue.push_document(changed(1, 3, "more"));
@@ -567,10 +594,12 @@ mod tests {
 
   #[test]
   fn a_full_queue_drops_events_and_asks_for_a_reread_later() {
-    let queue = Queue::new(1);
+    let usage = Arc::new(Usage::default());
+    let queue = Queue::new(1, usage.clone());
     queue.push_document(Event::Closed(9));
     queue.push_document(changed(1, 2, "a"));
     assert_eq!(queue.len(), 1);
+    assert_eq!(usage.snapshot().dropped_events, 1);
     let (reply, _receiver) = std::sync::mpsc::channel();
     let command = Event::Command {
       command: "x".into(),
@@ -592,7 +621,7 @@ mod tests {
 
   #[test]
   fn stopping_fails_waiting_commands() {
-    let queue = Queue::new(4);
+    let queue = Queue::new(4, Arc::default());
     let (reply, receiver) = std::sync::mpsc::channel();
     queue
       .push_command(Event::Command {

@@ -58,6 +58,50 @@ in:
   start (after a reboot) isn't automated; the first run of a session is
   reported separately as the closest approximation.
 
+### Regression checks
+
+Since Milestone 8, three layers guard against regressions:
+
+1. **Budgets that count work** run with the tests, in CI on every platform. Timing on shared CI
+   runners is too noisy to compare, but the amount of work isn't. A keystroke in a
+   200,000-line document must send exactly one line and less than 1 KB, and a page of
+   scrolling at most a page of lines
+   (`large_documents_cost_the_same_per_keystroke_as_small_ones` in
+   `src-tauri/src/editor/protocol.rs`). The core's view tests check the same for incremental
+   updates.
+2. **End-to-end comparison** with a committed baseline, on the reference machine:
+
+   ```sh
+   pnpm tauri build --no-bundle
+   pnpm bench:app all
+   pnpm bench:check                       # node scripts/perf-check.mjs
+   node scripts/perf-check.mjs --update   # accept the current results as the baseline
+   ```
+
+   `benches/baseline.json` holds the metrics and the machine they were measured on. Each kind
+   of metric has its own tolerance:
+
+   | Metric kind                     | Fails when it grows by more than |
+   | ------------------------------- | -------------------------------- |
+   | Paint latency (keystroke, page) | 10% + 2 ms (less than a frame)   |
+   | Other timings (startup, open)   | 25% + 5 ms                       |
+   | Backend `editor.apply`          | 50% + 0.1 ms                     |
+   | Memory                          | 15% + 8 MB                       |
+   | Binary size                     | 10%                              |
+
+   Results from a different CPU or OS than the baseline's are compared with a warning.
+
+3. **Microbenchmarks** against a saved Criterion baseline:
+
+   ```sh
+   cargo bench -p ferrite-benches -- --save-baseline before
+   cargo bench -p ferrite-benches -- --baseline before
+   node scripts/perf-check.mjs micro --threshold 10
+   ```
+
+   A benchmark fails only when even the lower end of Criterion's confidence interval for the
+   change is above the threshold, so noise doesn't fail it.
+
 ## Baseline (Milestone 4)
 
 Development machine: AMD Ryzen 7 5800X (8 cores, 16 threads), 32 GB RAM,
@@ -243,6 +287,40 @@ back to back again.
 - **Status and view updates.** These send an event only when the content actually changed. The
   TODOs example republishes its view after every change, but the frontend refetches only when
   something differs.
+
+## Milestone 8: hardening
+
+Measured on 2026-10-25, without extensions. The Milestone 7 build was rebuilt from its commit and
+run alternately with Milestone 8, because startup varied between 600 and 880 ms on the machine
+that evening for both builds.
+
+| Measurement                         | Milestone 7              | Milestone 8              |
+| ----------------------------------- | ------------------------ | ------------------------ |
+| Startup, later runs (median of 4)   | 859 / 662 ms             | 761 / 691 ms             |
+| Idle memory, whole process tree     | 356 / 359 MB             | 356 / 359 MB             |
+| Keystroke → painted, small document | 13.3 ms p50, 13.9 ms p95 | 13.3 ms p50, 14.0 ms p95 |
+| Keystroke → painted, 200,000 lines  | 13.4 ms p50, 13.9 ms p95 | 13.3 ms p50, 13.9 ms p95 |
+| Page jump → painted (p50)           | 26.7 ms                  | 26.7 ms                  |
+| Generate + open 200,000 lines       | 87–102 ms (3 runs)       | 89–107 ms (3 runs)       |
+| Binary size                         | 37.9 MB                  | 38.1 MB                  |
+
+The baseline in `benches/baseline.json` comes from a separate full run (startup 638 ms median).
+A second, independent run passed `pnpm bench:check` with every metric within 3% except
+generate + open, which was 11% faster.
+
+- **Typing costs the same.** Each view now also refreshes the input mirror for screen readers
+  (one line of text and a selection, set only when changed) and signals the backup thread (an
+  atomic flag). Neither shows in keystroke latency.
+- **Backups.** These run on their own thread, outside the editor lock except for O(1) snapshots.
+  They are off in benchmark runs, which keep no session state.
+- **Extension accounting** costs one clock reading per call into an extension.
+- **Generate + open** measured 61 ms in an earlier session. Both builds measured 87–107 ms this
+  evening, so the difference is the machine, not this milestone.
+- **Open item.** The Criterion regex find benchmark (`core/find_10MB/regex_word`) measured
+  4.3 ms this evening, against 2.5 ms in the Milestone 4 table, while the literal searches are
+  about 20% slower than then. Milestone 8 didn't change search, but no Milestone 4 baseline was
+  saved to compare against. Saving Criterion baselines per milestone (`--save-baseline m8`)
+  makes such drift attributable from now on.
 
 ## Optimizations made from these measurements
 

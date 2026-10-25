@@ -135,9 +135,12 @@ impl Embedder for AppEmbedder {
         level,
         message,
       },
-      Notification::DocumentEdited(id) => AppEvent::DocumentEdited {
-        document_id: id.get(),
-      },
+      Notification::DocumentEdited(id) => {
+        self.app.state::<crate::backups::BackupState>().touch();
+        AppEvent::DocumentEdited {
+          document_id: id.get(),
+        }
+      }
       Notification::DiagnosticsChanged(id) => AppEvent::DiagnosticsChanged {
         document_id: id.get(),
       },

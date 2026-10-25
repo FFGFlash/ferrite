@@ -1,10 +1,12 @@
-/* Zero-width in layout; the hit area overlaps the neighbouring border. */
+/* On the right edge of its (relatively positioned) parent; the hit area
+   overlaps the neighbouring border. */
 .sash {
-  position: relative;
+  position: absolute;
+  top: 0;
+  right: calc(var(--size-sash) / -2);
+  bottom: 0;
   z-index: 1;
-  flex: none;
   width: var(--size-sash);
-  margin: 0 calc(var(--size-sash) / -2);
   cursor: col-resize;
   touch-action: none;
 }
@@ -14,8 +16,4 @@
 .sash:focus-visible {
   outline: none;
   background: var(--color-sash-hover);
-}
-
-.sash + * {
-  border-left: 1px solid var(--color-border);
 }

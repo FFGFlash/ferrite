@@ -6,7 +6,7 @@
 //! permission an extension requests, it is not started.
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
@@ -103,20 +103,11 @@ impl Decisions {
     };
     let result = serde_json::to_string_pretty(&self.entries)
       .map_err(std::io::Error::other)
-      .and_then(|text| write_atomically(path, text.as_bytes()));
+      .and_then(|text| ferrite_workspace::write_file_atomically(path, text.as_bytes()));
     if let Err(error) = result {
       tracing::error!(%error, path = %path.display(), "could not save extension permissions");
     }
   }
-}
-
-fn write_atomically(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
-  if let Some(parent) = path.parent() {
-    std::fs::create_dir_all(parent)?;
-  }
-  let temporary = path.with_extension("json.tmp");
-  std::fs::write(&temporary, bytes)?;
-  std::fs::rename(&temporary, path)
 }
 
 #[cfg(test)]

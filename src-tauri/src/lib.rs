@@ -5,6 +5,7 @@
 //! runs the window event loop. Editor behavior belongs in dedicated crates
 //! (see `docs/architecture.md`), not here.
 
+mod backups;
 mod bench;
 mod commands;
 mod dialogs;
@@ -78,6 +79,14 @@ pub fn run() {
       }
       // Benchmarks measure the editor alone unless asked otherwise.
       extensions::init(app.handle(), load_extensions);
+      // Benchmark runs keep no backups and restore none.
+      let backup_root = app
+        .path()
+        .app_local_data_dir()
+        .ok()
+        .filter(|_| !benchmarking)
+        .map(|dir| dir.join("backups"));
+      let crashed = backups::init(app.handle(), backup_root);
 
       // Benchmarks start from a clean session.
       let (previous_files, named) = if benchmarking {
@@ -103,6 +112,7 @@ pub fn run() {
       editor::open_startup_files(
         app.handle(),
         previous_files.into_iter().chain(named).collect(),
+        crashed,
       );
       Ok(())
     })
@@ -170,9 +180,13 @@ pub fn run() {
     }
   };
 
-  app.run(|handle, event| {
-    if let RunEvent::Exit = event {
+  app.run(|handle, event| match event {
+    RunEvent::ExitRequested { api, .. } => editor::on_exit_requested(handle, &api),
+    RunEvent::Exit => {
       tracing::info!("exiting");
+      // Removes the backups of unsaved changes, or keeps them if the exit
+      // skipped asking about them.
+      backups::shutdown(handle);
       // Stop extensions, language servers, and background work (searches,
       // indexing) before the process ends.
       extensions::shutdown(handle);
@@ -186,5 +200,6 @@ pub fn run() {
         guard.flush();
       }
     }
+    _ => {}
   });
 }

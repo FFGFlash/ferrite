@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { getPerfStats, type PerfStats } from "../ipc/perf";
+import { extensionsStore, useExtensionUsage } from "../state/extensions";
 import { perfSnapshot, type SeriesSummary } from "../state/perf";
 import { createStore, useStore } from "../state/store";
 import "./PerfOverlay.css";
@@ -16,13 +17,17 @@ const mb = (bytes: number) => `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 /** Live timing and memory statistics, toggled with "Developer: Toggle Performance Overlay". */
 export function PerfOverlay() {
   const open = useStore(perfOverlayStore);
+  return open ? <PerfOverlayContent /> : null;
+}
+
+function PerfOverlayContent() {
   const [frontend, setFrontend] = useState<SeriesSummary[]>([]);
   const [backend, setBackend] = useState<PerfStats | null>(null);
 
+  const extensions = useStore(extensionsStore);
+  const usage = useExtensionUsage(REFRESH_MS);
+
   useEffect(() => {
-    if (!open) {
-      return;
-    }
     const refresh = () => {
       setFrontend(perfSnapshot());
       getPerfStats()
@@ -32,11 +37,9 @@ export function PerfOverlay() {
     refresh();
     const timer = setInterval(refresh, REFRESH_MS);
     return () => clearInterval(timer);
-  }, [open]);
+  }, []);
 
-  if (!open) {
-    return null;
-  }
+  const running = extensions.filter((extension) => (usage.get(extension.id)?.calls ?? 0) > 0);
   const heap = (performance as Performance & { memory?: { usedJSHeapSize: number } }).memory;
   return (
     <aside className="perf-overlay" aria-label="Performance statistics">
@@ -115,6 +118,36 @@ export function PerfOverlay() {
             </tr>
           ))}
         </tbody>
+        {running.length > 0 && (
+          <>
+            <thead>
+              <tr>
+                <th>Extensions</th>
+                <th>calls</th>
+                <th>busy ms</th>
+                <th>slowest</th>
+                <th>memory</th>
+              </tr>
+            </thead>
+            <tbody>
+              {running.map((extension) => {
+                const used = usage.get(extension.id)!;
+                return (
+                  <tr key={extension.id}>
+                    <td>
+                      {extension.name}
+                      {used.droppedEvents > 0 && <small> ({used.droppedEvents} dropped)</small>}
+                    </td>
+                    <td>{used.calls}</td>
+                    <td>{used.busyMs.toFixed(used.busyMs < 10 ? 2 : 0)}</td>
+                    <td>{used.slowestCallMs.toFixed(used.slowestCallMs < 10 ? 2 : 0)}</td>
+                    <td>{used.memoryBytes > 0 ? mb(used.memoryBytes) : "—"}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </>
+        )}
       </table>
       <p className="perf-overlay__memory">
         {backend?.backendMemoryBytes != null && <>Backend {mb(backend.backendMemoryBytes)} · </>}

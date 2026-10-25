@@ -130,6 +130,21 @@ export interface ExtensionStatus {
   commands: ExtensionCommand[];
   configErrors: string[];
   contributions: Contributions;
+  usage: ResourceUsage;
+}
+
+/** What an extension has used during this session. */
+export interface ResourceUsage {
+  /** Time spent running its code. */
+  busyMs: number;
+  calls: number;
+  slowestCallMs: number;
+  /** Memory of the running instance; 0 when not running. */
+  memoryBytes: number;
+  peakMemoryBytes: number;
+  /** Document changes dropped because it was busy. */
+  droppedEvents: number;
+  compileMs: number;
 }
 
 export type MessageLevel = "info" | "warning" | "error";

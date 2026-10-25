@@ -203,28 +203,7 @@ impl Document {
   /// cursors before and after it stay put, and the reload can be undone.
   /// Returns whether the text changed.
   pub fn reload(&mut self, text: &str, has_bom: bool, stamp: FileStamp) -> Result<bool, CoreError> {
-    let current = self.buffer.contents();
-    let changed = current != text;
-    if changed {
-      let (prefix, suffix) = common_affixes(&current, text);
-      let edit = Edit::new(
-        prefix..current.len() - suffix,
-        &text[prefix..text.len() - suffix],
-      );
-      let changes = ChangeSet::single(edit)?;
-      let before = self.selections.clone();
-      let inverse = self.buffer.apply(&changes)?;
-      let after = before.map(|s| {
-        Selection::new(
-          changes.map_offset(s.anchor, Bias::Before),
-          changes.map_offset(s.head, Bias::Before),
-        )
-      });
-      self.selections = after.clone();
-      self
-        .history
-        .record(changes, inverse, before, after, EditKind::Other, false);
-    }
+    let changed = self.replace_text(text)?;
     self.saved_state = self.history.current_state();
     if let Some(file) = &mut self.file {
       file.has_bom = has_bom;
@@ -232,6 +211,37 @@ impl Document {
     }
     self.history.seal();
     Ok(changed)
+  }
+
+  /// Replaces the whole text with `text` (taken as is, line endings
+  /// included) as one undoable change, e.g. to restore a backup. Only the
+  /// differing middle section is replaced, so cursors before and after it
+  /// stay put. Returns whether the text changed.
+  pub fn replace_text(&mut self, text: &str) -> Result<bool, CoreError> {
+    let current = self.buffer.contents();
+    if current == text {
+      return Ok(false);
+    }
+    let (prefix, suffix) = common_affixes(&current, text);
+    let edit = Edit::new(
+      prefix..current.len() - suffix,
+      &text[prefix..text.len() - suffix],
+    );
+    let changes = ChangeSet::single(edit)?;
+    let before = self.selections.clone();
+    let inverse = self.buffer.apply(&changes)?;
+    let after = before.map(|s| {
+      Selection::new(
+        changes.map_offset(s.anchor, Bias::Before),
+        changes.map_offset(s.head, Bias::Before),
+      )
+    });
+    self.selections = after.clone();
+    self
+      .history
+      .record(changes, inverse, before, after, EditKind::Other, false);
+    self.history.seal();
+    Ok(true)
   }
 
   /// Applies edits made outside the editor (e.g. by an extension) as one
@@ -444,6 +454,20 @@ tail",
         )
         .expect("reloads")
     );
+    assert!(!document.is_dirty());
+  }
+
+  #[test]
+  fn replacing_the_text_is_one_undoable_dirty_change() {
+    let config = EditorConfig::default();
+    let mut document = Document::new(DocumentId(1), "a\r\nsaved\r\n", None, 0, &config);
+    assert!(document.replace_text("a\r\nrestored\n").expect("replaces"));
+    assert_eq!(document.buffer().contents(), "a\r\nrestored\n");
+    assert!(document.is_dirty());
+    assert!(!document.replace_text("a\r\nrestored\n").expect("replaces"));
+
+    document.apply(crate::ops::EditorOp::Undo).expect("undo");
+    assert_eq!(document.buffer().contents(), "a\r\nsaved\r\n");
     assert!(!document.is_dirty());
   }
 

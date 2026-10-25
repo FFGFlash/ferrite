@@ -5,6 +5,7 @@ import { installGlobalErrorLogging } from "./ipc";
 import { followSystemTheme } from "./themes/theme";
 import "./styles/tokens.css";
 import "./styles/base.css";
+import "./styles/accessibility.css";
 
 followSystemTheme();
 installGlobalErrorLogging();

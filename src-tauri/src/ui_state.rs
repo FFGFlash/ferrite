@@ -2,7 +2,6 @@
 //! open files, and the frontend's layout. Stored as JSON in the app's local
 //! data directory and written atomically whenever it changes.
 
-use std::io::Write;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Mutex, PoisonError};
@@ -82,13 +81,8 @@ impl UiStateStore {
 }
 
 fn write_atomically(path: &std::path::Path, state: &UiState) -> std::io::Result<()> {
-  let dir = path.parent().unwrap_or(std::path::Path::new("."));
-  std::fs::create_dir_all(dir)?;
-  let mut file = tempfile::NamedTempFile::new_in(dir)?;
-  serde_json::to_writer_pretty(&mut file, state)?;
-  file.flush()?;
-  file.persist(path).map_err(|error| error.error)?;
-  Ok(())
+  let bytes = serde_json::to_vec_pretty(state)?;
+  ferrite_workspace::write_file_atomically(path, &bytes)
 }
 
 /// Records which files are open, after documents are opened, closed, or saved

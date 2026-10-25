@@ -1,0 +1,100 @@
+/*
+ * Adjustments for operating system accessibility settings.
+ *
+ * Forced colors (Windows High Contrast and contrast themes) replace colors
+ * with a few system colors and drop backgrounds and shadows used as
+ * indicators. Indicators that would vanish get system-colored outlines or
+ * keep explicit system colors instead.
+ */
+@media (forced-colors: active) {
+  /* Text in the system's text color, without the backplate the browser
+     would paint behind it over selections and matches. Syntax and
+     decoration colors (some inline) give way. */
+  .editor-view__lines {
+    forced-color-adjust: none;
+  }
+
+  .editor-view__lines,
+  .editor-view__lines * {
+    color: CanvasText !important;
+  }
+
+  /* The caret, selections, and find matches are drawn as boxes. */
+  .editor-view__caret {
+    forced-color-adjust: none;
+    background: CanvasText;
+  }
+
+  .editor-view__selection {
+    forced-color-adjust: none;
+    background: Highlight;
+    opacity: 0.5;
+  }
+
+  .editor-view__match {
+    outline: 1px solid CanvasText;
+  }
+
+  .editor-view__match[data-current] {
+    outline: 2px solid Highlight;
+  }
+
+  .editor-view__decoration {
+    outline: 1px dotted CanvasText;
+  }
+
+  .editor-view__diagnostic {
+    forced-color-adjust: none;
+    background: none;
+    border-bottom: 2px solid Mark;
+  }
+
+  .editor-view__line-number[data-active] {
+    color: Highlight;
+  }
+
+  /* Selected and focused items in lists, menus, and tabs. */
+  .editor-tab[aria-selected="true"],
+  .palette__item[aria-selected="true"],
+  .completion-list__item[aria-selected="true"],
+  .context-menu__item[data-selected],
+  .explorer-tree__row[aria-selected="true"],
+  .extension-view__row[aria-selected="true"] {
+    outline: 1px solid Highlight;
+    outline-offset: -1px;
+  }
+
+  .explorer-tree:focus-visible .explorer-tree__row[data-focused],
+  .extension-view__tree:focus-visible .extension-view__row[data-focused] {
+    outline: 2px solid Highlight;
+    outline-offset: -2px;
+  }
+
+  .activitybar__item[aria-pressed="true"]::before {
+    forced-color-adjust: none;
+    background: Highlight;
+  }
+
+  /* Popups need a visible edge without their shadows. */
+  .context-menu,
+  .notification,
+  .palette,
+  .perf-overlay,
+  .find-widget,
+  .hover-card,
+  .completion-list {
+    border: 1px solid CanvasText;
+  }
+}
+
+/* Nothing animates today; keep it that way for people who ask for it. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

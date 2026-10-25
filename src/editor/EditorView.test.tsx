@@ -1,8 +1,9 @@
-import { act, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { EditorOp, Viewport, WireView as View } from "../ipc/editor";
 import { editorStatus } from "../state/editorStatus";
+import { contextMenuStore } from "../components/contextMenuState";
 import { EditorView } from "./EditorView";
 import type { EditorTransport } from "./session";
 
@@ -99,6 +100,50 @@ describe("EditorView", () => {
     input.focus();
     await user.keyboard("a");
     expect(editorStatus.get()).toEqual({ line: 1, column: 4, selectionCount: 1, language: null });
+  });
+
+  it("holds the cursor's line and selection for screen readers", async () => {
+    const user = userEvent.setup();
+    const { transport } = fakeTransport(
+      makeView(["fn main() {", "  ok();", "}"], {
+        selections: [
+          { anchor: { line: 1, column: 2 }, head: { line: 1, column: 6 }, primary: true },
+        ],
+        primary: { position: { line: 1, column: 6 }, visualColumn: 6 },
+      }),
+    );
+    const input = (await renderEditor(transport)) as HTMLTextAreaElement;
+    expect(input.value).toBe("  ok();");
+    expect([input.selectionStart, input.selectionEnd]).toEqual([2, 6]);
+
+    // After typing, it follows the view the backend returns.
+    input.focus();
+    await user.keyboard("x");
+    expect(await screen.findByText("changed")).toBeInTheDocument();
+    expect(input.value).toBe("changed");
+    expect(input.selectionStart).toBe(0);
+  });
+
+  it("inserts composed text once, when composition ends", async () => {
+    const { transport, applied } = fakeTransport(makeView(["ab"]));
+    const input = (await renderEditor(transport)) as HTMLTextAreaElement;
+    fireEvent.compositionStart(input);
+    input.value = "かab";
+    fireEvent.input(input, { isComposing: true });
+    expect(applied).toHaveLength(0);
+    fireEvent.compositionEnd(input, { data: "か" });
+    fireEvent.input(input);
+    expect(applied).toEqual([[{ type: "insert", text: "か" }]]);
+    expect(input.value).toBe("ab");
+  });
+
+  it("opens the context menu from the keyboard without moving the cursor", async () => {
+    const { transport, applied } = fakeTransport(makeView(["abc"]));
+    const input = await renderEditor(transport);
+    fireEvent.contextMenu(input);
+    expect(contextMenuStore.get()?.entries.map((entry) => entry?.label)).toContain("Copy");
+    expect(applied).toHaveLength(0);
+    contextMenuStore.set(null);
   });
 
   it("inserts pasted text", async () => {

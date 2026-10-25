@@ -2,6 +2,7 @@ import { useCallback } from "react";
 import { useKeybindings } from "../commands/registry";
 import { ActivityBar } from "../components/ActivityBar";
 import { ContextMenu } from "../components/ContextMenu";
+import { ErrorBoundary } from "../components/ErrorBoundary";
 import { Notifications } from "../components/Notifications";
 import { Palette } from "../components/Palette";
 import { PerfOverlay } from "../components/PerfOverlay";
@@ -44,20 +45,25 @@ export function Workbench({ appInfo }: WorkbenchProps) {
       <div className="workbench__body">
         <ActivityBar views={views} activeViewId={view?.id ?? null} onSelect={selectView} />
         {view && (
-          <>
-            <SideBar view={view} width={sidebarWidth} />
-            <Sash
-              label="Resize side bar"
-              value={sidebarWidth}
-              min={SIDEBAR_MIN_WIDTH}
-              max={SIDEBAR_MAX_WIDTH}
-              onChange={resize}
-            />
-          </>
+          <SideBar
+            view={view}
+            width={sidebarWidth}
+            resizer={
+              <Sash
+                label="Resize side bar"
+                value={sidebarWidth}
+                min={SIDEBAR_MIN_WIDTH}
+                max={SIDEBAR_MAX_WIDTH}
+                onChange={resize}
+              />
+            }
+          />
         )}
         <EditorArea appInfo={appInfo} />
       </div>
-      <StatusBar appInfo={appInfo} />
+      <ErrorBoundary name="The status bar">
+        <StatusBar appInfo={appInfo} />
+      </ErrorBoundary>
       <Notifications />
       <Palette />
       <ContextMenu />

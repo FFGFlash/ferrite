@@ -3,7 +3,8 @@
 //! The frontend subscribes once with a Tauri `Channel`; events are pushed
 //! through it. A channel is part of IPC itself, so no event permissions are
 //! granted to the webview. A new subscription (e.g. after a reload) replaces
-//! the old one.
+//! the old one. Events sent before the first subscription (during startup)
+//! are kept and delivered when it arrives.
 
 use std::sync::{Mutex, PoisonError};
 
@@ -106,6 +107,18 @@ pub enum AppEvent {
     start: Position,
     end: Position,
   },
+  /// Something the user should know about, such as files that could not be
+  /// reopened or restored unsaved changes.
+  Notice {
+    level: NoticeLevel,
+    message: String,
+  },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum NoticeLevel {
+  Warning,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -115,17 +128,40 @@ pub struct WorkspaceInfo {
   pub name: String,
 }
 
+/// Events kept before the frontend first subscribes.
+const MAX_EARLY_EVENTS: usize = 256;
+
 #[derive(Default)]
-pub struct EventHub(Mutex<Option<Channel<AppEvent>>>);
+struct Hub {
+  channel: Option<Channel<AppEvent>>,
+  early: Vec<AppEvent>,
+}
+
+#[derive(Default)]
+pub struct EventHub(Mutex<Hub>);
 
 impl EventHub {
   pub fn emit(&self, event: AppEvent) {
-    let channel = self.0.lock().unwrap_or_else(PoisonError::into_inner);
-    if let Some(channel) = channel.as_ref()
-      && let Err(error) = channel.send(event)
-    {
-      tracing::debug!(%error, "event not delivered");
+    let mut hub = self.0.lock().unwrap_or_else(PoisonError::into_inner);
+    match hub.channel.as_ref() {
+      Some(channel) => {
+        if let Err(error) = channel.send(event) {
+          tracing::debug!(%error, "event not delivered");
+        }
+      }
+      None if hub.early.len() < MAX_EARLY_EVENTS => hub.early.push(event),
+      None => tracing::debug!("event dropped before the frontend subscribed"),
     }
+  }
+
+  fn subscribe(&self, channel: Channel<AppEvent>) {
+    let mut hub = self.0.lock().unwrap_or_else(PoisonError::into_inner);
+    for event in std::mem::take(&mut hub.early) {
+      if let Err(error) = channel.send(event) {
+        tracing::debug!(%error, "event not delivered");
+      }
+    }
+    hub.channel = Some(channel);
   }
 }
 
@@ -136,5 +172,5 @@ pub fn emit(app: &AppHandle, event: AppEvent) {
 
 #[tauri::command]
 pub fn events_subscribe(hub: State<'_, EventHub>, channel: Channel<AppEvent>) {
-  *hub.0.lock().unwrap_or_else(PoisonError::into_inner) = Some(channel);
+  hub.subscribe(channel);
 }

@@ -29,6 +29,7 @@ pub mod keys;
 pub mod manifest;
 mod permissions;
 mod runtime;
+mod usage;
 mod worker;
 
 /// Host bindings generated from the WIT interface.
@@ -53,6 +54,7 @@ pub use contributions::Contributions;
 pub use host::{CommandTicket, ExtensionHost};
 pub use manifest::{MANIFEST_FILE, Manifest, ManifestError};
 pub use permissions::{Decision, Permission};
+pub use usage::ResourceUsage;
 
 /// What the host needs from the application.
 pub trait Embedder: Send + Sync + 'static {
@@ -167,6 +169,8 @@ pub struct ExtensionDecoration {
 pub struct Limits {
   /// Linear memory per instance.
   pub memory_bytes: usize,
+  /// Linear memory of all running extensions together.
+  pub total_memory_bytes: usize,
   /// Instantiating and activating.
   pub activation_time: Duration,
   /// Running one command.
@@ -181,6 +185,7 @@ impl Default for Limits {
   fn default() -> Self {
     Self {
       memory_bytes: 128 * 1024 * 1024,
+      total_memory_bytes: 512 * 1024 * 1024,
       activation_time: Duration::from_secs(5),
       command_time: Duration::from_secs(10),
       event_time: Duration::from_secs(1),
@@ -292,4 +297,5 @@ pub struct ExtensionStatus {
   /// Problems with the user's configuration values.
   pub config_errors: Vec<String>,
   pub contributions: Contributions,
+  pub usage: ResourceUsage,
 }

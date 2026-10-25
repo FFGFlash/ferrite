@@ -1,10 +1,15 @@
 .sidebar {
+  position: relative;
   display: flex;
   flex-direction: column;
   flex: none;
   min-width: 0;
   background: var(--color-sidebar-background);
   color: var(--color-sidebar-foreground);
+}
+
+.sidebar + * {
+  border-left: 1px solid var(--color-border);
 }
 
 .sidebar__header {

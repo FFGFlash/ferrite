@@ -9,7 +9,7 @@
 
 use std::path::Path;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
@@ -18,6 +18,7 @@ use wasmtime::{Config, Engine, ResourceLimiter, UpdateDeadline};
 
 use crate::api::ApiContext;
 use crate::bindings::Extension;
+use crate::usage::Usage;
 
 /// How often deadlines are checked.
 pub const TICK: Duration = Duration::from_millis(10);
@@ -48,24 +49,109 @@ pub struct StoreState {
   pub interrupt: Option<Interrupt>,
 }
 
-/// Caps linear memory, tables, and instance counts, and remembers when the
-/// memory cap was hit so the failure can be reported as such.
+/// Memory shared by all extensions: each instance reserves what its linear
+/// memories grow to, so together they stay within the total.
+#[derive(Debug)]
+pub struct MemoryPool {
+  used: AtomicUsize,
+  limit: usize,
+}
+
+impl MemoryPool {
+  pub fn new(limit: usize) -> Self {
+    Self {
+      used: AtomicUsize::new(0),
+      limit,
+    }
+  }
+
+  pub fn limit(&self) -> usize {
+    self.limit
+  }
+
+  fn reserve(&self, bytes: usize) -> bool {
+    let mut used = self.used.load(Ordering::Acquire);
+    loop {
+      let Some(total) = used.checked_add(bytes).filter(|total| *total <= self.limit) else {
+        return false;
+      };
+      match self
+        .used
+        .compare_exchange_weak(used, total, Ordering::AcqRel, Ordering::Acquire)
+      {
+        Ok(_) => return true,
+        Err(actual) => used = actual,
+      }
+    }
+  }
+
+  fn release(&self, bytes: usize) {
+    self.used.fetch_sub(bytes, Ordering::AcqRel);
+  }
+
+  #[cfg(test)]
+  fn used(&self) -> usize {
+    self.used.load(Ordering::Acquire)
+  }
+}
+
+/// Which memory limit stopped a growth.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MemoryExceeded {
+  /// The extension's own limit.
+  Instance,
+  /// The limit for all extensions together.
+  Total,
+}
+
+/// Caps linear memory (per instance and in the shared pool), tables, and
+/// instance counts, remembers which memory cap was hit so the failure can be
+/// reported as such, and accounts for memory in the extension's usage.
 pub struct Limiter {
   pub max_memory: usize,
-  pub memory_exceeded: bool,
+  pub memory_exceeded: Option<MemoryExceeded>,
+  pub usage: Arc<Usage>,
+  pub pool: Arc<MemoryPool>,
+  /// Bytes reserved in the pool by this instance's memories.
+  reserved: usize,
+}
+
+impl Limiter {
+  pub fn new(max_memory: usize, usage: Arc<Usage>, pool: Arc<MemoryPool>) -> Self {
+    Self {
+      max_memory,
+      memory_exceeded: None,
+      usage,
+      pool,
+      reserved: 0,
+    }
+  }
+}
+
+impl Drop for Limiter {
+  fn drop(&mut self) {
+    self.pool.release(self.reserved);
+  }
 }
 
 impl ResourceLimiter for Limiter {
   fn memory_growing(
     &mut self,
-    _current: usize,
+    current: usize,
     desired: usize,
     _maximum: Option<usize>,
   ) -> wasmtime::Result<bool> {
-    if desired > self.max_memory {
-      self.memory_exceeded = true;
+    let growth = desired.saturating_sub(current);
+    if self.reserved + growth > self.max_memory {
+      self.memory_exceeded = Some(MemoryExceeded::Instance);
       return Ok(false);
     }
+    if !self.pool.reserve(growth) {
+      self.memory_exceeded = Some(MemoryExceeded::Total);
+      return Ok(false);
+    }
+    self.reserved += growth;
+    self.usage.set_memory(self.reserved);
     Ok(true)
   }
 
@@ -214,6 +300,24 @@ fn is_component(bytes: &[u8]) -> bool {
 #[cfg(test)]
 mod tests {
   use super::*;
+
+  #[test]
+  fn instances_share_the_memory_pool() {
+    let pool = Arc::new(MemoryPool::new(100));
+    let mut a = Limiter::new(80, Arc::default(), pool.clone());
+    let mut b = Limiter::new(80, Arc::default(), pool.clone());
+    assert!(a.memory_growing(0, 60, None).expect("grows"));
+    assert!(!a.memory_growing(60, 90, None).expect("checked"));
+    assert_eq!(a.memory_exceeded, Some(MemoryExceeded::Instance));
+    assert!(!b.memory_growing(0, 50, None).expect("checked"));
+    assert_eq!(b.memory_exceeded, Some(MemoryExceeded::Total));
+    assert!(b.memory_growing(0, 40, None).expect("grows"));
+    assert_eq!(pool.used(), 100);
+    drop(a);
+    assert_eq!(pool.used(), 40, "a stopped instance returns its memory");
+    drop(b);
+    assert_eq!(pool.used(), 0);
+  }
 
   #[test]
   fn tells_components_from_modules() {

@@ -414,6 +414,7 @@ Each extension runs on its own thread with these limits:
 | Limit                          | Value                      |
 | ------------------------------ | -------------------------- |
 | Memory (linear memory)         | 128 MiB                    |
+| Memory of all extensions       | 512 MiB together           |
 | Instantiation and `activate`   | 5 s                        |
 | One command                    | 10 s                       |
 | One notification, `deactivate` | 1 s                        |
@@ -424,6 +425,17 @@ Each extension runs on its own thread with these limits:
 misses a deadline. Infinite loops are interrupted at the deadline. The extension is marked
 failed, and its diagnostics, decorations, status bar items, and view contents are removed. The
 user sees why, with a **Restart** button. The editor and the document are unaffected.
+
+**Shared memory.** Running extensions share a 512 MiB memory pool, besides each one's own
+limit. An extension whose memory can't grow because the pool is used up fails with a message
+saying so, and a stopped extension returns its memory to the pool.
+
+**Resource use.** Ferrite counts, per extension, how often it ran and for how long, its slowest
+call, its memory (current and peak), the document changes it skipped because its queue was
+full, and how long it took to compile. Users see this in the Extensions view and in **Developer:
+Toggle Performance Overlay**. A call that takes more than a quarter of its deadline is logged as
+`slow extension call`. Keep handlers short: do the minimum per change, and use the changed
+ranges instead of re-reading the whole document.
 
 **Commands.** A command that returns `Err(message)` shows the message as an error; the
 extension keeps running.

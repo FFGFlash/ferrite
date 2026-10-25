@@ -1,3 +1,4 @@
+import { formatUsage } from "../app/format";
 import { executeCommand } from "../commands/registry";
 import {
   restartExtension,
@@ -6,8 +7,9 @@ import {
   type ExtensionState,
   type ExtensionStatus,
   type Permission,
+  type ResourceUsage,
 } from "../ipc/extensions";
-import { extensionsStore } from "../state/extensions";
+import { extensionsStore, useExtensionUsage } from "../state/extensions";
 import { reportError } from "../state/notifications";
 import { useStore } from "../state/store";
 import "./ExtensionsPanel.css";
@@ -42,6 +44,7 @@ function contributionSummary(extension: ExtensionStatus): string | null {
 /** Lists installed and development extensions with their state and permissions. */
 export function ExtensionsPanel() {
   const extensions = useStore(extensionsStore);
+  const usage = useExtensionUsage();
   if (extensions.length === 0) {
     return (
       <div className="extensions-panel__empty">
@@ -63,7 +66,11 @@ export function ExtensionsPanel() {
   return (
     <ul className="extensions-panel" aria-label="Extensions">
       {extensions.map((extension) => (
-        <ExtensionItem key={extension.id} extension={extension} />
+        <ExtensionItem
+          key={extension.id}
+          extension={extension}
+          usage={usage.get(extension.id) ?? extension.usage}
+        />
       ))}
     </ul>
   );
@@ -73,7 +80,8 @@ function act(action: string, run: () => Promise<void>): void {
   run().catch((error: unknown) => reportError(action, error));
 }
 
-function ExtensionItem({ extension }: { extension: ExtensionStatus }) {
+function ExtensionItem({ extension, usage }: { extension: ExtensionStatus; usage: ResourceUsage }) {
+  const usageText = formatUsage(usage);
   const valid = extension.state !== "invalid";
   const runs = valid && extension.state !== "ready";
   const visibleCommands = extension.commands.filter((command) => !command.hidden);
@@ -96,6 +104,7 @@ function ExtensionItem({ extension }: { extension: ExtensionStatus }) {
       {contributionSummary(extension) && (
         <p className="extension__contributes">{contributionSummary(extension)}</p>
       )}
+      {usageText && <p className="extension__usage">{usageText}</p>}
       {extension.error && (
         <p className="extension__error" role="alert">
           {extension.error}

@@ -45,6 +45,15 @@ const tidy: ExtensionStatus = {
     views: [],
     decorations: [],
   },
+  usage: {
+    busyMs: 3.42,
+    calls: 12,
+    slowestCallMs: 1.2,
+    memoryBytes: 1153434,
+    peakMemoryBytes: 0,
+    droppedEvents: 0,
+    compileMs: 0,
+  },
 };
 
 describe("ExtensionsPanel", () => {
@@ -70,10 +79,15 @@ describe("ExtensionsPanel", () => {
       commands: [],
       configErrors: [],
       development: false,
+      usage: { ...tidy.usage, calls: 0 },
     };
     extensionsStore.set([tidy, broken]);
     render(<ExtensionsPanel />);
     expect(screen.getByText("Tidy")).toBeInTheDocument();
+    expect(
+      screen.getByText("Ran 12 times for 3.4 ms in total (slowest 1.2 ms) · 1.1 MB memory"),
+    ).toBeInTheDocument();
+    expect(screen.getAllByText(/^Ran /)).toHaveLength(1);
     expect(screen.getByText("Active")).toBeInTheDocument();
     expect(screen.getByText("dev")).toBeInTheDocument();
     expect(screen.getByRole("checkbox", { name: "Read open documents" })).toBeChecked();

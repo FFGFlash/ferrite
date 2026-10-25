@@ -85,6 +85,9 @@ export function handleEvent(event: AppEvent): void {
     case "extensionReveal":
       revealInDocument(event.documentId, event.start, event.end);
       break;
+    case "notice":
+      notify(event.level, event.message);
+      break;
     case "documentEdited": {
       setDirty(event.documentId, true);
       const editor = activeEditor.get();

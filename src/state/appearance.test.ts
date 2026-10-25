@@ -34,6 +34,15 @@ const themes = {
     views: [],
     decorations: [],
   },
+  usage: {
+    busyMs: 0,
+    calls: 0,
+    slowestCallMs: 0,
+    memoryBytes: 0,
+    peakMemoryBytes: 0,
+    droppedEvents: 0,
+    compileMs: 0,
+  },
 } satisfies ExtensionStatus;
 
 describe("appearance", () => {

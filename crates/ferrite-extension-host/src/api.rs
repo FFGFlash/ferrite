@@ -97,6 +97,12 @@ pub struct ApiContext {
 }
 
 impl ApiContext {
+  pub fn extension_id(&self) -> &str {
+    &self.id
+  }
+}
+
+impl ApiContext {
   pub fn new(shared: Weak<Shared>, setup: &Setup) -> Self {
     Self {
       shared,

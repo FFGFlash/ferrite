@@ -36,6 +36,7 @@ import { useStore } from "../state/store";
 import { activeEditor, type EditorController } from "./activeEditor";
 import { isWordChar, visibleCompletions, wordAround } from "./completion";
 import { FindWidget, type FindState } from "./FindWidget";
+import { inputMirror, typedText, type InputMirror } from "./inputMirror";
 import { isMac, keyToCommand } from "./keymap";
 import {
   COMPLETION_ROW_HEIGHT,
@@ -162,6 +163,14 @@ export function EditorView({ documentId, title, transport = ipcTransport }: Edit
   const [, setScrollTick] = useState(0);
   viewRef.current = view;
   findRef.current = find;
+  const mirror = useMemo(() => (view ? inputMirror(view) : null) ?? EMPTY_MIRROR, [view]);
+  const mirrorRef = useRef(mirror);
+  mirrorRef.current = mirror;
+  useLayoutEffect(() => {
+    if (inputRef.current && !composing) {
+      showMirror(inputRef.current, mirror);
+    }
+  }, [mirror, composing]);
   const hoverRef = useRef(hover);
   hoverRef.current = hover;
   const hoverTimerRef = useRef<number | undefined>(undefined);
@@ -181,6 +190,9 @@ export function EditorView({ documentId, title, transport = ipcTransport }: Edit
   /** When the view being rendered arrived, and when the oldest unpainted input happened. */
   const receivedAtRef = useRef(0);
   const inputStartRef = useRef<number | null>(null);
+
+  // Focusing must not scroll: the input spans the cursor's whole line.
+  const focusInput = () => inputRef.current?.focus({ preventScroll: true });
 
   const dispatch = (op: EditorOp) => {
     revealRef.current = true;
@@ -214,7 +226,7 @@ export function EditorView({ documentId, title, transport = ipcTransport }: Edit
       session.dispatch({ type: "setCursor", position: pending.start, extend: false, add: false });
       session.dispatch({ type: "setCursor", position: pending.end, extend: true, add: false });
     }
-    inputRef.current?.focus();
+    focusInput();
     return () => {
       const scroller = scrollRef.current;
       if (scroller) {
@@ -235,7 +247,7 @@ export function EditorView({ documentId, title, transport = ipcTransport }: Edit
       openFind: (replace) => openFind(replace),
       findNext: (backward) => findNext(backward),
       refresh: () => sessionRef.current?.refresh(),
-      focus: () => inputRef.current?.focus(),
+      focus: () => focusInput(),
       lineCount: () => viewRef.current?.lineCount ?? 0,
       scrollToLine: (line) => {
         const scroller = scrollRef.current;
@@ -392,7 +404,7 @@ export function EditorView({ documentId, title, transport = ipcTransport }: Edit
 
   const closeFind = () => {
     setFind(null);
-    inputRef.current?.focus();
+    focusInput();
   };
 
   // Scroll events already arrive at most once per frame; requesting lines
@@ -472,15 +484,49 @@ export function EditorView({ documentId, title, transport = ipcTransport }: Edit
     }
   };
 
+  const insertTyped = (text: string) => {
+    dispatch({ type: "insert", text });
+    afterTyping(text);
+  };
+
+  // Typing is applied to the document, not the input: the input mirrors the
+  // view (see inputMirror.ts). Keys and clipboard events are handled
+  // before they reach `beforeinput`; composition text can't be cancelled.
+  useEffect(() => {
+    const input = inputRef.current;
+    if (!input) {
+      return;
+    }
+    const onBeforeInput = (event: InputEvent) => {
+      if (event.isComposing || composingRef.current) {
+        return;
+      }
+      if (event.inputType === "insertCompositionText") {
+        return;
+      }
+      event.preventDefault();
+      if (
+        (event.inputType === "insertText" || event.inputType === "insertReplacementText") &&
+        event.data
+      ) {
+        insertTyped(event.data);
+      }
+    };
+    input.addEventListener("beforeinput", onBeforeInput);
+    return () => input.removeEventListener("beforeinput", onBeforeInput);
+  });
+
+  // Input the browser applied anyway: apply the difference, then restore.
   const onInput = (event: FormEvent<HTMLTextAreaElement>) => {
     if ((event.nativeEvent as InputEvent).isComposing || composingRef.current) {
       return;
     }
-    const text = event.currentTarget.value;
-    event.currentTarget.value = "";
-    if (text) {
-      dispatch({ type: "insert", text });
-      afterTyping(text);
+    const input = event.currentTarget;
+    const current = mirrorRef.current;
+    const typed = typedText(current, input.value);
+    showMirror(input, current);
+    if (typed) {
+      insertTyped(typed);
     }
   };
 
@@ -492,10 +538,9 @@ export function EditorView({ documentId, title, transport = ipcTransport }: Edit
   const onCompositionEnd = (event: CompositionEvent<HTMLTextAreaElement>) => {
     composingRef.current = false;
     setComposing(false);
-    event.currentTarget.value = "";
+    showMirror(event.currentTarget, mirrorRef.current);
     if (event.data) {
-      dispatch({ type: "insert", text: event.data });
-      afterTyping(event.data);
+      insertTyped(event.data);
     }
   };
 
@@ -537,7 +582,7 @@ export function EditorView({ documentId, title, transport = ipcTransport }: Edit
       return;
     }
     event.preventDefault();
-    inputRef.current?.focus();
+    focusInput();
     hideHover();
     closeCompletion();
     const position = positionAt(event.clientX, event.clientY);
@@ -662,9 +707,18 @@ export function EditorView({ documentId, title, transport = ipcTransport }: Edit
     event.preventDefault();
     hideHover();
     closeCompletion();
-    inputRef.current?.focus();
-    const position = positionAt(event.clientX, event.clientY);
+    focusInput();
+    // Shift+F10 and the menu key target the focused input (the mouse can't
+    // reach it): open the menu at the cursor, without moving it.
+    const fromKeyboard = event.target === inputRef.current;
+    const position = fromKeyboard ? null : positionAt(event.clientX, event.clientY);
     const current = viewRef.current;
+    let [x, y] = [event.clientX, event.clientY];
+    const caret = overlay.carets.find((candidate) => candidate.primary);
+    const lines = linesRef.current?.getBoundingClientRect();
+    if (fromKeyboard && caret && lines) {
+      [x, y] = [lines.left + caret.left, lines.top + caret.top + lineHeight];
+    }
     // Right-clicking outside the selection moves the cursor there first.
     if (position && current) {
       const inside = current.selections.some((selection) => {
@@ -713,7 +767,7 @@ export function EditorView({ documentId, title, transport = ipcTransport }: Edit
         run: () => openPalette(">"),
       },
     );
-    openContextMenu(event.clientX, event.clientY, entries);
+    openContextMenu(x, y, entries);
   };
 
   const onContentMouseLeave = (event: ReactMouseEvent<HTMLDivElement>) => {
@@ -884,7 +938,7 @@ export function EditorView({ documentId, title, transport = ipcTransport }: Edit
     dispatch({ type: "setCursor", position: item.from, extend: true, add: false });
     dispatch({ type: "insert", text: item.insert });
     closeCompletion();
-    inputRef.current?.focus();
+    focusInput();
   };
 
   const primaryCaret: Rect | undefined = overlay.carets.find((c) => c.primary);
@@ -1050,7 +1104,17 @@ export function EditorView({ documentId, title, transport = ipcTransport }: Edit
                 className="editor-view__input"
                 data-editor-input=""
                 data-composing={composing || undefined}
-                style={{ top: primary?.top ?? 0, left: primary?.left ?? 0 }}
+                data-mirror={mirror.line >= 0 || undefined}
+                style={
+                  mirror.line >= 0
+                    ? {
+                        top: (mirror.line - startLine) * lineHeight,
+                        left: 0,
+                        width: "100%",
+                        height: mirror.value.split("\n").length * lineHeight,
+                      }
+                    : { top: primary?.top ?? 0, left: primary?.left ?? 0 }
+                }
                 aria-label={`Editor for ${title}`}
                 aria-multiline="true"
                 autoComplete="off"
@@ -1090,6 +1154,28 @@ function earlier(a: Position, b: Position): Position {
 }
 
 const NO_OVERLAYS: readonly TextOverlay[] = [];
+
+/** The input's content when nothing is mirrored: empty, at the caret. */
+const EMPTY_MIRROR: InputMirror = {
+  line: -1,
+  value: "",
+  selectionStart: 0,
+  selectionEnd: 0,
+  direction: "forward",
+};
+
+function showMirror(input: HTMLTextAreaElement, mirror: InputMirror): void {
+  if (input.value !== mirror.value) {
+    input.value = mirror.value;
+  }
+  if (
+    input.selectionStart !== mirror.selectionStart ||
+    input.selectionEnd !== mirror.selectionEnd ||
+    input.selectionDirection !== mirror.direction
+  ) {
+    input.setSelectionRange(mirror.selectionStart, mirror.selectionEnd, mirror.direction);
+  }
+}
 
 interface LineProps {
   line: DisplayLine;

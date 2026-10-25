@@ -4,7 +4,7 @@ This document describes Ferrite's architecture as it currently exists and how it
 grow. The goals and constraints come from [`DESIGN.md`](DESIGN.md); decisions with lasting
 consequences are recorded as ADRs in [`adr/`](adr/).
 
-## Current state (Milestone 7)
+## Current state (Milestone 8)
 
 ```text
 ┌──────────────────────────── Desktop process (ferrite) ─────────────────────────────┐
@@ -41,7 +41,7 @@ Tauri, and nothing in Rust depends on the frontend.
 | Crate                    | Responsibility                                                                                                                                                                                                                   | Depends on                                                                     |
 | ------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------ |
 | `ferrite-text`           | Rope-backed `TextBuffer`, validated `ChangeSet`s, versions, the line-splice log, UTF-16 conversion, grapheme/word boundaries, line endings, regex/literal search over the rope                                                   | `ropey`, `unicode-segmentation`, `regex-cursor`                                |
-| `ferrite-workspace`      | Reading and atomically writing files, directory listings with ignore rules, the Go to File index, find in files, file watching                                                                                                   | `ferrite-text`, `ignore`, `globset`, `nucleo-matcher`, `notify-debouncer-mini` |
+| `ferrite-workspace`      | Reading and atomically writing files, directory listings with ignore rules, the Go to File index, find in files, file watching, backups of unsaved documents                                                                     | `ferrite-text`, `ignore`, `globset`, `nucleo-matcher`, `notify-debouncer-mini` |
 | `ferrite-core`           | `Editor` (open documents), `Document`, selections, `EditorOp`s (including find/replace), undo history, dirty state, reload from disk, incremental viewport updates. No I/O.                                                      | `ferrite-text`, `ferrite-workspace` (for `FileStamp`)                          |
 | `ferrite-syntax`         | Bundled Tree-sitter grammars and highlight queries (Rust, TypeScript/TSX, JavaScript, JSON, TOML, Python), language detection, incremental and interruptible parsing, per-line highlight spans                                   | `ferrite-text`, `tree-sitter`, grammar crates                                  |
 | `ferrite-lsp`            | Language server processes and JSON-RPC over stdio, UTF-8/UTF-16 position conversion, incremental document changes from the edit log, known servers and workspace roots, a scripted test server                                   | `ferrite-text`, `lsp-types`, `serde_json`                                      |
@@ -57,8 +57,9 @@ workspace, `extensions/`. The design brief's `editor-app` and `src-tauri` are on
 [ADR 0003](adr/0003-workbench-services.md), and performance decisions in
 [ADR 0004](adr/0004-performance-foundations.md), and syntax and language server decisions in
 [ADR 0005](adr/0005-syntax-and-language-servers.md), and extension decisions in
-[ADR 0006](adr/0006-wasm-extensions.md) and [ADR 0007](adr/0007-workbench-contributions.md).
-Measurements are in
+[ADR 0006](adr/0006-wasm-extensions.md) and [ADR 0007](adr/0007-workbench-contributions.md),
+and hardening decisions (crash recovery, accessibility, regression checks) in
+[ADR 0008](adr/0008-hardening.md). Measurements are in
 [`performance.md`](performance.md).
 
 ## Background work
@@ -145,7 +146,10 @@ I/O.
   lock, then writes it without the lock, so editing can continue. The file is written to a
   temporary file in the same directory, flushed with `fsync`, then renamed over the target. A
   crash therefore leaves either the old or the new file, never a partial one. Symlinks are
-  followed. Read-only files are refused. Unix permission bits are copied to the new file.
+  followed. Read-only files are refused. Unix permission bits are copied to the new file. On
+  Windows, the rename is retried for up to about 600 ms while another program (a virus scanner,
+  an indexer, a sync client) briefly has the file open. The app's own files (settings edits,
+  `state.json`, permission decisions) are written the same way (`write_file_atomically`).
 - **External modification policy**: each document remembers the file's modification time and
   length from when it was loaded or saved. If they differ at save time, nothing is written and the
   user is asked whether to overwrite. A file deleted externally is recreated on save. While a
@@ -203,10 +207,64 @@ timestamp granularity and with the same length isn't detected.
   and the frontend's layout (side bar visibility, width, active view, expanded folders). It's
   written atomically on every change; the frontend debounces its layout updates by 500 ms. On
   launch the folder and files are reopened, then any files named on the command line, the last of
-  which becomes active. Unsaved changes are not persisted, so closing still asks about them.
+  which becomes active. Unsaved changes are backed up only for crash recovery (see below), not
+  kept across a normal close, so closing still asks about them.
 - **`extension-permissions.json`** next to `settings.toml` holds the user's permission decisions
   and enabled state for each extension. Installed extensions live in the `extensions` folder
   there too.
+
+## Crash recovery and error handling
+
+### Backups of unsaved changes
+
+A background thread (`src-tauri/src/backups.rs`) keeps a backup of every document with unsaved
+changes, so a crash, a forced shutdown, or a power cut loses at most the last second of work.
+
+- **Where.** Each running instance has a session folder,
+  `<local data dir>/backups/<pid>-<time>/`. It holds one file per unsaved document: a format
+  line, JSON metadata (path, title, cursor), then the text as is. The folder's `lock` file stays
+  exclusively locked while the instance runs (`File::try_lock`). The operating system releases
+  the lock when the process ends, however it ends.
+- **When.** Edits only signal the thread. It waits 750 ms for a burst of edits to settle, then
+  takes O(1) rope snapshots under the editor lock and writes them without it. Each file is
+  written next to its final name and renamed into place.
+  - Large documents are backed up less often: a document isn't written again sooner than its
+    size at 4 MB/s, so a 100 MB file is backed up every 25 s while it's being edited.
+  - Backups of documents that are saved, closed, or undone back to their saved text are removed.
+    A document closed with **Don't Save** loses its backup immediately.
+- **Restoring.** At startup, a session folder whose lock can be taken belongs to an instance that
+  didn't exit cleanly, and its backups are restored before the previous session's files reopen.
+  - A file-backed document opens with the file's text, and the backup is applied as one undoable
+    change. It's dirty, its undo history leads back to the file on disk, and saving still checks
+    for external changes.
+  - A backup whose text matches the file is skipped. A backup whose file was deleted becomes an
+    untitled document.
+  - The restored documents are backed up in the new session before the old folder is removed.
+    If any backup can't be restored, the old folder is kept.
+  - A warning lists what was restored.
+- **Exiting.** A clean exit removes the session folder: all changes were saved, or the user chose
+  **Don't Save**. Otherwise (an exit that skipped the prompt), the backups are flushed and kept
+  for the next start.
+- **Quit without the window closing.** Quit on macOS (`Cmd+Q`) asks about unsaved changes like
+  closing the window does (`RunEvent::ExitRequested`).
+- **Benchmark runs** keep no backups and restore none.
+
+### Errors
+
+- **Backend.** Non-test code has no `unwrap` (a Clippy lint) or `expect`. Poisoned locks are
+  recovered rather than propagated. Panics are caught in scheduler tasks and around each
+  extension's thread, and logged by the panic hook. Tauri commands return typed
+  `CommandError`s, which the frontend shows.
+- **Problems found in the background** (files that can't be reopened at startup, restored
+  changes) reach the user as `notice` events. Events sent before the frontend subscribes are kept
+  (up to 256) and delivered when it does.
+- **Frontend.** React error boundaries surround the workbench, each side bar view, the editor
+  (reset when switching documents), and the status bar. A rendering error is logged and replaced
+  by a message with **Try Again** and **Reload Window**, and the rest stays usable. Documents,
+  unsaved changes, and extensions live in the backend, so **Developer: Reload Window** loses
+  nothing. Uncaught errors and unhandled rejections are forwarded to the backend log.
+- **Notifications.** Information notifications disappear after 10 s, but not while hovered or
+  focused. Warnings, errors, and notifications with buttons stay until dismissed.
 
 ## Commands and keybindings
 
@@ -439,12 +497,19 @@ connects it to the editor, settings, and frontend. The developer guide is
 - **Diagnostics** from extensions are stored per extension and document, like LSP diagnostics,
   and merged into views, hover cards, and the status bar's counts.
 - **Limits and failures:**
-  - Memory, stack, and table limits come from a `ResourceLimiter`.
+  - Memory, stack, and table limits come from a `ResourceLimiter`. Besides each instance's limit
+    (128 MiB), all running extensions together may use 512 MiB: instances reserve what their
+    memories grow to in a shared pool, and return it when they stop.
   - Call deadlines (5 s activation, 10 s commands, 1 s notifications) use epoch interruption
     with a 10 ms ticker.
   - Output is limited (log and message rate limits; read, edit, and diagnostic sizes).
   - A failure stops the instance, removes its diagnostics, marks the extension failed, and shows
     the reason with a **Restart** action.
+- **Resource accounting.** The host counts, per extension (`usage.rs`): time spent in calls,
+  call count, slowest call, current and peak memory, events dropped from a full queue, and
+  compile time. The counters are atomics, kept across restarts. The Extensions view and the
+  performance overlay show them. A call that takes more than a quarter of its deadline is logged
+  as slow.
 - **Benchmarks** run without extensions unless `--extensions` is passed to `scripts/bench.mjs`.
 
 ### Workbench contributions
@@ -519,11 +584,24 @@ them. Extensions fill in content through the `workbench` interface (API 1.1).
   an extension's theme, which overrides tokens with inline custom properties on `<html>` (as do
   the user's `workbench.colors`). The allowed tokens are listed in `themes/tokens.json`.
   Editor font size, family, line height, and tab width are CSS variables set from settings.
-- **Accessibility**: the tab strip and tab panels use ARIA tab roles, and unsaved tabs say so in
-  their accessible name. The explorer is an ARIA `tree` with arrow-key navigation, and the palette
-  is a combobox with `aria-activedescendant`. Find options are toggle buttons, errors are
-  announced through `role="alert"`, and the sash is keyboard adjustable. Screen readers can't yet
-  read the editor's text, because the input textarea is empty; that's planned for M8.
+- **Accessibility**:
+  - **Roles.** The tab strip and tab panels use ARIA tab roles, and unsaved tabs say so in their
+    accessible name. The explorer and extension views are ARIA `tree`s with arrow-key navigation,
+    and the palette is a combobox with `aria-activedescendant`. Find options are toggle buttons,
+    errors are announced through `role="alert"`, and the sash is keyboard adjustable.
+  - **Screen readers** read the editor's text through its input textarea
+    (`editor/inputMirror.ts`). The textarea holds the cursor's line, or the selected lines (up to
+    100), with the editor's selection. It's laid over the rendered line, so its text lines up and
+    IME windows appear at the cursor. It never edits itself: `beforeinput` is cancelled and
+    applied as editor operations, composition text is applied when composition ends, and the
+    mirror follows each new view.
+  - **Context menus** open from the keyboard (`Shift+F10`, the menu key) at the cursor or the
+    focused explorer row.
+  - **System settings.** `styles/accessibility.css` handles forced colors (Windows contrast
+    themes): carets, selections, matches, focused and selected items, and popup edges get system
+    colors or outlines. It also turns off motion when `prefers-reduced-motion` is set.
+  - **Automated checks.** axe-core runs over the workbench, its views, the palette, menus,
+    notifications, and the editor in the test suite (`app/accessibility.test.tsx`).
 
 ## Logging and diagnostics
 
@@ -577,6 +655,28 @@ window was already interactive.
 The M1 release `ferrite.exe` process had a working set of about 30 MB. WebView2 runs in separate
 processes, which this figure excludes.
 
+## Testing and CI
+
+| Layer                  | What runs                                                                                   |
+| ---------------------- | ------------------------------------------------------------------------------------------- |
+| Rust unit tests        | Every crate; `cargo test --workspace`                                                       |
+| Extension host         | `crates/ferrite-extension-host/tests/host.rs` builds the WebAssembly fixtures and runs them |
+| Performance budgets    | Work counted, not timed (lines and bytes per keystroke and page in a 200,000-line document) |
+| Frontend               | Vitest with jsdom: components, state, the editor session, axe accessibility checks          |
+| Benchmarks, end to end | `scripts/bench.mjs` against the release build; `scripts/perf-check.mjs` against a baseline  |
+| Microbenchmarks        | Criterion; `perf-check.mjs micro` reads its comparison with a saved baseline                |
+
+- **CI** (`.github/workflows/ci.yml`) runs formatting, Clippy with warnings as errors, and all
+  tests on Windows, macOS, and Linux, plus the frontend checks. Each Criterion benchmark runs
+  once there to keep it working. Timing comparisons don't run in CI, because shared runners are
+  too noisy; the work-counting budgets do.
+- **Platform-specific code** is small and listed here:
+  - `paths.rs`: Windows `\\?\` prefixes.
+  - `file.rs`: Unix permission bits; the Windows rename retry.
+  - `keymap.ts` and the keybinding registry: `mod` means Cmd on macOS.
+  - `bench.mjs`: process memory through `ps` or CIM.
+  - Lock files use the standard library's portable locks.
+
 ## Known limitations
 
 These are tracked for later milestones:
@@ -592,8 +692,8 @@ These are tracked for later milestones:
 - Only files inside the open folder are watched. Open files outside it don't reload on external
   changes, but saving still detects conflicts.
 - Single folder only; multi-root workspaces aren't supported.
-- Scroll positions are remembered per tab only while the app runs. Unsaved changes aren't
-  persisted across restarts (closing asks about them).
+- Scroll positions are remembered per tab only while the app runs. Unsaved changes aren't kept
+  across a normal close (closing asks about them); they're backed up only for crash recovery.
 - Language features are limited to diagnostics, hover, go to definition, and completion. Find
   references, rename, code actions, formatting, signature help, and semantic tokens aren't
   implemented, nor are completion's additional edits (such as auto-imports) or snippets
@@ -609,8 +709,10 @@ These are tracked for later milestones:
 - Extension diagnostics count toward the status bar's problem counts only in files with a known
   language, because the counts live in the language status.
 - There's no graphical settings or keybindings UI; both are edited as TOML.
+- Screen readers read the cursor's line and selection. Diagnostics under the cursor, hover cards,
+  and completion items aren't announced yet. Forced-colors mode shows syntax in the system's
+  text color.
 - Multi-line Tab/Shift+Tab indentation, auto-closing brackets, and copying the whole line when
   nothing is selected aren't implemented. Alt+drag doesn't create column selections.
-- Errors opening files at startup are only logged, not shown.
 - On Linux, watching very large trees can exhaust the inotify watch limit; watching then fails
   with a logged warning and the workspace works without live updates.

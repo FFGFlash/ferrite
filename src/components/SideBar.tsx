@@ -1,12 +1,16 @@
+import type { ReactNode } from "react";
 import type { ViewDescriptor } from "../app/views";
+import { ErrorBoundary } from "./ErrorBoundary";
 import "./SideBar.css";
 
 interface SideBarProps {
   view: ViewDescriptor;
   width: number;
+  /** The splitter on its edge, inside the landmark so it can be found. */
+  resizer?: ReactNode;
 }
 
-export function SideBar({ view, width }: SideBarProps) {
+export function SideBar({ view, width, resizer }: SideBarProps) {
   const ViewComponent = view.component;
   const Actions = view.actions;
   return (
@@ -20,8 +24,11 @@ export function SideBar({ view, width }: SideBarProps) {
         )}
       </header>
       <div className="sidebar__content">
-        <ViewComponent />
+        <ErrorBoundary name={`The ${view.title} view`} resetKey={view.id}>
+          <ViewComponent />
+        </ErrorBoundary>
       </div>
+      {resizer}
     </aside>
   );
 }

@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { dismiss, notifications, reportError, type Notification } from "../state/notifications";
 import { useStore } from "../state/store";
 import "./Notifications.css";
@@ -16,21 +16,37 @@ export function Notifications() {
   );
 }
 
+/**
+ * Information disappears after a while, but not while the pointer or focus
+ * is on it. Warnings, errors, and notifications with buttons stay until
+ * dismissed.
+ */
 function NotificationItem({ item }: { item: Notification }) {
-  const sticky = (item.actions?.length ?? 0) > 0;
+  const sticky = item.kind !== "info" || (item.actions?.length ?? 0) > 0;
+  const [hovered, setHovered] = useState(false);
+  const [focused, setFocused] = useState(false);
+  const paused = hovered || focused;
   useEffect(() => {
-    if (sticky) {
+    if (sticky || paused) {
       return;
     }
     const timer = setTimeout(() => dismiss(item.id), AUTO_DISMISS_MS);
     return () => clearTimeout(timer);
-  }, [item.id, sticky]);
+  }, [item.id, sticky, paused]);
 
   return (
     <div
       className="notification"
       data-kind={item.kind}
       role={item.kind === "error" ? "alert" : "status"}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+      onFocus={() => setFocused(true)}
+      onBlur={(event) => {
+        if (!event.currentTarget.contains(event.relatedTarget)) {
+          setFocused(false);
+        }
+      }}
     >
       <div className="notification__body">
         <p className="notification__message">{item.message}</p>

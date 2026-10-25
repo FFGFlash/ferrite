@@ -9,6 +9,7 @@ publish = false
 [dependencies]
 ferrite-core = { workspace = true }
 ferrite-text = { workspace = true }
+ferrite-workspace = { workspace = true }
 semver = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }

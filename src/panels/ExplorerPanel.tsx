@@ -135,6 +135,18 @@ export function ExplorerPanel() {
       tabIndex={0}
       aria-activedescendant={rows[focusIndex] ? rowId(rows[focusIndex].entry.path) : undefined}
       onKeyDown={onKeyDown}
+      onContextMenu={(event) => {
+        // From the keyboard (Shift+F10, the menu key): the focused row's menu.
+        const row = rows[focusIndex];
+        if (event.target !== event.currentTarget || !row) {
+          return;
+        }
+        event.preventDefault();
+        const rect = document.getElementById(rowId(row.entry.path))?.getBoundingClientRect();
+        if (!row.entry.directory && rect) {
+          openFileMenu(rect.left + rect.width / 3, rect.bottom, row.entry.path);
+        }
+      }}
     >
       {rows.map((row, index) => (
         <li

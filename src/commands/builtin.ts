@@ -273,6 +273,14 @@ export const builtinCommands: Command[] = [
     run: resetPerf,
   },
   {
+    id: "developer.reloadWindow",
+    category: "Developer",
+    title: "Reload Window",
+    // Documents, unsaved changes, and extensions live in the backend, so
+    // the reloaded workbench picks up where it was.
+    run: () => window.location.reload(),
+  },
+  {
     id: "preferences.themeDark",
     category: "Preferences",
     title: "Color Theme: Dark",
