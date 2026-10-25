@@ -6,6 +6,7 @@ import { activate, close, documentsStore, moveDocument } from '../state/document
 import { useStore } from '../state/store'
 import { EditorView } from './EditorView'
 import { activeEditor } from './activeEditor'
+import { Breadcrumbs } from './Breadcrumbs'
 import { WelcomePage } from './WelcomePage'
 import './EditorArea.css'
 
@@ -38,6 +39,7 @@ export const EditorArea = memo(function EditorArea({ appInfo }: EditorAreaProps)
           id={`editor-panel-${active.id}`}
           aria-labelledby={`editor-tab-${active.id}`}
         >
+          <Breadcrumbs document={active} />
           <ErrorBoundary name="The editor" resetKey={active.id}>
             <EditorView key={active.id} documentId={active.id} title={active.title} />
           </ErrorBoundary>

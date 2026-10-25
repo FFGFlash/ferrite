@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState, type KeyboardEvent, type RefObject } from 'react'
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type RefObject } from 'react'
 import { CopyMinus, FilePlus, FolderOpen, FolderPlus } from 'lucide-react'
 import { executeCommand, primaryKeybinding, getCommand } from '../commands/registry'
 import type { DirectoryEntry } from '../ipc/workspace'
@@ -18,6 +18,7 @@ import {
   type Listing,
 } from '../state/workspace'
 import {
+  EXPLORER_TREE_ID,
   beginCreate,
   cancelCreate,
   explorerStore,
@@ -65,7 +66,7 @@ export function ExplorerPanel() {
   const { info, listings } = useStore(workspaceStore)
   const { expanded } = useStore(layoutStore)
   const { documents, activeId } = useStore(documentsStore)
-  const { focused, creating } = useStore(explorerStore)
+  const { focused, creating, revealed } = useStore(explorerStore)
   const iconTheme = useStore(iconThemeStore)
   const light = useStore(themeKind) === 'light'
   const treeRef = useRef<HTMLUListElement>(null)
@@ -75,6 +76,18 @@ export function ExplorerPanel() {
     () => (info ? flatten(info.root, listings, new Set(expanded), 0) : []),
     [info, listings, expanded],
   )
+
+  // Scroll a revealed row into view once it is listed, once per reveal.
+  const scrolledSeq = useRef(0)
+  useEffect(() => {
+    if (revealed && revealed.seq !== scrolledSeq.current) {
+      const row = document.getElementById(rowId(revealed.path))
+      if (row) {
+        scrolledSeq.current = revealed.seq
+        row.scrollIntoView({ block: 'nearest' })
+      }
+    }
+  }, [revealed, rows])
 
   if (!info) {
     return (
@@ -187,6 +200,7 @@ export function ExplorerPanel() {
     <div className="explorer">
       <ul
         ref={treeRef}
+        id={EXPLORER_TREE_ID}
         className="explorer-tree"
         role="tree"
         aria-label={info.name}
@@ -289,6 +303,7 @@ function NameInput({ pending, depth, siblings, treeRef, iconTheme, light }: Name
   const finish = (path: string | null) => {
     done.current = true
     explorerStore.update(state => ({
+      ...state,
       creating: null,
       focused: path ?? state.focused,
     }))

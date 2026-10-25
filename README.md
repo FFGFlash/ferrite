@@ -73,6 +73,9 @@ jump to that part of the file, or drag its slider to scroll. **View: Toggle Mini
 shows it. The editor scrolls past the last line until it's the only one visible, and clicking
 below the text moves the cursor to the end of the last line.
 
+Breadcrumbs above the editor show where the file is, such as `src › components › Palette.tsx`.
+Click a part to show it in the Explorer.
+
 In the find widget, Alt+C, Alt+W, and Alt+R toggle Match Case, Whole Word, and Regular
 Expression; in the replace field, Enter replaces and Ctrl+Enter replaces all. Regex
 replacements can use `$1` and `${name}`.
@@ -186,7 +189,8 @@ Reloading keeps open documents and unsaved changes. See
 ## Workspace
 
 Open a folder with **File: Open Folder…** (command palette or the Explorer). The explorer shows
-`.gitignore`d entries dimmed.
+`.gitignore`d entries dimmed. It follows the file you're editing: switching tabs, going to a
+definition, or opening a search result expands the file's folders and selects it.
 
 To add a file or folder, use the **New File** and **New Folder** buttons in the Explorer header,
 right-click a folder or file, or run **Explorer: New File…** / **Explorer: New Folder…**. The new

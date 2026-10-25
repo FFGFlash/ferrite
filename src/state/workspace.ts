@@ -123,6 +123,49 @@ export async function createEntry(
   return created.path
 }
 
+/** The folders between the workspace root and `path` (see `foldersBetween`). */
+export function foldersTo(path: string): string[] | null {
+  const root = workspaceStore.get().info?.root
+  return root ? foldersBetween(root, path) : null
+}
+
+/** The separator in a path from the backend, which uses the platform's form. */
+export function pathSeparator(path: string): string {
+  return path.includes('\\') ? '\\' : '/'
+}
+
+/**
+ * The folders between `root` and `path`, outermost first and not counting
+ * `root`; `null` if `path` isn't inside `root`.
+ */
+export function foldersBetween(root: string, path: string): string[] | null {
+  const separator = pathSeparator(root)
+  const prefix = root.endsWith(separator) ? root : root + separator
+  if (!path.startsWith(prefix) || path.length === prefix.length) {
+    return null
+  }
+  const names = path.slice(prefix.length).split(separator).slice(0, -1)
+  return names.map((_, index) => prefix + names.slice(0, index + 1).join(separator))
+}
+
+/**
+ * Expands the folders down to `path` (a file or folder in the workspace)
+ * and loads their listings. Returns whether `path` is in the workspace.
+ */
+export async function revealPath(path: string): Promise<boolean> {
+  const folders = foldersTo(path)
+  if (!folders) {
+    return false
+  }
+  const open = expanded()
+  if (folders.some(folder => !open.has(folder))) {
+    updateLayout({ expanded: [...new Set([...open, ...folders])] })
+  }
+  const { listings } = workspaceStore.get()
+  await Promise.all(folders.filter(folder => !listings.has(folder)).map(load))
+  return true
+}
+
 export function collapseAll(): void {
   updateLayout({ expanded: [] })
 }

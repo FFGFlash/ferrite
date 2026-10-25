@@ -580,6 +580,13 @@ them. Extensions fill in content through the `workbench` interface (API 1.1).
   (`editor/measure.ts` maps UTF-16 columns across a line's text nodes), and clicks map back to
   columns with `caretPositionFromPoint`, so proportional glyphs, tabs, and wide characters line
   up without a custom text-layout engine.
+- **`editor/Breadcrumbs`**: the active file's path above the editor. Inside the workspace, each
+  part is a button that reveals it in the explorer and focuses the tree. Other files show their
+  full path, and untitled ones their title.
+- **Explorer auto-reveal** (`panels/explorerState.ts`): when the active file or the workspace
+  changes, the explorer expands the file's folders and loads their listings (`revealPath`). It
+  then makes the file the focused row and scrolls it into view once it is listed. It reacts only
+  to a different file, so collapsing a folder or editing doesn't undo what the user did.
 - **`editor/Minimap`**: a canvas over the editor's right edge
   ([ADR 0010](adr/0010-minimap.md)). It fetches the lines it shows, plus 100 on each side, from
   `editor_minimap`, at once when scrolled past them and at most every 100 ms while the document

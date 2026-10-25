@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { registerCommands } from '../commands/registry'
 import { openContextMenu } from '../components/contextMenuState'
 import { openPalette, paletteStore } from '../components/paletteState'
+import { Breadcrumbs } from '../editor/Breadcrumbs'
 import { EditorView } from '../editor/EditorView'
 import type { EditorTransport } from '../editor/session'
 import type { WireView } from '../ipc/editor'
@@ -106,13 +107,17 @@ describe('accessibility (axe)', () => {
       listings: new Map([['/w', [entry('src', true), entry('README.md', false)]]]),
       indexing: false,
     })
-    explorerStore.set({ focused: null, creating: { parent: '/w', directory: false } })
+    explorerStore.set({
+      focused: null,
+      creating: { parent: '/w', directory: false },
+      revealed: null,
+    })
     render(<Workbench appInfo={null} />)
     await user.type(screen.getByRole('textbox', { name: 'File name' }), 'readme.md')
     expect(screen.getByRole('alert')).toBeInTheDocument()
     expect(await axeViolations()).toEqual([])
     act(() => {
-      explorerStore.set({ focused: null, creating: null })
+      explorerStore.set({ focused: null, creating: null, revealed: null })
       workspaceStore.set({ info: null, listings: new Map(), indexing: false })
     })
   })
@@ -143,18 +148,29 @@ describe('accessibility (axe)', () => {
     unregister()
   })
 
-  it('finds no problems in the editor', async () => {
+  it('finds no problems in the editor and its breadcrumbs', async () => {
     const transport: EditorTransport = {
       view: vi.fn(() => Promise.resolve(view)),
       apply: vi.fn(() => Promise.resolve(view)),
       clipboard: vi.fn(() => Promise.resolve(view)),
     }
+    workspaceStore.set({ info: { root: '/w', name: 'w' }, listings: new Map(), indexing: false })
+    const document = {
+      id: 1,
+      title: 'main.rs',
+      path: '/w/src/main.rs',
+      dirty: false,
+      lineEnding: 'LF',
+      encoding: 'UTF-8',
+    }
     render(
       <main>
+        <Breadcrumbs document={document} />
         <EditorView documentId={1} title="main.rs" transport={transport} />
       </main>,
     )
     await act(async () => {})
     expect(await axeViolations()).toEqual([])
+    act(() => workspaceStore.set({ info: null, listings: new Map(), indexing: false }))
   })
 })

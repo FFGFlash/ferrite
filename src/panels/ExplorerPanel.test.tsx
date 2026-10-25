@@ -15,7 +15,8 @@ vi.mock('../ipc/editor', () => ({ openDocument: vi.fn() }))
 const ipc = await import('../ipc/workspace')
 const editorIpc = await import('../ipc/editor')
 const { CommandError } = await import('../ipc/index')
-const { setWorkspace } = await import('../state/workspace')
+const { setWorkspace, toggleFolder } = await import('../state/workspace')
+const { documentsStore } = await import('../state/documents')
 const { DEFAULT_LAYOUT, layoutStore } = await import('../state/layout')
 const { notifications } = await import('../state/notifications')
 const { iconThemeStore } = await import('../state/iconTheme')
@@ -37,7 +38,7 @@ describe('ExplorerPanel', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     layoutStore.set(DEFAULT_LAYOUT)
-    explorerStore.set({ focused: null, creating: null })
+    explorerStore.set({ focused: null, creating: null, revealed: null })
     notifications.set([])
     listings = {
       '/w': [entry('/w/src', true), entry('/w/target', true, true), entry('/w/README.md')],
@@ -49,14 +50,15 @@ describe('ExplorerPanel', () => {
       listings[parent] = [...(listings[parent] ?? []), entry(path, directory)]
       return { path, directories: [parent] }
     })
-    vi.mocked(editorIpc.openDocument).mockResolvedValue({
+    vi.mocked(editorIpc.openDocument).mockImplementation(async path => ({
       id: 1,
-      title: 'README.md',
-      path: '/w/README.md',
+      title: path.split('/').pop() ?? path,
+      path,
       dirty: false,
       lineEnding: 'LF',
       encoding: 'UTF-8',
-    })
+    }))
+    documentsStore.set({ documents: [], activeId: null })
   })
 
   async function renderTree() {
@@ -116,6 +118,39 @@ describe('ExplorerPanel', () => {
     await user.keyboard('{End}')
     fireEvent.contextMenu(tree)
     expect(contextMenuStore.get()?.entries[0]).toMatchObject({ label: 'Open' })
+  })
+
+  it('reveals the active file: expands its folders, selects it, and scrolls to it', async () => {
+    const scrolled = vi.spyOn(Element.prototype, 'scrollIntoView')
+    const tree = await renderTree()
+    expect(within(tree).queryByText('main.rs')).not.toBeInTheDocument()
+
+    // As when Go to Definition opens a file in a collapsed folder.
+    const summary = {
+      id: 3,
+      title: 'main.rs',
+      path: '/w/src/main.rs',
+      dirty: false,
+      lineEnding: 'LF',
+      encoding: 'UTF-8',
+    }
+    await act(async () => documentsStore.set({ documents: [summary], activeId: 3 }))
+    const row = (await within(tree).findByText('main.rs')).closest('li')
+    expect(layoutStore.get().expanded).toEqual(['/w/src'])
+    expect(row).toHaveAttribute('aria-selected', 'true')
+    expect(row).toHaveAttribute('data-focused')
+    expect(scrolled.mock.contexts).toContain(row)
+
+    // Collapsing it afterwards sticks: only a change of file reveals again.
+    scrolled.mockClear()
+    act(() => toggleFolder('/w/src'))
+    await act(async () =>
+      documentsStore.update(state => ({ ...state, documents: [{ ...summary, dirty: true }] })),
+    )
+    expect(layoutStore.get().expanded).toEqual([])
+    expect(scrolled).not.toHaveBeenCalled()
+    act(() => documentsStore.set({ documents: [], activeId: null }))
+    scrolled.mockRestore()
   })
 
   it('shows folder and file icons', async () => {
