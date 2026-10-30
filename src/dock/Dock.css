@@ -194,6 +194,12 @@
   cursor: pointer;
 }
 
+/* A menu arrow beside the button it belongs to. */
+.dock-action--narrow {
+  width: 16px;
+  margin-left: -2px;
+}
+
 .dock-action:hover {
   background: var(--color-control-hover-background);
   color: var(--color-text);

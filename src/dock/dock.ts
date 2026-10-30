@@ -468,9 +468,9 @@ function preferredTerminal(): ItemId | null {
   return id === undefined ? null : terminalItem(id)
 }
 
-/** Starts a terminal and shows it. */
-export async function openTerminal(): Promise<void> {
-  const id = await newTerminal()
+/** Starts a terminal with a profile (the default if `null`) and shows it. */
+export async function openTerminal(profile: string | null = null): Promise<void> {
+  const id = await newTerminal(profile)
   showItem(terminalItem(id))
 }
 

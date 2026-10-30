@@ -233,8 +233,17 @@ the workspace folder; pressed in the terminal, it returns to the editor. **Termi
 Terminal** (`` Ctrl+Shift+` ``) or the **+** button beside a terminal's tabs opens another. Like
 any tab, a terminal can be docked anywhere.
 
-- **Shell.** PowerShell on Windows (PowerShell 7 if installed), `$SHELL` elsewhere. Change it
-  with `terminal.shell` and `terminal.args`.
+- **Shells.** Ferrite finds the shells installed on your computer:
+  - **Windows:** PowerShell 7, Windows PowerShell, Command Prompt, Git Bash, Cygwin, MSYS2, and
+    each WSL distribution, such as "Ubuntu (WSL)".
+  - **macOS and Linux:** the shells listed in `/etc/shells`, such as bash, zsh, and fish.
+
+  The arrow beside the **+** button, or **Terminal: New Terminal With Profile…**, starts a
+  terminal with any of them. New terminals otherwise use the default profile: PowerShell on
+  Windows (PowerShell 7 if installed), `$SHELL` elsewhere. Change it with **Terminal: Select
+  Default Profile…**, or `terminal.default_profile`. In settings, you can also add profiles,
+  change a found one's arguments or environment, or hide one (see [Settings](#settings)).
+
 - **Keys.** While the terminal has focus, keys go to the shell, except the command palette, Go
   to File, showing views, switching tabs and groups, settings, and terminal commands.
 - **Clipboard.** On Windows, `Ctrl+C` copies when text is selected and `Ctrl+V` pastes; on Linux
@@ -271,10 +280,16 @@ exclude = [".git", "dist"]
 command = "C:/tools/rust-analyzer.exe"   # use a specific build
 
 [terminal]
-shell = "C:/Program Files/Git/bin/bash.exe"   # empty: PowerShell, or $SHELL
-args = ["--login"]
+default_profile = "Ubuntu (WSL)"         # a profile's name; empty: PowerShell, or $SHELL
 scrollback = 5000
 screen_reader = true                     # announce terminal output (slower)
+
+[terminal.profiles."Nushell"]
+command = "C:/tools/nu.exe"              # add a profile
+args = []
+
+[terminal.profiles."Command Prompt"]
+enabled = false                          # hide one that was found
 
 [extensions.settings."example.tidy"]
 max_line_length = 120                    # settings an extension declares

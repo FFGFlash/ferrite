@@ -13,6 +13,7 @@ import { closeFolder, collapseAll, openFolder, workspaceStore } from '../state/w
 import { isMac } from '../editor/keymap'
 import { beginCreate } from '../panels/explorerState'
 import { clearTerminal, closeTerminal, terminalsStore } from '../terminal/terminals'
+import { menuOrigin, openDefaultProfileMenu, openNewTerminalMenu } from '../terminal/profileMenu'
 import {
   closeCurrentTab,
   cycleTab,
@@ -138,7 +139,26 @@ export const builtinCommands: Command[] = [
     title: 'New Terminal',
     keybinding: 'ctrl+shift+`',
     terminal: true,
-    run: openTerminal,
+    run: () => openTerminal(),
+  },
+  {
+    id: 'terminal.newWithProfile',
+    category: 'Terminal',
+    title: 'New Terminal With Profile…',
+    terminal: true,
+    run: () => {
+      const { x, y } = menuOrigin()
+      return openNewTerminalMenu(x, y)
+    },
+  },
+  {
+    id: 'terminal.selectDefaultProfile',
+    category: 'Terminal',
+    title: 'Select Default Profile…',
+    run: () => {
+      const { x, y } = menuOrigin()
+      return openDefaultProfileMenu(x, y)
+    },
   },
   {
     id: 'terminal.focus',

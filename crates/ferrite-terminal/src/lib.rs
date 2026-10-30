@@ -14,6 +14,7 @@
 
 pub mod flow;
 pub mod history;
+pub mod profiles;
 pub mod shell;
 pub mod utf8;
 

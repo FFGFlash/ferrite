@@ -11,6 +11,7 @@ use ferrite_extension_host::contributions::check_theme_colors;
 use ferrite_extension_host::keys::normalize as normalize_key;
 use ferrite_lsp::{ServerCommand, ServerConfig, default_servers};
 use ferrite_terminal::Shell;
+use ferrite_terminal::profiles::{self, Profile};
 use ferrite_workspace::ExcludeFilter;
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Manager, State};
@@ -67,12 +68,22 @@ const TEMPLATE: &str = r##"# Ferrite settings. Uncomment a line to change it; sa
 # root_markers = ["pyproject.toml"]
 
 [terminal]
-# The shell integrated terminals run. Empty: PowerShell on Windows (pwsh if
-# installed), otherwise $SHELL (as a login shell on macOS).
-# shell = ""
-# args = []                 # leave unset for the default shell's arguments
+# The profile new terminals use, by name. Empty: PowerShell on Windows
+# (PowerShell 7 if installed), otherwise $SHELL (as a login shell on macOS).
+# Installed shells are found: Windows PowerShell, Command Prompt, Git Bash,
+# Cygwin, MSYS2, WSL distributions ("Ubuntu (WSL)"), and /etc/shells.
+# default_profile = ""
 # scrollback = 1000         # lines kept above the screen
 # screen_reader = false     # announce output to screen readers (slower)
+#
+# Add a profile, or change or hide one that was found:
+# [terminal.profiles."Nushell"]
+# command = "C:/tools/nu.exe"
+# args = []
+# env = { EDITOR = "code --wait" }
+#
+# [terminal.profiles."Command Prompt"]
+# enabled = false
 
 [extensions]
 # WebAssembly extensions. Installed extensions are folders in "extensions"
@@ -195,23 +206,41 @@ pub struct SearchSettings {
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct TerminalSettings {
-  /// Empty: the platform's default shell.
-  pub shell: String,
-  /// `None`: the default shell's arguments, or none for a configured shell.
-  pub args: Option<Vec<String>>,
+  /// A profile's name; empty for the platform's default.
+  pub default_profile: String,
   pub scrollback: u32,
   pub screen_reader: bool,
+  /// Added profiles, and changes to detected ones, by name.
+  pub profiles: BTreeMap<String, ProfileSettings>,
 }
 
 impl Default for TerminalSettings {
   fn default() -> Self {
     Self {
-      shell: String::new(),
-      args: None,
+      default_profile: String::new(),
       scrollback: 1000,
       screen_reader: false,
+      profiles: BTreeMap::new(),
     }
   }
+}
+
+/// Changes to a detected profile, or a new one (which needs `command`).
+#[derive(Debug, Clone, PartialEq, Deserialize, Default)]
+#[serde(default, deny_unknown_fields)]
+pub struct ProfileSettings {
+  pub command: Option<String>,
+  pub args: Option<Vec<String>>,
+  pub env: Option<BTreeMap<String, String>>,
+  pub enabled: Option<bool>,
+}
+
+/// The profiles to offer, and the one new terminals use.
+#[derive(Debug, Clone, PartialEq)]
+pub struct TerminalProfiles {
+  pub profiles: Vec<Profile>,
+  /// The default profile's name, if there is any profile.
+  pub default: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize)]
@@ -306,6 +335,20 @@ impl Settings {
     if self.terminal.scrollback > 100_000 {
       return Err("terminal.scrollback must be at most 100000".into());
     }
+    for (name, profile) in &self.terminal.profiles {
+      if name.trim().is_empty() || name.chars().count() > 64 {
+        return Err("terminal.profiles names must have 1 to 64 characters".into());
+      }
+      if profile
+        .command
+        .as_deref()
+        .is_some_and(|command| command.trim().is_empty())
+      {
+        return Err(format!(
+          "terminal.profiles.\"{name}\".command must not be empty"
+        ));
+      }
+    }
     ExcludeFilter::new(&self.files.exclude).map_err(|error| format!("files.exclude: {error}"))?;
     let known: Vec<String> = default_servers()
       .into_iter()
@@ -397,21 +440,52 @@ impl Settings {
     ExcludeFilter::new(&self.files.exclude).unwrap_or_default()
   }
 
-  /// The shell new terminals run.
-  pub fn terminal_shell(&self) -> Shell {
-    let program = self.terminal.shell.trim();
-    let mut shell = if program.is_empty() {
-      Shell::detect()
-    } else {
-      Shell {
-        program: program.to_owned(),
-        args: Vec::new(),
+  /// The detected profiles with the user's changes: changed or hidden by
+  /// name, and added ones after them. Added profiles need a `command`;
+  /// changes to profiles that weren't found are ignored.
+  pub fn terminal_profiles(&self, detected: Vec<Profile>) -> TerminalProfiles {
+    let mut profiles: Vec<Profile> = detected
+      .into_iter()
+      .filter_map(|mut profile| {
+        let Some(change) = self.terminal.profiles.get(&profile.name) else {
+          return Some(profile);
+        };
+        if change.enabled == Some(false) {
+          return None;
+        }
+        apply_profile_change(&mut profile, change);
+        Some(profile)
+      })
+      .collect();
+    for (name, change) in &self.terminal.profiles {
+      let new = !profiles.iter().any(|profile| profile.name == *name);
+      if new && change.enabled != Some(false) && change.command.is_some() {
+        let mut profile = Profile {
+          name: name.clone(),
+          shell: Shell {
+            program: String::new(),
+            args: Vec::new(),
+          },
+          env: Vec::new(),
+        };
+        apply_profile_change(&mut profile, change);
+        profiles.push(profile);
       }
-    };
-    if let Some(args) = &self.terminal.args {
-      shell.args.clone_from(args);
     }
-    shell
+    let wanted = self.terminal.default_profile.trim();
+    let chosen = profiles
+      .iter()
+      .find(|profile| profile.name == wanted)
+      .or_else(|| {
+        profiles
+          .iter()
+          .find(|profile| profile.name.eq_ignore_ascii_case(wanted))
+      })
+      .or_else(|| profiles::default_profile(&profiles, &profiles::System));
+    TerminalProfiles {
+      default: chosen.map(|profile| profile.name.clone()),
+      profiles,
+    }
   }
 
   pub fn editor_config(&self) -> EditorConfig {
@@ -490,6 +564,21 @@ impl SettingsState {
 
   fn replace(&self, settings: Settings) {
     *self.current.write().unwrap_or_else(PoisonError::into_inner) = settings;
+  }
+}
+
+fn apply_profile_change(profile: &mut Profile, change: &ProfileSettings) {
+  if let Some(command) = &change.command {
+    profile.shell.program = command.trim().to_owned();
+  }
+  if let Some(args) = &change.args {
+    profile.shell.args.clone_from(args);
+  }
+  if let Some(env) = &change.env {
+    for (key, value) in env {
+      profile.env.retain(|(existing, _)| existing != key);
+      profile.env.push((key.clone(), value.clone()));
+    }
   }
 }
 
@@ -581,6 +670,20 @@ pub fn settings_set_theme(app: AppHandle, theme: String) -> Result<(), CommandEr
   })
 }
 
+/// Sets `terminal.default_profile` in the settings file, keeping its
+/// comments and formatting, and applies it.
+#[tauri::command]
+pub fn settings_set_default_profile(app: AppHandle, profile: String) -> Result<(), CommandError> {
+  let name = profile.as_str();
+  edit(&app, |document| {
+    if !document.contains_table("terminal") {
+      document["terminal"] = toml_edit::table();
+    }
+    document["terminal"]["default_profile"] = toml_edit::value(name);
+    Ok(())
+  })
+}
+
 /// Sets `workbench.icon_theme` in the settings file, keeping its comments
 /// and formatting, and applies it.
 #[tauri::command]
@@ -657,29 +760,70 @@ mod tests {
     let scrollback =
       Settings::parse("[terminal]\nscrollback = 1000000\n").expect_err("too much scrollback");
     assert!(scrollback.contains("terminal.scrollback"), "{scrollback}");
+    let command =
+      Settings::parse("[terminal.profiles.x]\ncommand = \" \"\n").expect_err("empty command");
+    assert!(command.contains("terminal.profiles"), "{command}");
+  }
+
+  fn profile(name: &str, program: &str) -> Profile {
+    Profile {
+      name: name.into(),
+      shell: Shell {
+        program: program.into(),
+        args: Vec::new(),
+      },
+      env: Vec::new(),
+    }
   }
 
   #[test]
-  fn picks_the_terminal_shell() {
-    assert_eq!(Settings::default().terminal_shell(), Shell::detect());
+  fn combines_detected_and_configured_terminal_profiles() {
+    let detected = || {
+      vec![
+        profile("Windows PowerShell", "powershell.exe"),
+        profile("Command Prompt", "cmd.exe"),
+        profile("Git Bash", "bash.exe"),
+      ]
+    };
+    let settings = Settings::parse(
+      r#"
+[terminal]
+default_profile = "git bash"
+[terminal.profiles."Command Prompt"]
+enabled = false
+[terminal.profiles."Git Bash"]
+args = ["--login"]
+env = { CHERE_INVOKING = "1" }
+[terminal.profiles."Nushell"]
+command = " C:/tools/nu.exe "
+[terminal.profiles."Not installed"]
+args = ["-x"]
+"#,
+    )
+    .expect("valid");
+    let result = settings.terminal_profiles(detected());
+    let names: Vec<&str> = result.profiles.iter().map(|p| p.name.as_str()).collect();
+    // Hidden, changed, added; a change without a command adds nothing.
+    assert_eq!(names, ["Windows PowerShell", "Git Bash", "Nushell"]);
+    assert_eq!(result.profiles[1].shell.args, ["--login"]);
+    assert_eq!(
+      result.profiles[1].env,
+      [("CHERE_INVOKING".into(), "1".into())]
+    );
+    assert_eq!(result.profiles[2].shell.program, "C:/tools/nu.exe");
+    // The default is matched without regard to case.
+    assert_eq!(result.default.as_deref(), Some("Git Bash"));
 
-    let configured = Settings::parse("[terminal]\nshell = \" bash \"\n")
-      .expect("valid")
-      .terminal_shell();
-    assert_eq!(configured.program, "bash");
-    assert!(configured.args.is_empty());
-
-    let with_args =
-      Settings::parse("[terminal]\nshell = \"cmd.exe\"\nargs = [\"/k\", \"echo hi\"]\n")
-        .expect("valid")
-        .terminal_shell();
-    assert_eq!(with_args.args, ["/k", "echo hi"]);
-
-    let default_with_args = Settings::parse("[terminal]\nargs = [\"-i\"]\n")
-      .expect("valid")
-      .terminal_shell();
-    assert_eq!(default_with_args.program, Shell::detect().program);
-    assert_eq!(default_with_args.args, ["-i"]);
+    // An unknown default falls back to the platform's.
+    let unknown = Settings::parse("[terminal]\ndefault_profile = \"Fish\"\n").expect("valid");
+    assert!(unknown.terminal_profiles(detected()).default.is_some());
+    assert_eq!(
+      Settings::default().terminal_profiles(Vec::new()),
+      TerminalProfiles {
+        profiles: Vec::new(),
+        default: None
+      }
+    );
   }
 
   #[test]

@@ -3,7 +3,7 @@
  * exited state), its content, and the buttons shown beside the tabs while
  * it's active.
  */
-import { Plus, SquareTerminal, Trash2 } from 'lucide-react'
+import { ChevronDown, Plus, SquareTerminal, Trash2 } from 'lucide-react'
 import { useEffect, useRef, type ReactNode } from 'react'
 import { useViews, type ViewDescriptor } from '../app/views'
 import { executeCommand, getCommand, primaryKeybinding } from '../commands/registry'
@@ -17,6 +17,7 @@ import type { DocumentSummary } from '../ipc/editor'
 import { documentsStore } from '../state/documents'
 import { iconThemeStore } from '../state/iconTheme'
 import { useStore } from '../state/store'
+import { openNewTerminalMenu } from '../terminal/profileMenu'
 import { closeTerminal, getSession, terminalsStore, type TerminalTab } from '../terminal/terminals'
 import { themeKind } from '../themes/theme'
 import { itemId } from './dock'
@@ -161,6 +162,19 @@ export function ItemActions({ resolved }: { resolved: ResolvedItem }): ReactNode
           onClick={() => void executeCommand('terminal.new')}
         >
           <Plus size={16} strokeWidth={1.5} aria-hidden="true" />
+        </button>
+        <button
+          type="button"
+          className="dock-action dock-action--narrow"
+          title="New Terminal With Profile…"
+          aria-label="New Terminal With Profile"
+          aria-haspopup="menu"
+          onClick={event => {
+            const r = event.currentTarget.getBoundingClientRect()
+            void openNewTerminalMenu(r.left, r.bottom)
+          }}
+        >
+          <ChevronDown size={14} strokeWidth={1.5} aria-hidden="true" />
         </button>
         <button
           type="button"

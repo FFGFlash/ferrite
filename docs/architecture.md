@@ -393,6 +393,7 @@ EditorView = { version, lineCount, startLine, endLine,
 | `lsp_hover`, `lsp_definition`, `lsp_completion`               | Language server requests at a position                 |
 | `terminal_create`, `terminal_list`, `terminal_attach`         | Start a terminal, or reattach after a reload           |
 | `terminal_platform`                                           | The Windows build, for the emulator's ConPTY handling  |
+| `terminal_profiles`, `settings_set_default_profile`           | Installed shells and profiles; choose the default      |
 | `terminal_write`, `terminal_resize`, `terminal_acknowledge`   | Input, size, and flow control for a terminal           |
 | `terminal_kill`                                               | End a terminal's shell and forget it                   |
 | `bench_config`, `bench_generate`, `bench_report`              | Benchmark mode only (`--bench <name>`)                 |
@@ -494,9 +495,16 @@ emulates the terminal in the frontend (`src/terminal/`). The decisions are in
                                                        waiter thread ◀── exit
 ```
 
-- **Starting.** `terminal_create(cols, rows, channel)` runs `terminal.shell` (or the platform's
-  default shell) in the workspace folder, or the home folder, on a blocking thread. At most 32
-  terminals are open at once.
+- **Profiles.** `ferrite-terminal/src/profiles.rs` finds the installed shells where their
+  installers put them. On Windows, that's PowerShell 7, Windows PowerShell, Command Prompt, Git
+  Bash, Cygwin, MSYS2, and each WSL distribution (`wsl.exe --list --quiet`, without Docker
+  Desktop's). Elsewhere, it's `/etc/shells` and `$SHELL`. The system is reached through a
+  `Probe` trait, so tests use a fake one. Settings add profiles, change found ones, or hide them
+  (`[terminal.profiles]`), and name the default (`terminal.default_profile`). What was found is
+  reused for 30 seconds (`terminal_profiles`, which the frontend's profile menus list).
+- **Starting.** `terminal_create(cols, rows, profile, channel)` runs the named profile (or the
+  default) in the workspace folder, or the home folder, on a blocking thread. The tab shows the
+  profile's name. At most 32 terminals are open at once.
 - **Threads.** Each terminal has a writer draining a bounded input queue, a reader decoding
   output as UTF-8, and a waiter that closes the pseudoterminal when the shell exits and reports
   the exit after the last output.

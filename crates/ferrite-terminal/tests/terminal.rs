@@ -204,3 +204,25 @@ fn rejects_oversized_input() {
     Err(TerminalError::InputTooLarge(_))
   ));
 }
+
+#[test]
+fn detects_this_computers_shells() {
+  let profiles = ferrite_terminal::profiles::detect();
+  for profile in &profiles {
+    println!(
+      "{}: {} {:?}",
+      profile.name, profile.shell.program, profile.shell.args
+    );
+  }
+  assert!(!profiles.is_empty(), "no shells found");
+  let default =
+    ferrite_terminal::profiles::default_profile(&profiles, &ferrite_terminal::profiles::System);
+  assert!(default.is_some());
+  // Every profile's program exists (WSL's is wsl.exe).
+  for profile in &profiles {
+    assert!(
+      std::path::Path::new(&profile.shell.program).is_file(),
+      "{profile:?}"
+    );
+  }
+}

@@ -93,10 +93,10 @@ far is replayed first.
 
 ### Shells and environment
 
-- **Default shell.** On Windows, PowerShell 7 (`pwsh`) if it's on the `PATH`, otherwise Windows
+- **Default shell.** On Windows, PowerShell 7 (`pwsh`) if it's installed, otherwise Windows
   PowerShell. On macOS, `$SHELL` as a login shell, so profile scripts set up the `PATH` for an
-  app started from the Dock. Elsewhere, `$SHELL` or `/bin/sh`. `terminal.shell` and
-  `terminal.args` override it.
+  app started from the Dock. Elsewhere, `$SHELL`. Since 2026-10-30, other installed shells can
+  be chosen too (see below).
 - **Working directory.** The workspace folder, or the home folder.
 - **Environment.** `COLORTERM=truecolor`, `TERM_PROGRAM=ferrite`, `TERM_PROGRAM_VERSION`, and,
   outside Windows, `TERM=xterm-256color`.
@@ -124,6 +124,32 @@ The terminal's background, foreground, cursor, and selection follow the editor's
 16 ANSI colors are tokens of their own (`terminal-ansi-*`), so themes and `workbench.colors`
 can change them. xterm.js enforces a 4.5:1 minimum contrast, which keeps program-chosen colors
 readable on either base theme.
+
+### Profiles (2026-10-30)
+
+Users have more than one shell, and want any of them, as VS Code offers: Git Bash, Command
+Prompt, a WSL distribution. A profile is a named shell (program, arguments, environment).
+
+- **Found where installers put them**, as VS Code finds them, rather than asked for:
+  - **Windows:** PowerShell 7 (on the `PATH`, or the newest under `Program Files\PowerShell`),
+    Windows PowerShell, Command Prompt, Git Bash (under `Program Files`, the user's programs, or
+    beside `git.exe` on the `PATH`), Cygwin, and MSYS2.
+  - **WSL:** each distribution from `wsl.exe --list --quiet`, run with `WSL_UTF8=1` and
+    decoded from UTF-16 when that isn't understood. Docker Desktop's distributions are
+    left out; they aren't shells.
+  - **Elsewhere:** `/etc/shells` (one per name, without `tmux`, `screen`, `nologin`, `rbash`,
+    and the like), and `$SHELL`.
+- **Started the way they expect.** Git Bash, Cygwin, and MSYS2 are login shells
+  (`--login -i`). Cygwin and MSYS2 get `CHERE_INVOKING=1`, so they stay in the folder the terminal
+  opens in. MSYS2 gets `MSYSTEM=UCRT64`, its default environment. WSL is started with
+  `wsl.exe --distribution <name>` and opens in the same folder, under `/mnt`.
+- **Configurable by name.** `[terminal.profiles."<name>"]` changes a found profile (`command`,
+  `args`, `env`) or hides it (`enabled = false`). A name that wasn't found, with a `command`, adds
+  a profile. `terminal.default_profile` names the default, matched without regard to case.
+  **Terminal: Select Default Profile…** writes it with `toml_edit`, keeping the file's comments.
+  These replace the earlier `terminal.shell` and `terminal.args`.
+- **Cached briefly.** Looking takes about 60 ms on Windows, most of it `wsl.exe`. The result is
+  reused for 30 seconds, so a shell installed while Ferrite runs still shows up.
 
 ### Resizing on Windows (2026-10-30)
 

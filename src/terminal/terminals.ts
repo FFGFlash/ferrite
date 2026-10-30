@@ -128,8 +128,8 @@ export function focusTerminal(id: number): void {
   requestAnimationFrame(() => sessions.get(id)?.focus())
 }
 
-/** Starts a terminal and returns its id. */
-export async function newTerminal(): Promise<number> {
+/** Starts a terminal with a profile (the default if `null`) and returns its id. */
+export async function newTerminal(profile: string | null = null): Promise<number> {
   startingTerminals.update(count => count + 1)
   let session: TerminalSession | undefined
   let info
@@ -137,7 +137,7 @@ export async function newTerminal(): Promise<number> {
     session = await createSession()
     const active = activeSession()
     const size = active ? { cols: active.xterm.cols, rows: active.xterm.rows } : DEFAULT_SIZE
-    info = await createTerminal(size.cols, size.rows, session.receive)
+    info = await createTerminal(size.cols, size.rows, profile, session.receive)
   } catch (error) {
     session?.dispose()
     throw error

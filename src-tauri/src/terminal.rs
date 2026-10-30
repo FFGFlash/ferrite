@@ -7,7 +7,9 @@
 
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
+use std::time::{Duration, Instant};
 
+use ferrite_terminal::profiles::{self, Profile};
 use ferrite_terminal::{
   Sink, Terminal, TerminalError, TerminalEvent, TerminalOptions, TerminalSize,
 };
@@ -21,12 +23,15 @@ use crate::workspace::WorkspaceState;
 
 /// The most terminals open at once.
 const MAX_TERMINALS: usize = 32;
+/// How long detected profiles are reused before looking again (shells get
+/// installed while Ferrite runs).
+const PROFILES_FRESH_FOR: Duration = Duration::from_secs(30);
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TerminalInfo {
   pub id: u64,
-  /// The shell's name, such as `pwsh` or `bash`.
+  /// The profile's name, such as `PowerShell` or `Ubuntu (WSL)`.
   pub title: String,
 }
 
@@ -62,11 +67,32 @@ struct Terminals {
 }
 
 #[derive(Default)]
-pub struct TerminalState(Mutex<Terminals>);
+pub struct TerminalState {
+  terminals: Mutex<Terminals>,
+  /// The installed shells, when they were last looked for.
+  detected: Mutex<Option<(Instant, Vec<Profile>)>>,
+}
 
 impl TerminalState {
   fn lock(&self) -> MutexGuard<'_, Terminals> {
-    self.0.lock().unwrap_or_else(PoisonError::into_inner)
+    self
+      .terminals
+      .lock()
+      .unwrap_or_else(PoisonError::into_inner)
+  }
+
+  /// The installed shells, looked for again when the last look is stale.
+  /// Blocks (it may run `wsl.exe`), so call it off the IPC thread.
+  fn detected_profiles(&self) -> Vec<Profile> {
+    let mut detected = self.detected.lock().unwrap_or_else(PoisonError::into_inner);
+    match detected.as_ref() {
+      Some((at, profiles)) if at.elapsed() < PROFILES_FRESH_FOR => profiles.clone(),
+      _ => {
+        let profiles = profiles::detect();
+        *detected = Some((Instant::now(), profiles.clone()));
+        profiles
+      }
+    }
   }
 
   fn get(&self, id: u64) -> Result<Arc<Terminal>, CommandError> {
@@ -133,13 +159,46 @@ fn environment(app: &AppHandle) -> Vec<(String, String)> {
   env
 }
 
-/// Starts a terminal in the workspace folder (or the home folder) and sends
-/// its output to `channel`.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProfileInfo {
+  pub name: String,
+  /// Whether new terminals use it unless another is chosen.
+  pub default: bool,
+}
+
+/// The installed shells and configured profiles, the default marked.
+#[tauri::command]
+pub async fn terminal_profiles(app: AppHandle) -> Result<Vec<ProfileInfo>, CommandError> {
+  let resolved = tauri::async_runtime::spawn_blocking(move || {
+    let detected = app.state::<TerminalState>().detected_profiles();
+    app
+      .state::<SettingsState>()
+      .get()
+      .terminal_profiles(detected)
+  })
+  .await
+  .map_err(CommandError::internal)?;
+  Ok(
+    resolved
+      .profiles
+      .into_iter()
+      .map(|profile| ProfileInfo {
+        default: resolved.default.as_deref() == Some(profile.name.as_str()),
+        name: profile.name,
+      })
+      .collect(),
+  )
+}
+
+/// Starts a terminal with a profile (the default if `None`) in the
+/// workspace folder (or the home folder), and sends its output to `channel`.
 #[tauri::command]
 pub async fn terminal_create(
   app: AppHandle,
   cols: u32,
   rows: u32,
+  profile: Option<String>,
   channel: Channel<TerminalMessage>,
 ) -> Result<TerminalInfo, CommandError> {
   let state = app.state::<TerminalState>();
@@ -152,23 +211,45 @@ pub async fn terminal_create(
   if state.lock().open.len() >= MAX_TERMINALS {
     return Err(too_many());
   }
-  let shell = app.state::<SettingsState>().get().terminal_shell();
-  let title = shell.name();
   let cwd = app
     .state::<WorkspaceState>()
     .root()
     .filter(|root| root.is_dir())
     .or_else(|| app.path().home_dir().ok());
-  let options = TerminalOptions {
-    shell,
-    cwd,
-    env: environment(&app),
-    size: TerminalSize::clamped(cols, rows),
-  };
-  // Starting a process can take a while; keep it off the IPC thread.
-  let terminal = tauri::async_runtime::spawn_blocking(move || Terminal::spawn(options))
-    .await
-    .map_err(CommandError::internal)??;
+  let mut env = environment(&app);
+  let size = TerminalSize::clamped(cols, rows);
+  // Finding shells and starting a process can take a while; keep them off
+  // the IPC thread.
+  let task_app = app.clone();
+  let (title, terminal) = tauri::async_runtime::spawn_blocking(move || {
+    let detected = task_app.state::<TerminalState>().detected_profiles();
+    let resolved = task_app
+      .state::<SettingsState>()
+      .get()
+      .terminal_profiles(detected);
+    let wanted = profile.or(resolved.default);
+    let profile = resolved
+      .profiles
+      .into_iter()
+      .find(|candidate| Some(&candidate.name) == wanted.as_ref())
+      .ok_or_else(|| match &wanted {
+        Some(name) => CommandError::new(
+          "unknownProfile",
+          format!("There's no terminal profile named \"{name}\"."),
+        ),
+        None => CommandError::new("noProfile", "No shell was found to start a terminal with."),
+      })?;
+    env.extend(profile.env);
+    let options = TerminalOptions {
+      shell: profile.shell,
+      cwd,
+      env,
+      size,
+    };
+    Ok::<_, CommandError>((profile.name, Terminal::spawn(options)?))
+  })
+  .await
+  .map_err(CommandError::internal)??;
   terminal.attach(sink(channel));
 
   let mut terminals = state.lock();

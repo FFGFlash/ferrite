@@ -32,7 +32,7 @@ describe('terminals', () => {
     }
     vi.clearAllMocks()
     channels.clear()
-    vi.mocked(ipc.createTerminal).mockImplementation(async (_cols, _rows, onMessage) => {
+    vi.mocked(ipc.createTerminal).mockImplementation(async (_cols, _rows, _profile, onMessage) => {
       const id = nextId++
       channels.set(id, onMessage)
       return { id, title: 'pwsh' }
@@ -55,7 +55,7 @@ describe('terminals', () => {
       tabs: [{ id, title: 'pwsh', description: null, exited: false }],
       activeId: id,
     })
-    expect(ipc.createTerminal).toHaveBeenCalledWith(80, 24, expect.any(Function))
+    expect(ipc.createTerminal).toHaveBeenCalledWith(80, 24, null, expect.any(Function))
     // ConPTY redraws on resize itself; xterm.js must know, or lines repeat.
     expect(xtermOf(id).options.windowsPty).toEqual({ backend: 'conpty', buildNumber: 26200 })
 
@@ -70,11 +70,13 @@ describe('terminals', () => {
 
   it('sends replies made before the backend named the terminal once it has', async () => {
     // ConPTY asks for the cursor position as soon as it starts.
-    vi.mocked(ipc.createTerminal).mockImplementationOnce(async (_cols, _rows, onMessage) => {
-      onMessage({ type: 'output', data: '\x1b[6n' })
-      expect(ipc.writeTerminal).not.toHaveBeenCalled()
-      return { id: 99, title: 'pwsh' }
-    })
+    vi.mocked(ipc.createTerminal).mockImplementationOnce(
+      async (_cols, _rows, _profile, onMessage) => {
+        onMessage({ type: 'output', data: '\x1b[6n' })
+        expect(ipc.writeTerminal).not.toHaveBeenCalled()
+        return { id: 99, title: 'pwsh' }
+      },
+    )
     await terminals.newTerminal()
     expect(ipc.writeTerminal).toHaveBeenCalledWith(99, '\x1b[1;1R')
   })

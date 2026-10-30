@@ -4,8 +4,25 @@ import { call } from './index'
 
 export interface TerminalInfo {
   id: number
-  /** The shell's name, such as `pwsh` or `bash`. */
+  /** The profile's name, such as `PowerShell` or `Ubuntu (WSL)`. */
   title: string
+}
+
+/** A shell to start terminals with: found on this computer, or configured. */
+export interface TerminalProfile {
+  name: string
+  /** Whether new terminals use it unless another is chosen. */
+  default: boolean
+}
+
+/** The installed shells and configured profiles, the default marked. */
+export function terminalProfiles(): Promise<TerminalProfile[]> {
+  return call<TerminalProfile[]>('terminal_profiles')
+}
+
+/** Makes `profile` the default, in the settings file. */
+export function setDefaultProfile(profile: string): Promise<void> {
+  return call<void>('settings_set_default_profile', { profile })
 }
 
 export type TerminalMessage =
@@ -30,13 +47,22 @@ export function terminalPlatform(): Promise<TerminalPlatform> {
   return call<TerminalPlatform>('terminal_platform')
 }
 
-/** Starts a shell; its output arrives through `onMessage`. */
+/**
+ * Starts a shell with a profile (the default if `null`); its output arrives
+ * through `onMessage`.
+ */
 export function createTerminal(
   cols: number,
   rows: number,
+  profile: string | null,
   onMessage: (message: TerminalMessage) => void,
 ): Promise<TerminalInfo> {
-  return call<TerminalInfo>('terminal_create', { cols, rows, channel: channel(onMessage) })
+  return call<TerminalInfo>('terminal_create', {
+    cols,
+    rows,
+    profile,
+    channel: channel(onMessage),
+  })
 }
 
 /** The terminals still running in the backend (after a window reload). */
