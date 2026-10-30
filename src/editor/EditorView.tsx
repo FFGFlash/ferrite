@@ -34,7 +34,7 @@ import { layoutStore } from '../state/layout'
 import { notify, reportError } from '../state/notifications'
 import { notifyPainted, recordTiming } from '../state/perf'
 import { useStore } from '../state/store'
-import { activeEditor, type EditorController } from './activeEditor'
+import { registerEditor, type EditorController } from './activeEditor'
 import { isWordChar, visibleCompletions, wordAround } from './completion'
 import { FindWidget, type FindState } from './FindWidget'
 import { inputMirror, typedText, type InputMirror } from './inputMirror'
@@ -268,12 +268,7 @@ export function EditorView({ documentId, title, transport = ipcTransport }: Edit
       triggerSuggest: () => requestCompletion(null, false),
       showHover: () => void showHoverAtCursor(),
     }
-    activeEditor.set(controller)
-    return () => {
-      if (activeEditor.get() === controller) {
-        activeEditor.set(null)
-      }
-    }
+    return registerEditor(controller)
     // The controller reads current state through refs, so it only needs to
     // change with the document.
   }, [documentId])

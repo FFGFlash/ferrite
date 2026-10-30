@@ -12,6 +12,8 @@ const settings = (theme: string, colors: Record<string, string> = {}): FrontendS
   fontSize: 14,
   fontFamily: '',
   tabSize: 4,
+  terminalScrollback: 1000,
+  terminalScreenReader: false,
 })
 
 const themes = {

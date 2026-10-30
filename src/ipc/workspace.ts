@@ -73,6 +73,10 @@ export interface FrontendSettings {
   fontSize: number
   fontFamily: string
   tabSize: number
+  /** Lines kept above a terminal's screen. */
+  terminalScrollback: number
+  /** Whether terminals announce output to screen readers. */
+  terminalScreenReader: boolean
 }
 
 export interface SavedUi {

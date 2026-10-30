@@ -55,7 +55,9 @@ preserved exactly, and new lines use the file's existing line ending.
 | Find in files                       | Ctrl+Shift+F                     | ⇧⌘F                      |
 | Extensions view                     | Ctrl+Shift+X                     | ⇧⌘X                      |
 | Explorer / Toggle side bar          | Ctrl+Shift+E / Ctrl+B            | ⇧⌘E / ⌘B                 |
-| Next / previous tab                 | Ctrl+Tab, Ctrl+PageDown / PageUp | ⌃Tab, ⌃PageDown / PageUp |
+| Terminal / New / Toggle terminals   | Ctrl+\` / Ctrl+Shift+\` / Ctrl+J | ⌃\` / ⌃⇧\` / ⌘J          |
+| Next / previous tab (in its group)  | Ctrl+Tab, Ctrl+PageDown / PageUp | ⌃Tab, ⌃PageDown / PageUp |
+| Next / previous group               | F6 / Shift+F6                    | F6 / ⇧F6                 |
 | Settings                            | Ctrl+,                           | ⌘,                       |
 | Undo / Redo                         | Ctrl+Z / Ctrl+Y, Ctrl+Shift+Z    | ⌘Z / ⇧⌘Z                 |
 | Cut / Copy / Paste / Select all     | Ctrl+X / C / V / A               | ⌘X / C / V / A           |
@@ -181,7 +183,11 @@ Reloading keeps open documents and unsaved changes. See
   so they can read the line, character, word, or selection as you move. Errors and
   notifications are announced.
 - **Keyboard.** Commands, views, lists, and menus work from the keyboard. Context menus open
-  with `Shift+F10` or the menu key, and the side bar is resized with the arrow keys on its edge.
+  with `Shift+F10` or the menu key. Groups are resized with the arrow keys on their edges, `F6`
+  moves between them, and every docking action has a command (see [Layout](#layout)).
+  `` Ctrl+` `` moves between the editor and the terminal.
+- **Terminal output.** Set `terminal.screen_reader = true` to have screen readers announce
+  terminal output.
 - **System settings.** Windows contrast themes (forced colors) and "reduce motion" are honored.
 - **Fonts and colors.** The editor font is a setting (`editor.font_size`, `editor.font_family`),
   and any theme color can be overridden (see [Customizing](#customizing)).
@@ -199,6 +205,49 @@ below the files creates at the top level. Type a name and press
 `Enter` (or `Escape` to cancel); a name like `src/net/http.rs` creates the missing folders too.
 New files open in the editor. Go to File and find in files skip them, along with paths matching
 `files.exclude`. The folder, open files, and layout are restored on the next launch.
+
+## Layout
+
+Everything is a tab: documents, the explorer, search, extensions, extension views, and terminals.
+Tabs sit in groups, and any tab can go in any group, beside any other.
+
+- **Docking.** Drag a tab (or an activity bar button) onto another group's tabs to join it, onto
+  a side of a group to split it, or near an edge of the window to dock along that edge. A
+  highlight shows where it will land.
+- **From the keyboard.** The tab menu (right-click, `Shift+F10`, or the menu key) splits or moves
+  a tab. The same actions are commands: **View: Split Tab Right/Down**, **View: Move Tab
+  Left/Right/Up/Down** (into the neighbouring group, or a new one), **View: Close Tab**, and
+  **View: Reset Layout**. In a tab strip, the arrow keys move between tabs and `Delete` closes one.
+- **Hiding.** The activity bar shows a view, or hides its group when it's already showing.
+  **View: Toggle Side Bar** (`Ctrl+B`) hides or shows every group of views, and **View: Toggle
+  Terminals** (`Ctrl+J`) every group of terminals, keeping their places.
+- **Documents** open in the group last used for documents. The main group (on the right at
+  first) stays when empty and shows the welcome page.
+
+The layout is restored on the next launch, with documents found again by path.
+
+## Terminal
+
+**View: Toggle Terminal** (`` Ctrl+` ``) opens a terminal, docked along the bottom at first, in
+the workspace folder; pressed in the terminal, it returns to the editor. **Terminal: New
+Terminal** (`` Ctrl+Shift+` ``) or the **+** button beside a terminal's tabs opens another. Like
+any tab, a terminal can be docked anywhere.
+
+- **Shell.** PowerShell on Windows (PowerShell 7 if installed), `$SHELL` elsewhere. Change it
+  with `terminal.shell` and `terminal.args`.
+- **Keys.** While the terminal has focus, keys go to the shell, except the command palette, Go
+  to File, showing views, switching tabs and groups, settings, and terminal commands.
+- **Clipboard.** On Windows, `Ctrl+C` copies when text is selected and `Ctrl+V` pastes; on Linux
+  use `Ctrl+Shift+C` and `Ctrl+Shift+V`; on macOS, `Cmd+C` and `Cmd+V`.
+- **Lifetime.** `exit` closes the tab. A shell that fails leaves its tab open until you press a
+  key. Terminals keep running when hidden or when the window reloads, and end when Ferrite
+  quits.
+- **On Windows**, Ferrite uses the console host from Windows Terminal, which it installs beside
+  `ferrite.exe`, rather than the one built into Windows, which loses or repeats lines when a
+  terminal is resized. The first Windows build downloads it (see
+  [ADR 0011](docs/adr/0011-integrated-terminal.md#resizing-on-windows-2026-10-30)).
+- **Colors.** The ANSI colors are theme tokens (`terminal-ansi-red`, and so on), so themes and
+  `workbench.colors` can change them.
 
 ## Settings
 
@@ -220,6 +269,12 @@ exclude = [".git", "dist"]
 
 [lsp.servers.rust-analyzer]
 command = "C:/tools/rust-analyzer.exe"   # use a specific build
+
+[terminal]
+shell = "C:/Program Files/Git/bin/bash.exe"   # empty: PowerShell, or $SHELL
+args = ["--login"]
+scrollback = 5000
+screen_reader = true                     # announce terminal output (slower)
 
 [extensions.settings."example.tidy"]
 max_line_length = 120                    # settings an extension declares
@@ -287,6 +342,7 @@ crates/
   ferrite-extension-api/   Extension API: WIT interface and Rust bindings for extensions
   ferrite-extension-host/  Extension loading, permissions, sandbox, limits, host functions
   ferrite-tasks/      Background scheduler and timing metrics
+  ferrite-terminal/   Shells in pseudoterminals, output streaming, flow control
   ferrite-syntax/     Tree-sitter grammars, incremental parsing, highlighting
   ferrite-lsp/        Language server client: processes, JSON-RPC, positions, document sync
   ferrite-text/       Rope-backed text buffer, change sets, positions, Unicode boundaries
@@ -296,9 +352,11 @@ src-tauri/            ferrite-app crate: Tauri shell, lifecycle, IPC commands, d
 src/                  React + TypeScript workbench
   app/                Root component, workbench layout, view registry
   commands/           Command registry, keybindings, fuzzy matching, built-in commands
-  components/         Workbench chrome (activity bar, side bar, palette, notifications, ...)
+  components/         Workbench chrome (activity bar, palette, notifications, ...)
+  dock/               The layout: groups of tabs in splits, drag and drop, saving
   editor/             Editor view, find widget, hover and completion, tabs, keymap, session
-  panels/             Side bar views (explorer, search, extensions)
+  panels/             Views (explorer, search, extensions)
+  terminal/           Terminal panel, tabs, and xterm.js sessions
   state/              Small observable stores (documents, workspace, search, layout, ...)
   ipc/                Typed wrappers for Tauri commands (the only place that calls invoke)
   themes/             Theme selection

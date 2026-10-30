@@ -121,6 +121,28 @@
   --color-syntax-tag: #e48a5c;
   --color-syntax-label: #d0a0c0;
   --color-syntax-module: #c8c0a0;
+
+  /* The terminal follows the editor; ANSI colors are what programs ask for. */
+  --color-terminal-background: var(--color-editor-background);
+  --color-terminal-foreground: var(--color-editor-foreground);
+  --color-terminal-cursor: var(--color-editor-cursor);
+  --color-terminal-selection: var(--color-editor-selection);
+  --color-terminal-ansi-black: #3a3e46;
+  --color-terminal-ansi-red: #f0706a;
+  --color-terminal-ansi-green: #a8c98a;
+  --color-terminal-ansi-yellow: #d8b26a;
+  --color-terminal-ansi-blue: #6fa8dc;
+  --color-terminal-ansi-magenta: #c6a0e0;
+  --color-terminal-ansi-cyan: #7fc4c0;
+  --color-terminal-ansi-white: #c8ccd4;
+  --color-terminal-ansi-bright-black: #6b717d;
+  --color-terminal-ansi-bright-red: #ff8f87;
+  --color-terminal-ansi-bright-green: #bfdca3;
+  --color-terminal-ansi-bright-yellow: #ecc98a;
+  --color-terminal-ansi-bright-blue: #8fb8de;
+  --color-terminal-ansi-bright-magenta: #d8b8ec;
+  --color-terminal-ansi-bright-cyan: #9fd8d4;
+  --color-terminal-ansi-bright-white: #f0f2f5;
 }
 
 [data-theme='light'] {
@@ -199,4 +221,22 @@
   --color-syntax-tag: #a8461f;
   --color-syntax-label: #8a3f70;
   --color-syntax-module: #6a5f30;
+
+  /* Dark enough to read on white, including "white" and "bright white". */
+  --color-terminal-ansi-black: #2a2d33;
+  --color-terminal-ansi-red: #b3261e;
+  --color-terminal-ansi-green: #2f7a1f;
+  --color-terminal-ansi-yellow: #8a6100;
+  --color-terminal-ansi-blue: #1f5fa0;
+  --color-terminal-ansi-magenta: #8a3fa8;
+  --color-terminal-ansi-cyan: #0f7a7a;
+  --color-terminal-ansi-white: #6b717d;
+  --color-terminal-ansi-bright-black: #646b77;
+  --color-terminal-ansi-bright-red: #c9372c;
+  --color-terminal-ansi-bright-green: #3b8f2a;
+  --color-terminal-ansi-bright-yellow: #9a6c00;
+  --color-terminal-ansi-bright-blue: #2f6ea8;
+  --color-terminal-ansi-bright-magenta: #9c4fbb;
+  --color-terminal-ansi-bright-cyan: #138a8a;
+  --color-terminal-ansi-bright-white: #8b919c;
 }

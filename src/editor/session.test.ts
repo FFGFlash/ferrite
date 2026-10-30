@@ -134,6 +134,41 @@ describe('EditorSession', () => {
     expect(onView).toHaveBeenCalledTimes(2)
   })
 
+  it('backs off when the backend keeps failing, and reports it once', async () => {
+    vi.useFakeTimers()
+    try {
+      const onError = vi.fn()
+      const transport: EditorTransport = {
+        apply: vi.fn(),
+        view: vi.fn().mockRejectedValue(new Error('unknown document')),
+        clipboard: vi.fn(),
+      }
+      const session = new EditorSession(
+        1,
+        { startLine: 0, endLine: 10 },
+        vi.fn(),
+        onError,
+        transport,
+      )
+      await vi.advanceTimersByTimeAsync(0)
+      // The first failure is retried at once; the second waits.
+      expect(transport.view).toHaveBeenCalledTimes(2)
+      await vi.advanceTimersByTimeAsync(249)
+      expect(transport.view).toHaveBeenCalledTimes(2)
+      await vi.advanceTimersByTimeAsync(1)
+      expect(transport.view).toHaveBeenCalledTimes(3)
+      // Then 500 ms, 1 s, ...
+      await vi.advanceTimersByTimeAsync(500)
+      expect(transport.view).toHaveBeenCalledTimes(4)
+      expect(onError).toHaveBeenCalledOnce()
+      // Waiting out a failure doesn't block saving.
+      await expect(session.idle()).resolves.toBeUndefined()
+      session.dispose()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('sends the find query with every request', async () => {
     const { transport, calls, next } = controlledTransport()
     const search = { pattern: 'x', regex: false, caseSensitive: false, wholeWord: false }

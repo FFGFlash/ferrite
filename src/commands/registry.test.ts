@@ -22,6 +22,24 @@ const key = (k: string, modifiers: Partial<KeyInput> = {}): KeyInput => ({
 })
 
 describe('keybindings', () => {
+  it('matches shifted punctuation by its unshifted key', () => {
+    // Shift+` reads "~" on a US keyboard.
+    const tilde = key('~', { ctrlKey: true, shiftKey: true, code: 'Backquote' })
+    expect(matchesKeybinding('ctrl+shift+`', tilde, false)).toBe(true)
+    expect(matchesKeybinding('ctrl+`', tilde, false)).toBe(false)
+    expect(
+      matchesKeybinding(
+        'ctrl+shift+1',
+        key('!', { ctrlKey: true, shiftKey: true, code: 'Digit1' }),
+        false,
+      ),
+    ).toBe(true)
+    // Unshifted keys still match by what they type.
+    expect(matchesKeybinding('ctrl+`', key('`', { ctrlKey: true, code: 'Backquote' }), false)).toBe(
+      true,
+    )
+  })
+
   it('maps mod to Ctrl or Cmd by platform', () => {
     expect(
       matchesKeybinding('mod+shift+p', key('P', { ctrlKey: true, shiftKey: true }), false),
@@ -71,6 +89,18 @@ describe('command registry', () => {
     expect(commandForKey(key('j', { ctrlKey: true }), false, false)).toBeUndefined()
     expect(commandForKey(key('d', { ctrlKey: true }), false, false)).toBeUndefined()
     expect(commandForKey(key('d', { ctrlKey: true }), false, true)).toBe(focused)
+  })
+
+  it('leaves keys to the shell while a terminal has focus, except terminal commands', () => {
+    const close = command({ id: 'close', keybinding: 'mod+w' })
+    const palette = command({ id: 'palette', keybinding: 'mod+shift+p', terminal: true })
+    unregister = registerCommands([close, palette])
+
+    const ctrlW = key('w', { ctrlKey: true })
+    expect(commandForKey(ctrlW, false, false, false)).toBe(close)
+    expect(commandForKey(ctrlW, false, false, true)).toBeUndefined()
+    const ctrlShiftP = key('P', { ctrlKey: true, shiftKey: true })
+    expect(commandForKey(ctrlShiftP, false, false, true)).toBe(palette)
   })
 
   it('uses platform-specific bindings', () => {

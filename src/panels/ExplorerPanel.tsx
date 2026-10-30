@@ -406,7 +406,7 @@ export function ExplorerActions() {
         <>
           <button
             type="button"
-            className="sidebar__action"
+            className="dock-action"
             title="New File…"
             aria-label="New File"
             onClick={() => beginCreate(false)}
@@ -415,7 +415,7 @@ export function ExplorerActions() {
           </button>
           <button
             type="button"
-            className="sidebar__action"
+            className="dock-action"
             title="New Folder…"
             aria-label="New Folder"
             onClick={() => beginCreate(true)}
@@ -426,7 +426,7 @@ export function ExplorerActions() {
       )}
       <button
         type="button"
-        className="sidebar__action"
+        className="dock-action"
         title={`Open Folder…${primaryKeybinding(open) ? ` (${primaryKeybinding(open)})` : ''}`}
         aria-label="Open Folder"
         onClick={() => void executeCommand('file.openFolder')}
@@ -436,7 +436,7 @@ export function ExplorerActions() {
       {info && collapse && (
         <button
           type="button"
-          className="sidebar__action"
+          className="dock-action"
           title="Collapse Folders"
           aria-label="Collapse Folders"
           onClick={() => void executeCommand('explorer.collapseAll')}

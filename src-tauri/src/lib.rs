@@ -18,6 +18,7 @@ mod lsp;
 mod paths;
 mod perf;
 mod settings;
+mod terminal;
 mod ui_state;
 mod workspace;
 
@@ -39,6 +40,7 @@ pub fn run() {
     .manage(perf::Perf::default())
     .manage(lsp::LspState::default())
     .manage(extensions::ExtensionsState::default())
+    .manage(terminal::TerminalState::default())
     .setup(move |app| {
       let log_dir = match app.path().app_log_dir() {
         Ok(dir) => Some(dir),
@@ -157,6 +159,14 @@ pub fn run() {
       lsp::lsp_hover,
       lsp::lsp_definition,
       lsp::lsp_completion,
+      terminal::terminal_create,
+      terminal::terminal_platform,
+      terminal::terminal_list,
+      terminal::terminal_attach,
+      terminal::terminal_write,
+      terminal::terminal_resize,
+      terminal::terminal_acknowledge,
+      terminal::terminal_kill,
       extensions::extensions_list,
       extensions::extensions_reload,
       extensions::extension_run_command,
@@ -191,8 +201,11 @@ pub fn run() {
       // Removes the backups of unsaved changes, or keeps them if the exit
       // skipped asking about them.
       backups::shutdown(handle);
-      // Stop extensions, language servers, and background work (searches,
-      // indexing) before the process ends.
+      // Stop terminals, extensions, language servers, and background work
+      // (searches, indexing) before the process ends.
+      if let Some(terminals) = handle.try_state::<terminal::TerminalState>() {
+        terminals.shutdown();
+      }
       extensions::shutdown(handle);
       if let Some(lsp) = handle.try_state::<lsp::LspState>() {
         lsp.shutdown_all();

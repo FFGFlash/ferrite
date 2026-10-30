@@ -10,6 +10,7 @@ use ferrite_core::EditorConfig;
 use ferrite_extension_host::contributions::check_theme_colors;
 use ferrite_extension_host::keys::normalize as normalize_key;
 use ferrite_lsp::{ServerCommand, ServerConfig, default_servers};
+use ferrite_terminal::Shell;
 use ferrite_workspace::ExcludeFilter;
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Manager, State};
@@ -65,6 +66,14 @@ const TEMPLATE: &str = r##"# Ferrite settings. Uncomment a line to change it; sa
 # languages = ["python"]
 # root_markers = ["pyproject.toml"]
 
+[terminal]
+# The shell integrated terminals run. Empty: PowerShell on Windows (pwsh if
+# installed), otherwise $SHELL (as a login shell on macOS).
+# shell = ""
+# args = []                 # leave unset for the default shell's arguments
+# scrollback = 1000         # lines kept above the screen
+# screen_reader = false     # announce output to screen readers (slower)
+
 [extensions]
 # WebAssembly extensions. Installed extensions are folders in "extensions"
 # next to this file. Each asks before using the permissions it requests.
@@ -99,6 +108,7 @@ pub struct Settings {
   pub files: FilesSettings,
   pub search: SearchSettings,
   pub lsp: LspSettings,
+  pub terminal: TerminalSettings,
   pub extensions: ExtensionsSettings,
   /// Command id to its keys, overriding the defaults.
   pub keybindings: BTreeMap<String, KeybindingSetting>,
@@ -184,6 +194,28 @@ pub struct SearchSettings {
 
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(default, deny_unknown_fields)]
+pub struct TerminalSettings {
+  /// Empty: the platform's default shell.
+  pub shell: String,
+  /// `None`: the default shell's arguments, or none for a configured shell.
+  pub args: Option<Vec<String>>,
+  pub scrollback: u32,
+  pub screen_reader: bool,
+}
+
+impl Default for TerminalSettings {
+  fn default() -> Self {
+    Self {
+      shell: String::new(),
+      args: None,
+      scrollback: 1000,
+      screen_reader: false,
+    }
+  }
+}
+
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(default, deny_unknown_fields)]
 pub struct LspSettings {
   pub enabled: bool,
   pub servers: BTreeMap<String, ServerSettings>,
@@ -249,6 +281,8 @@ pub struct FrontendSettings {
   pub font_size: u32,
   pub font_family: String,
   pub tab_size: usize,
+  pub terminal_scrollback: u32,
+  pub terminal_screen_reader: bool,
 }
 
 impl Settings {
@@ -268,6 +302,9 @@ impl Settings {
     }
     if self.search.max_file_bytes == 0 {
       return Err("search.max_file_bytes must be greater than 0".into());
+    }
+    if self.terminal.scrollback > 100_000 {
+      return Err("terminal.scrollback must be at most 100000".into());
     }
     ExcludeFilter::new(&self.files.exclude).map_err(|error| format!("files.exclude: {error}"))?;
     let known: Vec<String> = default_servers()
@@ -360,6 +397,23 @@ impl Settings {
     ExcludeFilter::new(&self.files.exclude).unwrap_or_default()
   }
 
+  /// The shell new terminals run.
+  pub fn terminal_shell(&self) -> Shell {
+    let program = self.terminal.shell.trim();
+    let mut shell = if program.is_empty() {
+      Shell::detect()
+    } else {
+      Shell {
+        program: program.to_owned(),
+        args: Vec::new(),
+      }
+    };
+    if let Some(args) = &self.terminal.args {
+      shell.args.clone_from(args);
+    }
+    shell
+  }
+
   pub fn editor_config(&self) -> EditorConfig {
     EditorConfig {
       tab_size: self.editor.tab_size,
@@ -389,6 +443,8 @@ impl Settings {
       font_size: self.editor.font_size,
       font_family: self.editor.font_family.clone(),
       tab_size: self.editor.tab_size,
+      terminal_scrollback: self.terminal.scrollback,
+      terminal_screen_reader: self.terminal.screen_reader,
     }
   }
 }
@@ -598,6 +654,32 @@ mod tests {
     let server =
       Settings::parse("[lsp.servers.mine]\ncommand = \"x\"\n").expect_err("no languages");
     assert!(server.contains("lsp.servers.mine"), "{server}");
+    let scrollback =
+      Settings::parse("[terminal]\nscrollback = 1000000\n").expect_err("too much scrollback");
+    assert!(scrollback.contains("terminal.scrollback"), "{scrollback}");
+  }
+
+  #[test]
+  fn picks_the_terminal_shell() {
+    assert_eq!(Settings::default().terminal_shell(), Shell::detect());
+
+    let configured = Settings::parse("[terminal]\nshell = \" bash \"\n")
+      .expect("valid")
+      .terminal_shell();
+    assert_eq!(configured.program, "bash");
+    assert!(configured.args.is_empty());
+
+    let with_args =
+      Settings::parse("[terminal]\nshell = \"cmd.exe\"\nargs = [\"/k\", \"echo hi\"]\n")
+        .expect("valid")
+        .terminal_shell();
+    assert_eq!(with_args.args, ["/k", "echo hi"]);
+
+    let default_with_args = Settings::parse("[terminal]\nargs = [\"-i\"]\n")
+      .expect("valid")
+      .terminal_shell();
+    assert_eq!(default_with_args.program, Shell::detect().program);
+    assert_eq!(default_with_args.args, ["-i"]);
   }
 
   #[test]

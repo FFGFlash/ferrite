@@ -5,6 +5,9 @@
 # Tauri generated files
 /src-tauri/gen/
 
+# ConPTY, downloaded by the Windows build (src-tauri/build.rs)
+/src-tauri/conpty/
+
 # Frontend
 /node_modules/
 /dist/

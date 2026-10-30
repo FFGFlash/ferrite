@@ -15,6 +15,7 @@ ferrite-extension-host = { path = "crates/ferrite-extension-host" }
 ferrite-lsp = { path = "crates/ferrite-lsp" }
 ferrite-syntax = { path = "crates/ferrite-syntax" }
 ferrite-tasks = { path = "crates/ferrite-tasks" }
+ferrite-terminal = { path = "crates/ferrite-terminal" }
 ferrite-text = { path = "crates/ferrite-text" }
 ferrite-workspace = { path = "crates/ferrite-workspace" }
 
@@ -26,6 +27,7 @@ ignore = "0.4.33"
 memory-stats = "1.2.0"
 notify-debouncer-mini = "0.7.0"
 nucleo-matcher = "0.3.1"
+portable-pty = "0.9.0"
 regex-automata = "0.4.18"
 regex-cursor = "0.1.5"
 regex-syntax = "0.8.11"
@@ -37,6 +39,7 @@ ropey = { version = "1.6.1", default-features = false, features = ["cr_lines", "
 streaming-iterator = "0.1.9"
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.154"
+sha2 = "0.10.9"
 tauri = { version = "2.12.5", features = [] }
 tauri-build = { version = "2.7.4", features = [] }
 tauri-plugin-clipboard-manager = "2.5.0"
@@ -58,6 +61,8 @@ unicode-segmentation = "1.13.3"
 # GC, threads, or async.
 wasmtime = { version = "50.0.0", default-features = false, features = ["anyhow", "component-model", "cranelift", "parallel-compilation", "runtime", "std"] }
 wat = "1.262.0"
+# The version Tauri already uses.
+windows-version = "0.1.7"
 wit-component = { version = "0.262.0", default-features = false }
 
 [workspace.lints.rust]

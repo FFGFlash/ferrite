@@ -1,6 +1,8 @@
 /**
- * A handle on the editor view of the active document, so commands (find,
- * go to line, add next match) can act on it without knowing about React.
+ * Handles on the editor views on screen, so commands (find, go to line, add
+ * next match) and events can act on them without knowing about React.
+ * Several editors can be visible at once (one per dock group); the active
+ * editor is the one showing the active document.
  */
 import type { EditorOp, Position } from '../ipc/editor'
 import { createStore } from '../state/store'
@@ -27,6 +29,49 @@ export interface EditorController {
 }
 
 export const activeEditor = createStore<EditorController | null>(null)
+
+/** Mounted editors by document; the last one mounted or focused wins. */
+const mounted = new Map<number, EditorController>()
+let activeDocument: number | null = null
+let lastUsed: EditorController | null = null
+
+function update(): void {
+  const active = activeDocument === null ? undefined : mounted.get(activeDocument)
+  activeEditor.set(
+    active ?? (lastUsed && mounted.get(lastUsed.documentId) === lastUsed ? lastUsed : null),
+  )
+}
+
+/** Registers a mounted editor view; returns the function that unregisters it. */
+export function registerEditor(controller: EditorController): () => void {
+  mounted.set(controller.documentId, controller)
+  lastUsed = controller
+  update()
+  return () => {
+    if (mounted.get(controller.documentId) === controller) {
+      mounted.delete(controller.documentId)
+    }
+    if (lastUsed === controller) {
+      lastUsed = null
+    }
+    update()
+  }
+}
+
+/** The editor showing a document, if one is mounted. */
+export function editorFor(documentId: number): EditorController | null {
+  return mounted.get(documentId) ?? null
+}
+
+export function mountedEditors(): EditorController[] {
+  return [...mounted.values()]
+}
+
+/** Called when the active document changes. */
+export function setActiveDocument(id: number | null): void {
+  activeDocument = id
+  update()
+}
 
 /** Selects `start..end` (or places the cursor at `start`) and scrolls to it. */
 export function selectRange(editor: EditorController, start: Position, end = start): void {

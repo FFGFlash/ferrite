@@ -1,0 +1,197 @@
+/**
+ * What each kind of dock item looks like: its tab (title, icon, unsaved or
+ * exited state), its content, and the buttons shown beside the tabs while
+ * it's active.
+ */
+import { Plus, SquareTerminal, Trash2 } from 'lucide-react'
+import { useEffect, useRef, type ReactNode } from 'react'
+import { useViews, type ViewDescriptor } from '../app/views'
+import { executeCommand, getCommand, primaryKeybinding } from '../commands/registry'
+import { ErrorBoundary } from '../components/ErrorBoundary'
+import { FileIcon } from '../components/FileIcon'
+import { Icon } from '../components/Icon'
+import { entryIcon } from '../components/fileIcons'
+import { Breadcrumbs } from '../editor/Breadcrumbs'
+import { EditorView } from '../editor/EditorView'
+import type { DocumentSummary } from '../ipc/editor'
+import { documentsStore } from '../state/documents'
+import { iconThemeStore } from '../state/iconTheme'
+import { useStore } from '../state/store'
+import { closeTerminal, getSession, terminalsStore, type TerminalTab } from '../terminal/terminals'
+import { themeKind } from '../themes/theme'
+import { itemId } from './dock'
+import { itemKind, type ItemId } from './model'
+
+export type ResolvedItem =
+  | { kind: 'document'; item: ItemId; document: DocumentSummary }
+  | { kind: 'view'; item: ItemId; view: ViewDescriptor }
+  | { kind: 'terminal'; item: ItemId; terminal: TerminalTab }
+
+/** The items that exist now (open documents, known views, running terminals). */
+export function useResolver(): (item: ItemId) => ResolvedItem | null {
+  const { documents } = useStore(documentsStore)
+  const { tabs } = useStore(terminalsStore)
+  const views = useViews()
+  return (item: ItemId) => {
+    const id = itemId(item)
+    switch (itemKind(item)) {
+      case 'document': {
+        const document = documents.find(candidate => candidate.id === Number(id))
+        return document ? { kind: 'document', item, document } : null
+      }
+      case 'view': {
+        const view = views.find(candidate => candidate.id === id)
+        return view ? { kind: 'view', item, view } : null
+      }
+      case 'terminal': {
+        const terminal = tabs.find(candidate => candidate.id === Number(id))
+        return terminal ? { kind: 'terminal', item, terminal } : null
+      }
+      default:
+        return null
+    }
+  }
+}
+
+export function itemTitle(resolved: ResolvedItem): string {
+  switch (resolved.kind) {
+    case 'document':
+      return resolved.document.title
+    case 'view':
+      return resolved.view.title
+    case 'terminal':
+      return resolved.terminal.title
+  }
+}
+
+/** The tab's accessible name: the title, and whether it's unsaved or exited. */
+export function itemLabel(resolved: ResolvedItem): string {
+  const title = itemTitle(resolved)
+  if (resolved.kind === 'document' && resolved.document.dirty) {
+    return `${title}, unsaved`
+  }
+  if (resolved.kind === 'terminal' && resolved.terminal.exited) {
+    return `${title}, exited`
+  }
+  return title
+}
+
+export function itemTooltip(resolved: ResolvedItem): string {
+  switch (resolved.kind) {
+    case 'document':
+      return resolved.document.path ?? resolved.document.title
+    case 'view':
+      return resolved.view.title
+    case 'terminal':
+      return resolved.terminal.description ?? resolved.terminal.title
+  }
+}
+
+export function ItemIcon({ resolved }: { resolved: ResolvedItem }) {
+  const iconTheme = useStore(iconThemeStore)
+  const light = useStore(themeKind) === 'light'
+  switch (resolved.kind) {
+    case 'document':
+      return (
+        <FileIcon
+          className="dock-tab__icon"
+          kind="file"
+          icon={entryIcon(resolved.document.title, null, iconTheme, light)}
+        />
+      )
+    case 'view':
+      return (
+        <span className="dock-tab__icon" aria-hidden="true">
+          <Icon name={resolved.view.icon} size={16} />
+        </span>
+      )
+    case 'terminal':
+      return (
+        <SquareTerminal className="dock-tab__icon" size={16} strokeWidth={1.5} aria-hidden="true" />
+      )
+  }
+}
+
+/** What the active tab shows. */
+export function ItemContent({ resolved }: { resolved: ResolvedItem }): ReactNode {
+  switch (resolved.kind) {
+    case 'document':
+      return (
+        <>
+          <Breadcrumbs document={resolved.document} />
+          <ErrorBoundary name="The editor" resetKey={resolved.document.id}>
+            <EditorView
+              key={resolved.document.id}
+              documentId={resolved.document.id}
+              title={resolved.document.title}
+            />
+          </ErrorBoundary>
+        </>
+      )
+    case 'view': {
+      const View = resolved.view.component
+      return (
+        <div className="dock-view">
+          <ErrorBoundary name={`The ${resolved.view.title} view`} resetKey={resolved.view.id}>
+            <View />
+          </ErrorBoundary>
+        </div>
+      )
+    }
+    case 'terminal':
+      return <TerminalPane id={resolved.terminal.id} />
+  }
+}
+
+/** Buttons beside the tabs for the active item. */
+export function ItemActions({ resolved }: { resolved: ResolvedItem }): ReactNode {
+  if (resolved.kind === 'view') {
+    const Actions = resolved.view.actions
+    return Actions ? <Actions /> : null
+  }
+  if (resolved.kind === 'terminal') {
+    const keys = primaryKeybinding(getCommand('terminal.new'))
+    return (
+      <>
+        <button
+          type="button"
+          className="dock-action"
+          title={keys ? `New Terminal (${keys})` : 'New Terminal'}
+          aria-label="New Terminal"
+          onClick={() => void executeCommand('terminal.new')}
+        >
+          <Plus size={16} strokeWidth={1.5} aria-hidden="true" />
+        </button>
+        <button
+          type="button"
+          className="dock-action"
+          title="Kill Terminal"
+          aria-label="Kill Terminal"
+          onClick={() => closeTerminal(resolved.terminal.id)}
+        >
+          <Trash2 size={16} strokeWidth={1.5} aria-hidden="true" />
+        </button>
+      </>
+    )
+  }
+  return null
+}
+
+/** Shows a terminal's emulator, moving its element here. */
+function TerminalPane({ id }: { id: number }) {
+  const ref = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    const session = getSession(id)
+    const element = ref.current
+    if (!session || !element) {
+      return
+    }
+    session.mount(element)
+    const observer = new ResizeObserver(() => session.fit())
+    observer.observe(element)
+    return () => observer.disconnect()
+  }, [id])
+
+  return <div ref={ref} className="terminal-view" data-terminal />
+}

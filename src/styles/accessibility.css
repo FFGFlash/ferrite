@@ -54,7 +54,7 @@
   }
 
   /* Selected and focused items in lists, menus, and tabs. */
-  .editor-tab[aria-selected='true'],
+  .dock-tab[aria-selected='true'],
   .palette__item[aria-selected='true'],
   .completion-list__item[aria-selected='true'],
   .context-menu__item[data-selected],
@@ -84,6 +84,24 @@
   .hover-card,
   .completion-list {
     border: 1px solid CanvasText;
+  }
+
+  /* The terminal draws its selection and cursor as backgrounds. */
+  .terminal-view .xterm-selection div {
+    forced-color-adjust: none;
+    background: Highlight !important;
+    opacity: 0.5;
+  }
+
+  .terminal-view .xterm-cursor {
+    outline: 1px solid CanvasText;
+  }
+
+  /* A drop target's preview is a translucent background. */
+  .dock-drop {
+    forced-color-adjust: none;
+    background: none;
+    outline: 2px solid Highlight;
   }
 
   /* The minimap's slider is only a background. */

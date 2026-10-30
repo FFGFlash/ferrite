@@ -15,6 +15,7 @@ path = "src/main.rs"
 name = "ferrite_app"
 
 [build-dependencies]
+sha2 = { workspace = true }
 tauri-build = { workspace = true }
 
 [dependencies]
@@ -23,6 +24,7 @@ ferrite-extension-host = { workspace = true }
 ferrite-lsp = { workspace = true }
 ferrite-syntax = { workspace = true }
 ferrite-tasks = { workspace = true }
+ferrite-terminal = { workspace = true }
 ferrite-text = { workspace = true }
 ferrite-workspace = { workspace = true }
 memory-stats = { workspace = true }

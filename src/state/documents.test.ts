@@ -88,16 +88,6 @@ describe('documents store', () => {
     ])
   })
 
-  it('reorders tabs and cycles through them', () => {
-    documents.documentsStore.set({ documents: [summary(1), summary(2), summary(3)], activeId: 1 })
-    documents.moveDocument(1, 2)
-    expect(documents.documentsStore.get().documents.map(d => d.id)).toEqual([2, 3, 1])
-    documents.activateRelative(1)
-    expect(documents.documentsStore.get().activeId).toBe(2)
-    documents.activateRelative(-1)
-    expect(documents.documentsStore.get().activeId).toBe(1)
-  })
-
   it('opens a path at a location once its editor mounts', async () => {
     vi.mocked(ipc.openDocument).mockResolvedValue(summary(4, { path: '/w/a.rs' }))
     await documents.openPath('/w/a.rs', { start: { line: 2, column: 1 } })

@@ -6,6 +6,7 @@
 import * as ipc from '../ipc/workspace'
 import type { DirectoryEntry, WorkspaceInfo } from '../ipc/workspace'
 import { layoutStore, updateLayout } from './layout'
+import { showView } from './viewRequests'
 import { reportError } from './notifications'
 import { createStore } from './store'
 
@@ -52,7 +53,8 @@ export async function openFolder(): Promise<void> {
   try {
     const info = await ipc.openWorkspaceDialog()
     if (info) {
-      updateLayout({ expanded: [], activeView: 'explorer', sidebarVisible: true })
+      updateLayout({ expanded: [] })
+      showView('explorer')
       setWorkspace(info)
     }
   } catch (error) {

@@ -13,6 +13,9 @@ import { DEFAULT_LAYOUT, layoutStore } from '../state/layout'
 import { notifications, notify } from '../state/notifications'
 import { workspaceStore } from '../state/workspace'
 import { explorerStore } from '../panels/explorerState'
+import { terminalsStore } from '../terminal/terminals'
+import { documentsStore } from '../state/documents'
+import { restoreDock, moveItem } from '../dock/dock'
 import { axeViolations } from '../test/axe'
 import { Workbench } from './Workbench'
 
@@ -37,6 +40,7 @@ const view = {
 describe('accessibility (axe)', () => {
   beforeEach(() => {
     layoutStore.set(DEFAULT_LAYOUT)
+    restoreDock()
     notifications.set([])
   })
 
@@ -119,6 +123,37 @@ describe('accessibility (axe)', () => {
     act(() => {
       explorerStore.set({ focused: null, creating: null, revealed: null })
       workspaceStore.set({ info: null, listings: new Map(), indexing: false })
+    })
+  })
+
+  it('finds no problems with documents and terminals docked in several groups', async () => {
+    render(<Workbench appInfo={null} />)
+    act(() => {
+      documentsStore.set({
+        documents: [1, 2].map(id => ({
+          id,
+          title: `file${id}.rs`,
+          path: `/w/file${id}.rs`,
+          dirty: id === 2,
+          lineEnding: 'LF' as const,
+          encoding: 'UTF-8',
+        })),
+        activeId: 1,
+      })
+      // One of them exited.
+      terminalsStore.set({
+        tabs: [
+          { id: 1, title: 'pwsh', description: null, exited: false },
+          { id: 2, title: 'bash', description: 'user@host: ~', exited: true },
+        ],
+        activeId: 2,
+      })
+      moveItem('document:2', { kind: 'split', group: 'main', edge: 'right' })
+    })
+    expect(await axeViolations()).toEqual([])
+    act(() => {
+      terminalsStore.set({ tabs: [], activeId: null })
+      documentsStore.set({ documents: [], activeId: null })
     })
   })
 

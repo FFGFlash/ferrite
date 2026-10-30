@@ -21,7 +21,7 @@ import {
   type StatusItem,
 } from '../ipc/extensions'
 import { setIconTheme, setTheme } from '../ipc/workspace'
-import { updateLayout } from './layout'
+import { showView } from './viewRequests'
 import { notify, reportError } from './notifications'
 import { createStore } from './store'
 
@@ -72,12 +72,8 @@ export function useExtensionUsage(intervalMs = 2000): ReadonlyMap<string, Resour
   return usage
 }
 
-export function showView(id: string): void {
-  updateLayout({ activeView: id, sidebarVisible: true })
-}
-
 export function showExtensionsView(): void {
-  showView('extensions')
+  showView('extensions', true)
 }
 
 /** Reloads extension statuses; coalesces calls made while one is running. */

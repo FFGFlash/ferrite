@@ -1,33 +1,31 @@
 /**
  * Workbench layout, restored on the next launch. The backend stores it as
  * opaque JSON; this module owns its shape and validates what comes back.
+ * The dock's part is validated by the dock (`dock/model.ts`).
  */
 import { getSavedUi, saveUi } from '../ipc/workspace'
 import { isDesktop } from '../ipc'
 import { documentsStore } from './documents'
 import { createStore } from './store'
 
-export const SIDEBAR_DEFAULT_WIDTH = 260
-export const SIDEBAR_MIN_WIDTH = 170
-export const SIDEBAR_MAX_WIDTH = 600
 const SAVE_DELAY_MS = 500
 const MAX_EXPANDED = 200
 
 export interface Layout {
-  sidebarVisible: boolean
-  sidebarWidth: number
-  activeView: string
   /** Expanded explorer folders (absolute paths). */
   expanded: string[]
   minimapVisible: boolean
+  /**
+   * Where everything is docked, as saved (see `dock/dock.ts`). Layouts from
+   * before the dock hold `{ sidebarVisible, activeView }` here instead.
+   */
+  dock: unknown
 }
 
 export const DEFAULT_LAYOUT: Layout = {
-  sidebarVisible: true,
-  sidebarWidth: SIDEBAR_DEFAULT_WIDTH,
-  activeView: 'explorer',
   expanded: [],
   minimapVisible: true,
+  dock: null,
 }
 
 export const layoutStore = createStore<Layout>(DEFAULT_LAYOUT)
@@ -42,16 +40,7 @@ export function parseLayout(input: unknown): Layout {
     typeof input === 'object' && input !== null && !Array.isArray(input)
       ? (input as Record<string, unknown>)
       : {}
-  const width = Number(saved.sidebarWidth)
   return {
-    sidebarVisible:
-      typeof saved.sidebarVisible === 'boolean'
-        ? saved.sidebarVisible
-        : DEFAULT_LAYOUT.sidebarVisible,
-    sidebarWidth: Number.isFinite(width)
-      ? Math.min(SIDEBAR_MAX_WIDTH, Math.max(SIDEBAR_MIN_WIDTH, width))
-      : DEFAULT_LAYOUT.sidebarWidth,
-    activeView: typeof saved.activeView === 'string' ? saved.activeView : DEFAULT_LAYOUT.activeView,
     expanded: Array.isArray(saved.expanded)
       ? saved.expanded
           .filter((path): path is string => typeof path === 'string')
@@ -61,6 +50,12 @@ export function parseLayout(input: unknown): Layout {
       typeof saved.minimapVisible === 'boolean'
         ? saved.minimapVisible
         : DEFAULT_LAYOUT.minimapVisible,
+    dock:
+      saved.dock ??
+      // Before the dock: the side bar's state seeds the default layout.
+      (saved.sidebarVisible !== undefined || saved.activeView !== undefined
+        ? { sidebarVisible: saved.sidebarVisible, activeView: saved.activeView }
+        : null),
   }
 }
 

@@ -17,6 +17,11 @@ const HEX_COLOR = /^#(?:[0-9a-f]{3,4}|[0-9a-f]{6}|[0-9a-f]{8})$/i
 
 /** The base theme in effect, for code that picks colors per theme. */
 export const themeKind = createStore<ThemeKind>('dark')
+/**
+ * Counts theme changes, including overrides that keep the base, for code
+ * that reads resolved token values (such as the terminal's colors).
+ */
+export const themeRevision = createStore(0)
 
 let overridden: string[] = []
 
@@ -39,6 +44,7 @@ export function applyTheme(kind: ThemeKind, colors: Readonly<Record<string, stri
     }
   }
   themeKind.set(kind)
+  themeRevision.update(revision => revision + 1)
 }
 
 /**

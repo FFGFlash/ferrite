@@ -1,0 +1,168 @@
+import { describe, expect, it } from 'vitest'
+import {
+  allItems,
+  emptyGroup,
+  findGroup,
+  groupOf,
+  groups,
+  isVisible,
+  neighbourInDirection,
+  parseDock,
+  placeItem,
+  removeItem,
+  resizeSplit,
+  setHidden,
+  type DockLayout,
+  type DockNode,
+} from './model'
+
+/** Views on the left, the main group on the right. */
+const classic = (): DockLayout => ({
+  main: 'main',
+  root: {
+    kind: 'split',
+    id: 's1',
+    direction: 'row',
+    sizes: [0.25, 0.75],
+    children: [
+      { kind: 'group', id: 'g1', items: ['view:explorer', 'view:search'], active: 'view:explorer' },
+      { kind: 'group', id: 'main', items: ['document:1', 'document:2'], active: 'document:2' },
+    ],
+  },
+})
+
+/** A compact picture of the tree: `row(g1[a,b] main[c])`. */
+function shape(node: DockNode): string {
+  if (node.kind === 'group') {
+    const items = node.items.map(item => item.split(':')[1]).join(',')
+    return `${node.id}${node.hidden ? '(hidden)' : ''}[${items}]`
+  }
+  return `${node.direction}(${node.children.map(shape).join(' ')})`
+}
+
+const sizesOf = (layout: DockLayout) => (layout.root.kind === 'split' ? layout.root.sizes : [1])
+
+describe('dock model', () => {
+  it('moves a tab within its group and to another group', () => {
+    let layout = placeItem(classic(), 'document:2', { kind: 'tabs', group: 'main', index: 0 })
+    expect(shape(layout.root)).toBe('row(g1[explorer,search] main[2,1])')
+
+    layout = placeItem(layout, 'view:search', { kind: 'tabs', group: 'main', index: 1 })
+    expect(shape(layout.root)).toBe('row(g1[explorer] main[2,search,1])')
+    expect(findGroup(layout, 'main')!.active).toBe('view:search')
+  })
+
+  it('removes a group left empty, but never the main group', () => {
+    let layout = placeItem(classic(), 'view:explorer', { kind: 'tabs', group: 'main', index: 0 })
+    layout = placeItem(layout, 'view:search', { kind: 'tabs', group: 'main', index: 0 })
+    // The view group is gone, and the split with it.
+    expect(shape(layout.root)).toBe('main[search,explorer,1,2]')
+
+    for (const item of allItems(layout)) {
+      layout = removeItem(layout, item)
+    }
+    expect(shape(layout.root)).toBe('main[]')
+  })
+
+  it('splits a group on any side, sharing its space', () => {
+    let layout = placeItem(classic(), 'document:1', { kind: 'split', group: 'main', edge: 'right' })
+    // Same direction as the root split: a new sibling taking half of main's space.
+    expect(shape(layout.root)).toBe('row(g1[explorer,search] main[2] g2[1])')
+    expect(sizesOf(layout)).toEqual([0.25, 0.375, 0.375])
+
+    layout = placeItem(layout, 'document:2', { kind: 'split', group: 'g2', edge: 'top' })
+    // Across: the group becomes a column of two.
+    expect(shape(layout.root)).toBe('row(g1[explorer,search] main[] column(g3[2] g2[1]))')
+  })
+
+  it('does not split a group by its only tab', () => {
+    const layout = placeItem(classic(), 'document:1', {
+      kind: 'split',
+      group: 'main',
+      edge: 'left',
+    })
+    const once = placeItem(layout, 'document:1', { kind: 'split', group: 'g2', edge: 'bottom' })
+    expect(once).toBe(layout)
+  })
+
+  it('docks along the edges of the whole layout', () => {
+    let layout = placeItem(classic(), 'terminal:1', { kind: 'root', edge: 'bottom' })
+    expect(shape(layout.root)).toBe('column(row(g1[explorer,search] main[1,2]) g2[1])')
+    expect(sizesOf(layout)).toEqual([0.75, 0.25])
+
+    layout = placeItem(layout, 'view:search', { kind: 'root', edge: 'top' })
+    expect(shape(layout.root)).toBe('column(g3[search] row(g1[explorer] main[1,2]) g2[1])')
+    expect(sizesOf(layout).reduce((a, b) => a + b)).toBeCloseTo(1)
+  })
+
+  it('flattens splits that go the same way as their parent', () => {
+    let layout = placeItem(classic(), 'document:1', {
+      kind: 'split',
+      group: 'main',
+      edge: 'bottom',
+    })
+    expect(shape(layout.root)).toBe('row(g1[explorer,search] column(main[2] g2[1]))')
+    // Emptying the column's other group leaves one child: the column goes.
+    layout = placeItem(layout, 'document:1', { kind: 'tabs', group: 'g1', index: 2 })
+    expect(shape(layout.root)).toBe('row(g1[explorer,search,1] main[2])')
+  })
+
+  it('activates neighbours when the active tab is removed', () => {
+    const layout = removeItem(classic(), 'document:2')
+    expect(findGroup(layout, 'main')!.active).toBe('document:1')
+    expect(groupOf(layout, 'document:2')).toBeUndefined()
+  })
+
+  it('hides groups but not the main group', () => {
+    let layout = setHidden(classic(), 'g1', true)
+    expect(findGroup(layout, 'g1')!.hidden).toBe(true)
+    expect(isVisible(layout.root)).toBe(true)
+    layout = setHidden(layout, 'main', true)
+    expect(findGroup(layout, 'main')!.hidden).toBeFalsy()
+    // Placing into a hidden group shows it.
+    layout = placeItem(layout, 'document:1', { kind: 'tabs', group: 'g1', index: 0 })
+    expect(findGroup(layout, 'g1')!.hidden).toBe(false)
+  })
+
+  it('resizes splits, keeping sizes summing to 1', () => {
+    const layout = resizeSplit(classic(), 's1', [1, 3])
+    expect(sizesOf(layout)).toEqual([0.25, 0.75])
+    expect(sizesOf(resizeSplit(classic(), 's1', [0, 0]))).toEqual([0.5, 0.5])
+  })
+
+  it('finds the neighbouring group in a direction', () => {
+    const rect = (left: number, top: number, right: number, bottom: number) => ({
+      rect: { left, top, right, bottom },
+    })
+    const left = rect(0, 0, 100, 400)
+    const topRight = rect(100, 0, 400, 200)
+    const bottomRight = rect(100, 200, 400, 400)
+    const all = [left, topRight, bottomRight]
+    expect(neighbourInDirection(topRight.rect, 'left', all)).toBe(left)
+    expect(neighbourInDirection(topRight.rect, 'bottom', all)).toBe(bottomRight)
+    expect(neighbourInDirection(left.rect, 'right', all)).toBe(topRight)
+    expect(neighbourInDirection(topRight.rect, 'top', all)).toBeNull()
+  })
+
+  it('reads a saved layout, dropping what it does not recognize', () => {
+    const saved = JSON.parse(JSON.stringify(classic()))
+    saved.root.children[1].items.push('document:1', 'bogus:1', 42)
+    const parsed = parseDock(
+      saved,
+      item => item.startsWith('view:') || item.startsWith('document:'),
+    )
+    // Duplicates and unknown items are dropped.
+    expect(parsed).toEqual(classic())
+
+    // A tree that lost its main group gets one back.
+    const noMain = { main: 'main', root: emptyGroup('g1', ['view:explorer']) }
+    expect(groups(parseDock(noMain, () => true)!).map(g => g.id)).toEqual(['g1', 'main'])
+
+    for (const bad of [null, 'x', {}, { main: 'main', root: { kind: 'split', id: 's1' } }]) {
+      expect(parseDock(bad, () => true)).toBeNull()
+    }
+    // Repeated ids are rejected.
+    const repeated = { main: 'main', root: { ...classic().root, id: 'main' } }
+    expect(parseDock(repeated, () => true)).toBeNull()
+  })
+})

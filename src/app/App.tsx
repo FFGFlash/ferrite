@@ -4,6 +4,7 @@ import { builtinCommands } from '../commands/builtin'
 import { registerCommands } from '../commands/registry'
 import { ErrorBoundary } from '../components/ErrorBoundary'
 import { getAppInfo, isDesktop, log, notifyFrontendReady, type AppInfo } from '../ipc'
+import { benchConfig } from '../ipc/perf'
 import { getSettings } from '../ipc/workspace'
 import { applySettings } from '../state/appearance'
 import { loadDocuments } from '../state/documents'
@@ -12,9 +13,30 @@ import { refreshExtensions } from '../state/extensions'
 import { restoreLayout } from '../state/layout'
 import { reportError } from '../state/notifications'
 import { loadWorkspace } from '../state/workspace'
+import { restoreTerminals } from '../terminal/terminals'
+import { documentsRestored, restoreDock, terminalsRestored } from '../dock/dock'
 import { Workbench } from './Workbench'
 
-/** Restores settings, layout, the workspace, and open documents, in that order. */
+/**
+ * Reattaches to terminals still running (after a window reload), or starts
+ * one where the saved layout showed terminals. Benchmarks measure the editor
+ * alone.
+ */
+async function loadTerminals(): Promise<void> {
+  try {
+    if ((await benchConfig()) === null) {
+      await restoreTerminals()
+      await terminalsRestored()
+    }
+  } catch (error) {
+    reportError('Restoring terminals', error)
+  }
+}
+
+/**
+ * Restores settings, layout, then the workspace, open documents, extensions,
+ * and terminals.
+ */
 async function restoreSession(): Promise<void> {
   listenToBackend()
   try {
@@ -28,7 +50,13 @@ async function restoreSession(): Promise<void> {
   } catch (error) {
     reportError('Restoring the layout', error)
   }
-  await Promise.all([loadWorkspace(), loadDocuments(activeFile), refreshExtensions()])
+  restoreDock()
+  await Promise.all([
+    loadWorkspace(),
+    loadDocuments(activeFile).then(documentsRestored),
+    refreshExtensions(),
+    loadTerminals(),
+  ])
   await runRequestedBenchmark()
 }
 

@@ -16,7 +16,9 @@ pnpm tauri dev
 
 Platform notes:
 
-- **Windows.** You need the Visual Studio C++ build tools. WebView2 ships with Windows 11.
+- **Windows.** You need the Visual Studio C++ build tools. WebView2 ships with Windows 11. The
+  first build downloads the ConPTY that terminals use from nuget.org, so it needs network access
+  (see `src-tauri/build.rs`).
 - **macOS.** You need the Xcode command line tools.
 - **Linux.** You need the WebKitGTK 4.1 development packages. On Debian and Ubuntu:
 

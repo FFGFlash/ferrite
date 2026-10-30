@@ -52,6 +52,10 @@ export const ipcTransport: EditorTransport = {
 
 type Job = { kind: 'ops'; ops: EditorOp[] } | { kind: 'clipboard'; action: ClipboardAction }
 
+/** The first delay before refetching after repeated failures, doubling up to the maximum. */
+const RETRY_BASE_MS = 250
+const RETRY_MAX_MS = 5000
+
 export class EditorSession {
   private readonly queue: Job[] = []
   private viewport: Viewport
@@ -61,6 +65,9 @@ export class EditorSession {
   private busy = false
   private disposed = false
   private idleWaiters: (() => void)[] = []
+  /** Requests that failed in a row. After the first, the view is refetched with growing delays. */
+  private failures = 0
+  private retryTimer: ReturnType<typeof setTimeout> | null = null
 
   constructor(
     private readonly documentId: number,
@@ -138,11 +145,19 @@ export class EditorSession {
   dispose(): void {
     this.disposed = true
     this.queue.length = 0
+    if (this.retryTimer !== null) {
+      clearTimeout(this.retryTimer)
+    }
     this.resolveIdle()
   }
 
   private pump(): void {
     if (this.busy || this.disposed) {
+      return
+    }
+    // A refetch waiting out a failure doesn't hold up edits, or saving.
+    if (this.retryTimer !== null && this.queue.length === 0) {
+      this.resolveIdle()
       return
     }
     const job = this.queue.shift()
@@ -163,6 +178,7 @@ export class EditorSession {
     request
       .then(wire => {
         recordTiming('ipc.roundTrip', performance.now() - sent)
+        this.failures = 0
         if (!this.disposed) {
           this.receive(wire)
         }
@@ -172,12 +188,28 @@ export class EditorSession {
           // Resynchronize with the backend's state after a failure.
           this.cache = null
           this.viewportStale = true
-          this.onError(error)
+          this.failures += 1
+          // Report a run of failures once, not once per retry.
+          if (this.failures === 1) {
+            this.onError(error)
+          } else {
+            log('warn', `Editor ${this.documentId}: request failed again: ${String(error)}`)
+          }
         }
       })
       .finally(() => {
         this.busy = false
-        this.pump()
+        if (this.failures > 1 && this.queue.length === 0 && !this.disposed) {
+          // The backend keeps refusing: retry later rather than at once.
+          const delay = Math.min(RETRY_MAX_MS, RETRY_BASE_MS * 2 ** (this.failures - 2))
+          this.retryTimer = setTimeout(() => {
+            this.retryTimer = null
+            this.pump()
+          }, delay)
+          this.resolveIdle()
+        } else {
+          this.pump()
+        }
       })
   }
 

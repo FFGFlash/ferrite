@@ -3,15 +3,7 @@ import { openPalette } from '../components/paletteState'
 import { togglePerfOverlay } from '../components/PerfOverlay'
 import { resetPerf } from '../state/perf'
 import { activeEditor } from '../editor/activeEditor'
-import {
-  activateRelative,
-  close,
-  documentsStore,
-  newFile,
-  openFile,
-  openPath,
-  save,
-} from '../state/documents'
+import { close, documentsStore, newFile, openFile, openPath, save } from '../state/documents'
 import { addDevelopmentExtension, reloadExtensions } from '../ipc/extensions'
 import { setIconTheme, setTheme, settingsFilePath } from '../ipc/workspace'
 import { DEFAULT_ICON_THEME } from '../state/iconTheme'
@@ -20,20 +12,29 @@ import { notify } from '../state/notifications'
 import { closeFolder, collapseAll, openFolder, workspaceStore } from '../state/workspace'
 import { isMac } from '../editor/keymap'
 import { beginCreate } from '../panels/explorerState'
+import { clearTerminal, closeTerminal, terminalsStore } from '../terminal/terminals'
+import {
+  closeCurrentTab,
+  cycleTab,
+  focusActiveTerminal,
+  focusGroupRelative,
+  hasCurrentTab,
+  moveCurrentTab,
+  openTerminal,
+  resetLayout,
+  showView,
+  splitCurrentTab,
+  toggleTerminal,
+  toggleTerminals,
+  toggleViews,
+} from '../dock/dock'
 import { bindingsOf, commandLabel, formatKeybinding, listCommands, type Command } from './registry'
 
 const hasEditor = () => activeEditor.get() !== null
 const hasDocument = () => documentsStore.get().activeId !== null
 const hasWorkspace = () => workspaceStore.get().info !== null
+const hasTerminal = () => terminalsStore.get().activeId !== null
 const editor = () => activeEditor.get()
-
-function showView(id: string): void {
-  updateLayout({ activeView: id, sidebarVisible: true })
-  if (id === 'search') {
-    // Let the panel mount, then focus its query field.
-    requestAnimationFrame(() => document.getElementById('search-panel-query')?.focus())
-  }
-}
 
 export const builtinCommands: Command[] = [
   { id: 'file.newFile', category: 'File', title: 'New File', keybinding: 'mod+n', run: newFile },
@@ -81,6 +82,7 @@ export const builtinCommands: Command[] = [
     category: 'View',
     title: 'Command Palette',
     keybinding: ['mod+shift+p', 'f1'],
+    terminal: true,
     hidden: true,
     run: () => openPalette('>'),
   },
@@ -89,6 +91,7 @@ export const builtinCommands: Command[] = [
     category: 'Go',
     title: 'Go to File…',
     keybinding: 'mod+p',
+    terminal: true,
     run: () => openPalette(''),
   },
   {
@@ -104,7 +107,8 @@ export const builtinCommands: Command[] = [
     category: 'View',
     title: 'Toggle Side Bar',
     keybinding: 'mod+b',
-    run: () => updateLayout({ sidebarVisible: !layoutStore.get().sidebarVisible }),
+    terminal: true,
+    run: toggleViews,
   },
   {
     id: 'view.toggleMinimap',
@@ -113,10 +117,106 @@ export const builtinCommands: Command[] = [
     run: () => updateLayout({ minimapVisible: !layoutStore.get().minimapVisible }),
   },
   {
+    id: 'workbench.togglePanel',
+    category: 'View',
+    title: 'Toggle Terminals',
+    keybinding: 'mod+j',
+    terminal: true,
+    run: toggleTerminals,
+  },
+  {
+    id: 'terminal.toggle',
+    category: 'View',
+    title: 'Toggle Terminal',
+    keybinding: 'ctrl+`',
+    terminal: true,
+    run: toggleTerminal,
+  },
+  {
+    id: 'terminal.new',
+    category: 'Terminal',
+    title: 'New Terminal',
+    keybinding: 'ctrl+shift+`',
+    terminal: true,
+    run: openTerminal,
+  },
+  {
+    id: 'terminal.focus',
+    category: 'Terminal',
+    title: 'Focus Terminal',
+    run: focusActiveTerminal,
+  },
+  {
+    id: 'terminal.kill',
+    category: 'Terminal',
+    title: 'Kill Terminal',
+    enabled: hasTerminal,
+    run: () => closeTerminal(),
+  },
+  {
+    id: 'terminal.clear',
+    category: 'Terminal',
+    title: 'Clear',
+    enabled: hasTerminal,
+    run: () => clearTerminal(),
+  },
+  {
+    id: 'view.closeTab',
+    category: 'View',
+    title: 'Close Tab',
+    enabled: hasCurrentTab,
+    run: closeCurrentTab,
+  },
+  ...(['left', 'right', 'up', 'down'] as const).map((direction): Command => ({
+    id: `view.moveTab${direction[0]!.toUpperCase()}${direction.slice(1)}`,
+    category: 'View',
+    title: `Move Tab ${direction[0]!.toUpperCase()}${direction.slice(1)}`,
+    enabled: hasCurrentTab,
+    run: () =>
+      moveCurrentTab(direction === 'up' ? 'top' : direction === 'down' ? 'bottom' : direction),
+  })),
+  {
+    id: 'view.splitRight',
+    category: 'View',
+    title: 'Split Tab Right',
+    enabled: hasCurrentTab,
+    run: () => splitCurrentTab('right'),
+  },
+  {
+    id: 'view.splitDown',
+    category: 'View',
+    title: 'Split Tab Down',
+    enabled: hasCurrentTab,
+    run: () => splitCurrentTab('bottom'),
+  },
+  {
+    id: 'view.focusNextGroup',
+    category: 'View',
+    title: 'Focus Next Group',
+    keybinding: 'f6',
+    terminal: true,
+    run: () => focusGroupRelative(1),
+  },
+  {
+    id: 'view.focusPreviousGroup',
+    category: 'View',
+    title: 'Focus Previous Group',
+    keybinding: 'shift+f6',
+    terminal: true,
+    run: () => focusGroupRelative(-1),
+  },
+  {
+    id: 'view.resetLayout',
+    category: 'View',
+    title: 'Reset Layout',
+    run: resetLayout,
+  },
+  {
     id: 'workbench.showExplorer',
     category: 'View',
     title: 'Show Explorer',
     keybinding: 'mod+shift+e',
+    terminal: true,
     run: () => showView('explorer'),
   },
   {
@@ -124,6 +224,7 @@ export const builtinCommands: Command[] = [
     category: 'View',
     title: 'Search in Files',
     keybinding: 'mod+shift+f',
+    terminal: true,
     run: () => showView('search'),
   },
   {
@@ -131,6 +232,7 @@ export const builtinCommands: Command[] = [
     category: 'View',
     title: 'Extensions',
     keybinding: 'mod+shift+x',
+    terminal: true,
     run: () => showView('extensions'),
   },
   {
@@ -158,7 +260,7 @@ export const builtinCommands: Command[] = [
     title: 'New File…',
     enabled: hasWorkspace,
     run: () => {
-      showView('explorer')
+      showView('explorer', false)
       beginCreate(false)
     },
   },
@@ -168,7 +270,7 @@ export const builtinCommands: Command[] = [
     title: 'New Folder…',
     enabled: hasWorkspace,
     run: () => {
-      showView('explorer')
+      showView('explorer', false)
       beginCreate(true)
     },
   },
@@ -182,18 +284,20 @@ export const builtinCommands: Command[] = [
   {
     id: 'view.nextEditor',
     category: 'View',
-    title: 'Next Editor',
+    title: 'Next Tab',
     keybinding: ['ctrl+tab', 'ctrl+pagedown'],
-    enabled: hasDocument,
-    run: () => activateRelative(1),
+    terminal: true,
+    enabled: hasCurrentTab,
+    run: () => cycleTab(1),
   },
   {
     id: 'view.previousEditor',
     category: 'View',
-    title: 'Previous Editor',
+    title: 'Previous Tab',
     keybinding: ['ctrl+shift+tab', 'ctrl+pageup'],
-    enabled: hasDocument,
-    run: () => activateRelative(-1),
+    terminal: true,
+    enabled: hasCurrentTab,
+    run: () => cycleTab(-1),
   },
   {
     id: 'editor.find',
@@ -286,6 +390,7 @@ export const builtinCommands: Command[] = [
     category: 'Preferences',
     title: 'Open Settings (TOML)',
     keybinding: 'mod+,',
+    terminal: true,
     run: async () => openPath(await settingsFilePath()),
   },
   {

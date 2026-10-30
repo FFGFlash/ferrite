@@ -6,6 +6,8 @@ import type { ClipboardAction, EditorOp, Motion } from '../ipc/editor'
 
 export interface KeyInput {
   key: string
+  /** The physical key, e.g. `Backquote`. */
+  code?: string
   ctrlKey: boolean
   metaKey: boolean
   altKey: boolean

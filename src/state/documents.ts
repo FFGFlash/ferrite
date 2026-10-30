@@ -2,7 +2,7 @@
  * Open documents as the workbench sees them: summaries for tabs (the text
  * itself stays in the backend) and which document is active.
  */
-import { activeEditor, selectRange } from '../editor/activeEditor'
+import { editorFor, selectRange, setActiveDocument } from '../editor/activeEditor'
 import * as ipc from '../ipc/editor'
 import type { DocumentSummary, Position } from '../ipc/editor'
 import { reportError } from './notifications'
@@ -14,6 +14,7 @@ export interface DocumentsState {
 }
 
 export const documentsStore = createStore<DocumentsState>({ documents: [], activeId: null })
+documentsStore.subscribe(() => setActiveDocument(documentsStore.get().activeId))
 
 /**
  * Hooks for work that must finish before a document is saved, such as edits
@@ -88,32 +89,6 @@ export function activate(id: number): void {
   documentsStore.update(state => ({ ...state, activeId: id }))
 }
 
-/** Activates the document `offset` tabs away from the active one, wrapping. */
-export function activateRelative(offset: number): void {
-  const { documents, activeId } = documentsStore.get()
-  if (documents.length === 0) {
-    return
-  }
-  const index = documents.findIndex(d => d.id === activeId)
-  const next = documents[(index + offset + documents.length) % documents.length]
-  if (next) {
-    activate(next.id)
-  }
-}
-
-/** Moves the tab of `id` to `index`. */
-export function moveDocument(id: number, index: number): void {
-  documentsStore.update(state => {
-    const moving = state.documents.find(d => d.id === id)
-    if (!moving) {
-      return state
-    }
-    const rest = state.documents.filter(d => d.id !== id)
-    const target = Math.max(0, Math.min(index, rest.length))
-    return { ...state, documents: [...rest.slice(0, target), moving, ...rest.slice(target)] }
-  })
-}
-
 /**
  * Opens (or switches to) the file at `path`, optionally selecting a range
  * once its editor is showing.
@@ -124,7 +99,7 @@ export async function openPath(
 ): Promise<void> {
   try {
     const summary = await ipc.openDocument(path)
-    const editor = activeEditor.get()
+    const editor = editorFor(summary.id)
     if (selection) {
       const range = { start: selection.start, end: selection.end ?? selection.start }
       if (editor?.documentId === summary.id) {
@@ -150,8 +125,9 @@ export async function newFile(text?: string): Promise<void> {
 
 /** Makes an open document active and selects `start..end` in it. */
 export function revealInDocument(id: number, start: Position, end: Position): void {
-  const editor = activeEditor.get()
-  if (editor?.documentId === id) {
+  const editor = editorFor(id)
+  if (editor) {
+    activate(id)
     selectRange(editor, start, end)
     return
   }

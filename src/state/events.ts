@@ -1,5 +1,5 @@
 /** Applies backend notifications to frontend state. */
-import { activeEditor } from '../editor/activeEditor'
+import { editorFor, mountedEditors } from '../editor/activeEditor'
 import { subscribeToEvents, type AppEvent } from '../ipc/workspace'
 import { applySettings } from './appearance'
 import { documentsStore, revealInDocument, setDirty, updateSummary } from './documents'
@@ -8,10 +8,10 @@ import {
   refreshStatusItems,
   showExtensionFailure,
   showExtensionMessage,
-  showView,
   viewChanged,
 } from './extensions'
 import { notify } from './notifications'
+import { showView } from './viewRequests'
 import { refreshDirectories, setIndexing, setWorkspace } from './workspace'
 
 export function handleEvent(event: AppEvent): void {
@@ -22,14 +22,10 @@ export function handleEvent(event: AppEvent): void {
     case 'filesChanged':
       refreshDirectories(event.directories)
       break
-    case 'documentReloaded': {
+    case 'documentReloaded':
       updateSummary(event.document)
-      const editor = activeEditor.get()
-      if (editor?.documentId === event.document.id) {
-        editor.refresh()
-      }
+      editorFor(event.document.id)?.refresh()
       break
-    }
     case 'documentChangedOnDisk':
       notify(
         'info',
@@ -41,18 +37,16 @@ export function handleEvent(event: AppEvent): void {
       notify('info', 'Settings applied.')
       break
     case 'languageServerChanged':
-      activeEditor.get()?.refresh()
+      for (const editor of mountedEditors()) {
+        editor.refresh()
+      }
       break
     case 'searchCounted':
     case 'syntaxUpdated':
     case 'decorationsChanged':
-    case 'diagnosticsChanged': {
-      const editor = activeEditor.get()
-      if (editor?.documentId === event.documentId) {
-        editor.refresh()
-      }
+    case 'diagnosticsChanged':
+      editorFor(event.documentId)?.refresh()
       break
-    }
     case 'documentOpened':
       documentsStore.update(({ documents, activeId }) => ({
         documents: documents.some(d => d.id === event.document.id)
@@ -80,7 +74,7 @@ export function handleEvent(event: AppEvent): void {
       viewChanged(event.view)
       break
     case 'extensionShowView':
-      showView(event.view)
+      showView(event.view, true)
       break
     case 'extensionReveal':
       revealInDocument(event.documentId, event.start, event.end)
@@ -88,14 +82,10 @@ export function handleEvent(event: AppEvent): void {
     case 'notice':
       notify(event.level, event.message)
       break
-    case 'documentEdited': {
+    case 'documentEdited':
       setDirty(event.documentId, true)
-      const editor = activeEditor.get()
-      if (editor?.documentId === event.documentId) {
-        editor.refresh()
-      }
+      editorFor(event.documentId)?.refresh()
       break
-    }
   }
 }
 

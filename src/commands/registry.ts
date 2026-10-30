@@ -31,6 +31,12 @@ export interface Command {
   enabled?: () => boolean
   /** Only run from the keyboard while the editor has focus. */
   editorFocus?: boolean
+  /**
+   * Also runs from the keyboard while a terminal has focus. Other commands'
+   * keys go to the shell there (Ctrl+W deletes a word, Ctrl+P recalls
+   * history, and so on).
+   */
+  terminal?: boolean
   /** Omitted from the command palette. */
   hidden?: boolean
   /** Who registered it; extension keybindings yield to built-in ones. */
@@ -132,10 +138,33 @@ function parse(binding: string, mac: boolean): ParsedBinding {
   }
 }
 
+/**
+ * The unshifted character of punctuation and digit keys, by physical key
+ * (US layout). With Shift, `key` reports the shifted character ("~" for the
+ * backquote key), but bindings name the unshifted one ("ctrl+shift+`").
+ */
+function unshiftedKey(code: string | undefined): string | undefined {
+  const punctuation: Record<string, string> = {
+    Backquote: '`',
+    Minus: '-',
+    Equal: '=',
+    BracketLeft: '[',
+    BracketRight: ']',
+    Backslash: '\\',
+    Semicolon: ';',
+    Quote: "'",
+    Comma: ',',
+    Period: '.',
+    Slash: '/',
+  }
+  return code === undefined ? undefined : (punctuation[code] ?? /^Digit(\d)$/.exec(code)?.[1])
+}
+
 export function matchesKeybinding(binding: string, event: KeyInput, mac: boolean): boolean {
   const parsed = parse(binding, mac)
+  const key = event.key === ' ' ? 'space' : event.key.toLowerCase()
   return (
-    parsed.key === (event.key === ' ' ? 'space' : event.key.toLowerCase()) &&
+    (parsed.key === key || (event.shiftKey && parsed.key === unshiftedKey(event.code))) &&
     parsed.ctrl === event.ctrlKey &&
     parsed.meta === event.metaKey &&
     parsed.alt === event.altKey &&
@@ -181,13 +210,14 @@ export function commandForKey(
   event: KeyInput,
   mac: boolean,
   editorFocused: boolean,
+  terminalFocused = false,
 ): Command | undefined {
   const user = overrides.get()
   const rank = (command: Command) =>
     command.id in user ? 0 : command.source === 'extension' ? 2 : 1
   const ordered = [...registry.get().values()].sort((a, b) => rank(a) - rank(b))
   for (const command of ordered) {
-    if (command.editorFocus && !editorFocused) {
+    if ((command.editorFocus && !editorFocused) || (terminalFocused && !command.terminal)) {
       continue
     }
     if (!bindingsOf(command, mac).some(binding => matchesKeybinding(binding, event, mac))) {
@@ -210,7 +240,9 @@ export function useKeybindings(): void {
       }
       const target = event.target as HTMLElement | null
       const editorFocused = target?.dataset.editorInput !== undefined
-      const command = commandForKey(event, mac, editorFocused)
+      const terminalFocused =
+        target instanceof Element && target.closest('[data-terminal]') !== null
+      const command = commandForKey(event, mac, editorFocused, terminalFocused)
       if (command) {
         event.preventDefault()
         event.stopPropagation()

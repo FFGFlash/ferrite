@@ -1,0 +1,283 @@
+.dock {
+  position: relative;
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  background: var(--color-workbench-background);
+}
+
+.dock-split {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+}
+
+.dock-split--column {
+  flex-direction: column;
+}
+
+.dock-split__cell {
+  position: relative;
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+}
+
+.dock-split--row > .dock-split__cell + .dock-split__cell {
+  border-left: 1px solid var(--color-border);
+}
+
+.dock-split--column > .dock-split__cell + .dock-split__cell {
+  border-top: 1px solid var(--color-border);
+}
+
+.dock-group {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  background: var(--color-editor-background);
+  color: var(--color-editor-foreground);
+}
+
+.dock-group[data-kind='view'] {
+  background: var(--color-sidebar-background);
+  color: var(--color-sidebar-foreground);
+}
+
+.dock-group[data-kind='terminal'] {
+  background: var(--color-terminal-background);
+  color: var(--color-terminal-foreground);
+}
+
+.dock-group__bar {
+  display: flex;
+  flex: none;
+  height: var(--size-tabs);
+  background: var(--color-tabs-background);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.dock-tabs {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+}
+
+.dock-tab {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 6px;
+  padding: 0 var(--space-1) 0 var(--space-3);
+  color: var(--color-tab-inactive-foreground);
+  border-right: 1px solid var(--color-border);
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.dock-tab[aria-selected='true'] {
+  background: var(--color-tab-active-background);
+  color: var(--color-tab-active-foreground);
+}
+
+/* The accent marks the active tab of the group being worked in. */
+.dock-group[data-current] .dock-tab[aria-selected='true'] {
+  box-shadow: inset 0 1px 0 var(--color-tab-active-indicator);
+}
+
+.dock-tab:focus-visible {
+  outline: 1px solid var(--color-focus-ring);
+  outline-offset: -1px;
+}
+
+/* Views not shown are just their icon (named by the tab's label and title),
+   so a narrow group of views keeps them all in sight. */
+.dock-tab[data-kind='view']:not([aria-selected='true']) {
+  padding: 0 var(--space-2);
+}
+
+.dock-tab[data-kind='view']:not([aria-selected='true']) .dock-tab__title,
+.dock-tab[data-kind='view']:not([aria-selected='true']) .dock-tab__close {
+  display: none;
+}
+
+.dock-tab[data-exited] .dock-tab__title {
+  font-style: italic;
+}
+
+.dock-tab[data-drop='before'] {
+  box-shadow: inset 2px 0 0 var(--color-focus-ring);
+}
+
+.dock-tab[data-drop='after'] {
+  box-shadow: inset -2px 0 0 var(--color-focus-ring);
+}
+
+.dock-tab__icon {
+  flex: none;
+  color: var(--color-explorer-file-icon);
+}
+
+.dock-tab__close {
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-control);
+  background: none;
+  color: inherit;
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.dock-tab__close:hover {
+  background: var(--color-control-hover-background);
+}
+
+/* The close button shows × on hover or for the active tab, and a dot for
+   unsaved changes otherwise. */
+.dock-tab__x,
+.dock-tab__dirty {
+  grid-area: 1 / 1;
+}
+
+.dock-tab__dirty {
+  display: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.dock-tab:not(:hover, [aria-selected='true']) .dock-tab__x {
+  visibility: hidden;
+}
+
+.dock-tab[data-dirty] .dock-tab__close:not(:hover) .dock-tab__dirty {
+  display: block;
+}
+
+.dock-tab[data-dirty] .dock-tab__close:not(:hover) .dock-tab__x {
+  visibility: hidden;
+}
+
+.dock-group__actions {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 2px;
+  padding: 0 var(--space-2);
+}
+
+.dock-action {
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-control);
+  background: none;
+  color: var(--color-text-muted);
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.dock-action:hover {
+  background: var(--color-control-hover-background);
+  color: var(--color-text);
+}
+
+.dock-group__content {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+
+.dock-group__content:focus {
+  outline: none;
+}
+
+.dock-view,
+.dock-group__welcome {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+
+.panel-empty {
+  margin: 0;
+  padding: var(--space-2) var(--space-4);
+  color: var(--color-text-muted);
+  line-height: 1.5;
+}
+
+.terminal-view {
+  position: absolute;
+  inset: var(--space-1) var(--space-2) var(--space-1) var(--space-4);
+}
+
+.terminal-view .xterm {
+  height: 100%;
+}
+
+/* xterm.css paints the viewport black; it shows below the last full row. */
+.terminal-view .xterm .xterm-viewport {
+  background-color: var(--color-terminal-background);
+}
+
+/* Where a dragged tab would land. */
+.dock-drop {
+  position: absolute;
+  z-index: 2;
+  inset: 0;
+  background: color-mix(in srgb, var(--color-focus-ring) 25%, transparent);
+  outline: 2px solid var(--color-focus-ring);
+  outline-offset: -2px;
+  pointer-events: none;
+}
+
+.dock-drop[data-zone='left'] {
+  right: 50%;
+}
+
+.dock-drop[data-zone='right'] {
+  left: 50%;
+}
+
+.dock-drop[data-zone='top'] {
+  bottom: 50%;
+}
+
+.dock-drop[data-zone='bottom'] {
+  top: 50%;
+}
+
+.dock-drop--root[data-zone='left'] {
+  right: 75%;
+}
+
+.dock-drop--root[data-zone='right'] {
+  left: 75%;
+}
+
+.dock-drop--root[data-zone='top'] {
+  bottom: 75%;
+}
+
+.dock-drop--root[data-zone='bottom'] {
+  top: 75%;
+}

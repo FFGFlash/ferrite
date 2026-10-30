@@ -17,3 +17,14 @@
   outline: none;
   background: var(--color-sash-hover);
 }
+
+/* On the top edge of its parent instead. */
+.sash--horizontal {
+  top: calc(var(--size-sash) / -2);
+  right: 0;
+  bottom: auto;
+  left: 0;
+  width: auto;
+  height: var(--size-sash);
+  cursor: row-resize;
+}

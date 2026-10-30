@@ -48,6 +48,7 @@ Tauri, and nothing in Rust depends on the frontend.
 | `ferrite-extension-api`  | The extension API: the WIT interface (`wit/extension.wit`) and the Rust bindings extensions build against (`Guest`, `export_extension!`). Standalone, so extensions outside the repository can use it                            | `wit-bindgen`                                                                  |
 | `ferrite-extension-host` | Extension discovery, manifest validation, permission decisions, a worker thread and bounded event queue per extension, Wasmtime with deadlines and memory limits, the host side of the API (validated reads, edits, diagnostics) | `ferrite-core`, `ferrite-text`, `wasmtime`, `wit-component`, `semver`, `toml`  |
 | `ferrite-tasks`          | Bounded background scheduler (priorities, keyed replacement, cancellation) and timing histograms                                                                                                                                 | `tracing`                                                                      |
+| `ferrite-terminal`       | Shells in pseudoterminals (ConPTY, Unix ptys), UTF-8 output decoding, output history for replay, flow control, default shell detection                                                                                           | `portable-pty`                                                                 |
 | `ferrite-app`            | Process lifecycle, Tauri commands, dialogs, clipboard, settings, session state, workspace coordination, syntax and language server state per document, backend events, instrumentation, benchmark mode, logging                  | all of the above, Tauri, `toml`, `toml_edit`, `memory-stats`                   |
 | `ferrite-benches`        | Criterion benchmarks and deterministic fixtures (`benches/`), not part of the app                                                                                                                                                | `ferrite-text`, `ferrite-core`, `ferrite-workspace`, `criterion`               |
 
@@ -59,7 +60,9 @@ workspace, `extensions/`. The design brief's `editor-app` and `src-tauri` are on
 [ADR 0005](adr/0005-syntax-and-language-servers.md), and extension decisions in
 [ADR 0006](adr/0006-wasm-extensions.md) and [ADR 0007](adr/0007-workbench-contributions.md),
 and hardening decisions (crash recovery, accessibility, regression checks) in
-[ADR 0008](adr/0008-hardening.md). Measurements are in
+[ADR 0008](adr/0008-hardening.md), and the integrated terminal in
+[ADR 0011](adr/0011-integrated-terminal.md), and docking in
+[ADR 0012](adr/0012-docking.md). Measurements are in
 [`performance.md`](performance.md).
 
 ## Background work
@@ -210,7 +213,7 @@ timestamp granularity and with the same length isn't detected.
   built-in theme or a contributed one; `workbench.colors` overrides theme tokens; `[keybindings]`
   replaces commands' keys.
 - **`state.json`** in the local data directory holds the open folder, open files, the active file,
-  and the frontend's layout (side bar visibility, width, active view, expanded folders). It's
+  and the frontend's layout (the dock's tree, expanded folders, the minimap). It's
   written atomically on every change; the frontend debounces its layout updates by 500 ms. On
   launch the folder and files are reopened, then any files named on the command line, the last of
   which becomes active. Unsaved changes are backed up only for crash recovery (see below), not
@@ -264,7 +267,7 @@ changes, so a crash, a forced shutdown, or a power cut loses at most the last se
 - **Problems found in the background** (files that can't be reopened at startup, restored
   changes) reach the user as `notice` events. Events sent before the frontend subscribes are kept
   (up to 256) and delivered when it does.
-- **Frontend.** React error boundaries surround the workbench, each side bar view, the editor
+- **Frontend.** React error boundaries surround the workbench, the dock, each view, the editor
   (reset when switching documents), and the status bar. A rendering error is logged and replaced
   by a message with **Try Again** and **Reload Window**, and the rest stays usable. Documents,
   unsaved changes, and extensions live in the backend, so **Developer: Reload Window** loses
@@ -277,7 +280,11 @@ changes, so a crash, a forced shutdown, or a power cut loses at most the last se
 All workbench actions are entries in a frontend **command registry** (`src/commands/`). Each
 has an id, a title, an optional category, optional keybindings (`mod` means Ctrl, or Cmd on
 macOS, with per-platform overrides), an `enabled` predicate, and an `editorFocus` flag for
-editor-only keys. One capture-phase listener runs bound commands. The **command palette** lists
+editor-only keys. One capture-phase listener runs bound commands. While a terminal has focus,
+only commands flagged `terminal` (the palette, Go to File, showing views, switching tabs,
+settings, terminal commands) run; other keys go to the shell. Bindings with Shift and
+punctuation (`` ctrl+shift+` ``) also match by the physical key, since the browser reports the
+shifted character. The **command palette** lists
 enabled commands with their shortcuts (`>`), finds files (no prefix), and goes to a line (`:`).
 Editing keys that need the editor's textarea (arrows, Backspace, clipboard) stay in
 `editor/keymap.ts`. Extension commands, declared in their manifests, are registered into the
@@ -384,6 +391,10 @@ EditorView = { version, lineCount, startLine, endLine,
 | `events_subscribe`                                            | Register the backend event channel                     |
 | `perf_stats`                                                  | Backend timings, scheduler statistics, memory          |
 | `lsp_hover`, `lsp_definition`, `lsp_completion`               | Language server requests at a position                 |
+| `terminal_create`, `terminal_list`, `terminal_attach`         | Start a terminal, or reattach after a reload           |
+| `terminal_platform`                                           | The Windows build, for the emulator's ConPTY handling  |
+| `terminal_write`, `terminal_resize`, `terminal_acknowledge`   | Input, size, and flow control for a terminal           |
+| `terminal_kill`                                               | End a terminal's shell and forget it                   |
 | `bench_config`, `bench_generate`, `bench_report`              | Benchmark mode only (`--bench <name>`)                 |
 
 ### Permissions, dialogs, and clipboard
@@ -467,6 +478,43 @@ server (`lsp/`).
   documents' diagnostics, and is restarted on demand up to three times, then marked failed.
   Opening or closing a folder, or changing `[lsp]` settings, restarts all servers. On exit, the
   app asks every server to shut down and kills those that don't within 2 seconds.
+
+## Terminals
+
+`ferrite-terminal` runs shells; `src-tauri/src/terminal.rs` exposes them as commands; xterm.js
+emulates the terminal in the frontend (`src/terminal/`). The decisions are in
+[ADR 0011](adr/0011-integrated-terminal.md).
+
+```text
+ frontend (xterm.js)                     ferrite-app / ferrite-terminal          shell
+ ───────────────────                     ──────────────────────────────          ─────
+ keys, paste, replies ── terminal_write ─▶ input queue ── writer thread ───────▶ pty
+ drawn output ───── terminal_acknowledge ─▶ flow control ◀─┐
+ Channel ◀── output, replay, exited ◀──── history ◀── reader thread (UTF-8) ◀── pty
+                                                       waiter thread ◀── exit
+```
+
+- **Starting.** `terminal_create(cols, rows, channel)` runs `terminal.shell` (or the platform's
+  default shell) in the workspace folder, or the home folder, on a blocking thread. At most 32
+  terminals are open at once.
+- **Threads.** Each terminal has a writer draining a bounded input queue, a reader decoding
+  output as UTF-8, and a waiter that closes the pseudoterminal when the shell exits and reports
+  the exit after the last output.
+- **Flow control.** The frontend acknowledges output in steps of 50,000 UTF-16 units. Reading
+  pauses at 500,000 unacknowledged units and resumes below 100,000, so the program blocks
+  instead of flooding the webview.
+- **Reload.** Terminals outlive the webview. Each keeps its last 256 KiB of output. A reloaded
+  window attaches to the running terminals (`terminal_list`, `terminal_attach`), the kept output
+  is replayed first, and xterm.js's replies to replayed queries are dropped.
+- **Exit.** A shell that exits with code 0 closes its tab. Any other exit leaves the tab with a
+  message until a key is pressed. Killing a terminal, or quitting the app, ends the shell and
+  the programs it started.
+- **ConPTY on Windows.** Ferrite ships the ConPTY from Windows Terminal (`conpty.dll` and
+  `OpenConsole.exe`), which `src-tauri/build.rs` downloads (pinned and hash-checked) and
+  `tauri.windows.conf.json` installs beside the executable. The one in Windows rewraps and
+  repaints its screen on resize, which duplicated or lost lines. The emulator is told it's
+  talking to ConPTY (`windowsPty`, with the build from `terminal_platform`)
+  ([ADR 0011](adr/0011-integrated-terminal.md#resizing-on-windows-2026-10-30)).
 
 ## Extensions
 
@@ -569,9 +617,20 @@ them. Extensions fill in content through the `workbench` interface (API 1.1).
   `editorStatus`, `extensions` (statuses, the commands they contribute, permission prompts), and
   `notifications` (which can carry action buttons and then stay until acted on). Each component subscribes only to what it reads, so a
   keystroke re-renders the editor view and status bar, not the workbench.
+- **`dock/`**: where everything shows ([ADR 0012](adr/0012-docking.md)).
+  - `model.ts`: the tree of splits and tab groups, as pure functions.
+  - `dock.ts`: the store. It follows the documents and terminals stores, places new items, tracks
+    the current group, hides and shows groups, and saves the tree (documents by path).
+  - `DockArea.tsx` and `items.tsx`: rendering, with splitters (`Sash`), tab strips, drag and drop
+    with a drop preview, the tab menu, and each item kind's tab, content, and buttons.
+
+  Views are shown through `state/viewRequests.ts`, so state modules needn't import the dock.
+
 - **`commands/`**: the command registry, keybinding matching, fuzzy matching, and the built-in
   commands. `editor/activeEditor.ts` exposes the active editor to commands (find, go to line,
-  next match) without coupling them to React.
+  next match) without coupling them to React. Several editors can be on screen (one per group):
+  each registers by document (`editorFor`), and the active editor is the one showing the active
+  document.
 - **`editor/EditorView`**: a scroll container sized to `lineCount × lineHeight`, plus the view's
   height less one line so the last line can scroll to the top. Only the
   viewport's lines are in the DOM, positioned with a single `translateY`. Each line is a run of
@@ -580,7 +639,7 @@ them. Extensions fill in content through the `workbench` interface (API 1.1).
   (`editor/measure.ts` maps UTF-16 columns across a line's text nodes), and clicks map back to
   columns with `caretPositionFromPoint`, so proportional glyphs, tabs, and wide characters line
   up without a custom text-layout engine.
-- **`editor/Breadcrumbs`**: the active file's path above the editor. Inside the workspace, each
+- **`editor/Breadcrumbs`**: the file's path above each editor. Inside the workspace, each
   part is a button that reveals it in the explorer and focuses the tree. Other files show their
   full path, and untitled ones their title.
 - **Explorer auto-reveal** (`panels/explorerState.ts`): when the active file or the workspace
@@ -592,6 +651,9 @@ them. Extensions fill in content through the `workbench` interface (API 1.1).
   `editor_minimap`, at once when scrolled past them and at most every 100 ms while the document
   changes. `editor/minimapGeometry.ts` holds VS Code's geometry: the proportional scroll, the
   slider, click-to-center, and drag scale.
+- **`terminal/`**: the terminals (`terminals.ts`), and one `TerminalSession` per terminal
+  wrapping xterm.js (`session.ts`, loaded with the first terminal). Each terminal is a dock item.
+  Terminal colors and fonts follow the theme tokens and editor settings.
 - **Language features**: resting the pointer on text shows a hover card (diagnostics at that
   point plus the server's Markdown, rendered as React elements, never HTML); F12 or Ctrl/Cmd+click
   goes to the definition; completion opens on the server's trigger characters, on typing a word,
@@ -603,13 +665,15 @@ them. Extensions fill in content through the `workbench` interface (API 1.1).
   phase before the editor sees the key.
 - **Extensions view** (`panels/ExtensionsPanel`, `Ctrl+Shift+X`): each extension's state,
   permissions (checkboxes that grant or deny), what it contributes, commands, errors, and
-  Restart and Disable buttons. The activity bar and side bar list built-in views followed by the
-  views of enabled extensions (`app/views.ts`).
+  Restart and Disable buttons. The activity bar lists built-in views followed by the views of
+  enabled extensions (`app/views.ts`). Its buttons show a view, hide the group of a view
+  already showing, and can be dragged into the dock.
 - **Context menus** (`components/ContextMenu`) are a generic keyboard-navigable menu, opened by
   the editor (clipboard, Go to Definition, extension items, Command Palette) and by explorer
   file rows (Open, extension items).
-- **Tabs** can be reordered by dragging, cycled with Ctrl+Tab and Ctrl+PageUp/PageDown, and
-  remember their scroll position while the app runs. Clicking a tab returns focus to its editor.
+- **Tabs** can be dragged within and between groups, cycled with Ctrl+Tab and
+  Ctrl+PageUp/PageDown within their group, and closed with Delete. Editor tabs remember their
+  scroll position while the app runs. Clicking a tab focuses its content.
 - **Theming**: `styles/tokens.css` defines semantic tokens for dark and light themes (including
   find matches, widgets, inputs, lists, and buttons), selected by `data-theme` on `<html>`.
   Components use tokens only. The `workbench.theme` setting picks dark, light, the OS scheme, or
@@ -617,8 +681,8 @@ them. Extensions fill in content through the `workbench` interface (API 1.1).
   the user's `workbench.colors`). The allowed tokens are listed in `themes/tokens.json`.
   Editor font size, family, line height, and tab width are CSS variables set from settings.
 - **Accessibility**:
-  - **Roles.** The tab strip and tab panels use ARIA tab roles, and unsaved tabs say so in their
-    accessible name. The explorer and extension views are ARIA `tree`s with arrow-key navigation,
+  - **Roles.** Each dock group is a labelled region, with ARIA tab roles for its tabs, and
+    unsaved tabs say so in their accessible name. The explorer and extension views are ARIA `tree`s with arrow-key navigation,
     and the palette is a combobox with `aria-activedescendant`. Find options are toggle buttons,
     errors are announced through `role="alert"`, and the sash is keyboard adjustable.
   - **Screen readers** read the editor's text through its input textarea
@@ -707,6 +771,9 @@ processes, which this figure excludes.
   - `file.rs`: Unix permission bits; the Windows rename retry.
   - `keymap.ts` and the keybinding registry: `mod` means Cmd on macOS.
   - `bench.mjs`: process memory through `ps` or CIM.
+  - `shell.rs` (terminal): the default shell per platform; `terminal.rs` sets `TERM` outside
+    Windows. ConPTY and Unix ptys are behind `portable-pty`.
+  - `session.ts` (terminal): clipboard keys per platform.
   - Lock files use the standard library's portable locks.
 
 ## Known limitations
@@ -746,5 +813,10 @@ These are tracked for later milestones:
   text color.
 - Multi-line Tab/Shift+Tab indentation, auto-closing brackets, and copying the whole line when
   nothing is selected aren't implemented. Alt+drag doesn't create column selections.
+- Terminals survive a window reload but not quitting the app. There are no clickable links,
+  shell integration, or terminal profiles, and extensions can't create terminals. Replaying a
+  full-screen program after a reload can look garbled until it redraws.
+- A document shows in one dock group at a time. There are no floating or separate windows, and
+  groups keep shares of the window rather than fixed widths.
 - On Linux, watching very large trees can exhaust the inotify watch limit; watching then fails
   with a logged warning and the workspace works without live updates.

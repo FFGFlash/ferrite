@@ -191,7 +191,7 @@ export function ExtensionsActions() {
     <>
       <button
         type="button"
-        className="sidebar__action"
+        className="dock-action"
         title="Load Development Extension…"
         aria-label="Load Development Extension"
         onClick={() => void executeCommand('extensions.addDevelopment')}
@@ -200,7 +200,7 @@ export function ExtensionsActions() {
       </button>
       <button
         type="button"
-        className="sidebar__action"
+        className="dock-action"
         title="Reload Extensions"
         aria-label="Reload Extensions"
         onClick={() => void executeCommand('extensions.reload')}

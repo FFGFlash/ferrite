@@ -1,8 +1,8 @@
 /**
  * Settings from `settings.toml` that the frontend applies: theme (built-in
- * or contributed by an extension) and color overrides, file icon theme, editor font, and
- * keybinding overrides. The editor's line height derives from the font
- * size.
+ * or contributed by an extension) and color overrides, file icon theme, editor font,
+ * terminal options, and keybinding overrides. The editor's line height derives from the
+ * font size.
  */
 import { setKeybindingOverrides } from '../commands/registry'
 import type { FrontendSettings, Theme } from '../ipc/workspace'
@@ -18,6 +18,8 @@ export interface Appearance {
   tabSize: number
   /** Editor line height in pixels. */
   lineHeight: number
+  terminalScrollback: number
+  terminalScreenReader: boolean
 }
 
 const lineHeightFor = (fontSize: number) => Math.round(fontSize * 1.45)
@@ -28,6 +30,8 @@ export const appearance = createStore<Appearance>({
   fontFamily: '',
   tabSize: 4,
   lineHeight: lineHeightFor(14),
+  terminalScrollback: 1000,
+  terminalScreenReader: false,
 })
 
 let stopFollowingSystem: (() => void) | null = null
@@ -68,6 +72,8 @@ export function applySettings(settings: FrontendSettings): void {
     fontFamily: settings.fontFamily,
     tabSize: settings.tabSize,
     lineHeight: lineHeightFor(settings.fontSize),
+    terminalScrollback: settings.terminalScrollback,
+    terminalScreenReader: settings.terminalScreenReader,
   })
   applyColors(settings)
   setActiveIconTheme(settings.iconTheme)

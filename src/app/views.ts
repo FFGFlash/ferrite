@@ -63,15 +63,16 @@ function contributedView(view: ViewContribution): ViewDescriptor {
 }
 
 /** Built-in views followed by those of enabled extensions. */
+export function listViews(extensions = extensionsStore.get()): readonly ViewDescriptor[] {
+  return [
+    ...builtinViews,
+    ...usableExtensions(extensions).flatMap(extension =>
+      extension.contributions.views.map(contributedView),
+    ),
+  ]
+}
+
 export function useViews(): readonly ViewDescriptor[] {
   const extensions = useStore(extensionsStore)
-  return useMemo(
-    () => [
-      ...builtinViews,
-      ...usableExtensions(extensions).flatMap(extension =>
-        extension.contributions.views.map(contributedView),
-      ),
-    ],
-    [extensions],
-  )
+  return useMemo(() => listViews(extensions), [extensions])
 }

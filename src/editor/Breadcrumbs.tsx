@@ -5,7 +5,7 @@ import { entryIcon } from '../components/fileIcons'
 import type { DocumentSummary } from '../ipc/editor'
 import { EXPLORER_TREE_ID, revealInExplorer } from '../panels/explorerState'
 import { iconThemeStore } from '../state/iconTheme'
-import { updateLayout } from '../state/layout'
+import { showView } from '../state/viewRequests'
 import { useStore } from '../state/store'
 import { foldersBetween, pathSeparator, workspaceStore } from '../state/workspace'
 import { themeKind } from '../themes/theme'
@@ -57,14 +57,14 @@ export function Breadcrumbs({ document }: { document: DocumentSummary }) {
   }, [document.path, document.title])
 
   const reveal = (path: string) => {
-    updateLayout({ activeView: 'explorer', sidebarVisible: true })
+    showView('explorer')
     void revealInExplorer(path).then(() =>
       requestAnimationFrame(() => window.document.getElementById(EXPLORER_TREE_ID)?.focus()),
     )
   }
 
   return (
-    <nav className="breadcrumbs" aria-label="Breadcrumbs">
+    <nav className="breadcrumbs" aria-label={`Breadcrumbs, ${document.title}`}>
       <ol className="breadcrumbs__list" ref={listRef}>
         {crumbs.map((crumb, index) => {
           const last = index === crumbs.length - 1
