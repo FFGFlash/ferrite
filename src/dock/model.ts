@@ -90,6 +90,33 @@ export function allItems(layout: DockLayout): ItemId[] {
   return groups(layout).flatMap(group => group.items)
 }
 
+/**
+ * The side bar: the groups along the dock's left edge, beside the activity
+ * bar, in reading order. The main group is never part of it. A group is
+ * there when, in every row it's in, nothing shows before it. So a hidden
+ * group stays (the activity bar can show it again), and what's beside it
+ * joins it, since that's what now lies along the edge.
+ */
+export function sidebarGroups(layout: DockLayout): DockGroup[] {
+  const result: DockGroup[] = []
+  // `left` is null until the walk passes through a row.
+  const walk = (node: DockNode, left: boolean | null) => {
+    if (node.kind === 'group') {
+      if (left && node.id !== layout.main) {
+        result.push(node)
+      }
+      return
+    }
+    let before = false
+    for (const child of node.children) {
+      walk(child, node.direction === 'row' ? left !== false && !before : left)
+      before ||= isVisible(child)
+    }
+  }
+  walk(layout.root, null)
+  return result
+}
+
 /** Whether a node shows anything: hidden groups, and splits of only those, don't. */
 export function isVisible(node: DockNode): boolean {
   return node.kind === 'group' ? !node.hidden : node.children.some(isVisible)

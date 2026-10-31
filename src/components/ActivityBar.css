@@ -32,3 +32,14 @@
   width: 2px;
   background: var(--color-activitybar-active-indicator);
 }
+
+/* A view dragged here joins the side bar. */
+.activitybar[data-drop] {
+  background: color-mix(in srgb, var(--color-focus-ring) 25%, var(--color-activitybar-background));
+  outline: 2px solid var(--color-focus-ring);
+  outline-offset: -2px;
+}
+
+.activitybar__icon {
+  display: grid;
+}

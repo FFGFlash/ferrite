@@ -2,7 +2,7 @@ import { act, fireEvent, render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { contextMenuStore } from '../components/contextMenuState'
-import { dockStore, restoreDock } from '../dock/dock'
+import { dockStore, moveItem, restoreDock } from '../dock/dock'
 import { findGroup, groupOf } from '../dock/model'
 import type { AppInfo } from '../ipc'
 import { documentsStore } from '../state/documents'
@@ -110,6 +110,57 @@ describe('Workbench', () => {
 
     await user.click(screen.getByRole('button', { name: 'Explorer' }))
     expect(screen.getByRole('tab', { name: 'Explorer' })).toHaveAttribute('aria-selected', 'true')
+  })
+
+  it('shows the side bar views on the activity bar, and takes views dropped on it', () => {
+    stubLayout()
+    render(<Workbench appInfo={null} />)
+    const activityBar = screen.getByRole('navigation', { name: 'Views' })
+    const buttons = () =>
+      within(activityBar)
+        .getAllByRole('button')
+        .map(button => button.getAttribute('aria-label'))
+    expect(buttons()).toEqual(['Explorer', 'Search', 'Extensions'])
+
+    // Docked on the right, the explorer leaves the activity bar.
+    act(() => moveItem('view:explorer', { kind: 'root', edge: 'right' }))
+    expect(buttons()).toEqual(['Search', 'Extensions'])
+
+    // Its tab dropped on the activity bar brings it back into the side bar.
+    const transfer = dataTransfer()
+    fireEvent.dragStart(screen.getByRole('tab', { name: 'Explorer' }), { dataTransfer: transfer })
+    drag('dragOver', activityBar, transfer, 10, 500)
+    expect(activityBar).toHaveAttribute('data-drop', 'true')
+    drag('drop', activityBar, transfer, 10, 500)
+    expect(activityBar).not.toHaveAttribute('data-drop')
+    expect(groupHolding('view:explorer')!.id).toBe('g1')
+    expect(buttons()).toEqual(['Search', 'Extensions', 'Explorer'])
+
+    // Anything docked there gets a button, such as a document.
+    act(() =>
+      documentsStore.set({
+        documents: [
+          {
+            id: 1,
+            title: 'main.rs',
+            path: '/w/main.rs',
+            dirty: false,
+            lineEnding: 'LF',
+            encoding: 'UTF-8',
+          },
+        ],
+        activeId: 1,
+      }),
+    )
+    expect(buttons()).toEqual(['Search', 'Extensions', 'Explorer'])
+    fireEvent.dragStart(screen.getByRole('tab', { name: 'main.rs' }), { dataTransfer: transfer })
+    drag('dragOver', activityBar, transfer, 10, 500)
+    drag('drop', activityBar, transfer, 10, 500)
+    expect(buttons()).toEqual(['Search', 'Extensions', 'Explorer', 'main.rs'])
+    expect(within(activityBar).getByRole('button', { name: 'main.rs' })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    )
   })
 
   it('resizes groups from the keyboard within their limits', async () => {

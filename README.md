@@ -218,8 +218,12 @@ Tabs sit in groups, and any tab can go in any group, beside any other.
   a tab. The same actions are commands: **View: Split Tab Right/Down**, **View: Move Tab
   Left/Right/Up/Down** (into the neighbouring group, or a new one), **View: Close Tab**, and
   **View: Reset Layout**. In a tab strip, the arrow keys move between tabs and `Delete` closes one.
-- **Hiding.** The activity bar shows a view, or hides its group when it's already showing.
-  **View: Toggle Side Bar** (`Ctrl+B`) hides or shows every group of views, and **View: Toggle
+- **The side bar** is whatever is docked along the left edge, beside the activity bar. The
+  activity bar has a button for each tab there (views, terminals, documents), and for views that
+  aren't open; something docked elsewhere has no button. Drop a tab on the activity bar to move
+  it into the side bar.
+- **Hiding.** An activity bar button shows its tab, or hides its group when it's already
+  showing. **View: Toggle Side Bar** (`Ctrl+B`) hides or shows the side bar, and **View: Toggle
   Terminals** (`Ctrl+J`) every group of terminals, keeping their places.
 - **Documents** open in the group last used for documents. The main group (on the right at
   first) stays when empty and shows the welcome page.

@@ -88,27 +88,34 @@ export function itemTooltip(resolved: ResolvedItem): string {
   }
 }
 
-export function ItemIcon({ resolved }: { resolved: ResolvedItem }) {
+interface ItemIconProps {
+  resolved: ResolvedItem
+  className?: string
+  size?: number
+}
+
+export function ItemIcon({ resolved, className = 'dock-tab__icon', size = 16 }: ItemIconProps) {
   const iconTheme = useStore(iconThemeStore)
   const light = useStore(themeKind) === 'light'
   switch (resolved.kind) {
     case 'document':
       return (
         <FileIcon
-          className="dock-tab__icon"
+          className={className}
+          size={size}
           kind="file"
           icon={entryIcon(resolved.document.title, null, iconTheme, light)}
         />
       )
     case 'view':
       return (
-        <span className="dock-tab__icon" aria-hidden="true">
-          <Icon name={resolved.view.icon} size={16} />
+        <span className={className} aria-hidden="true">
+          <Icon name={resolved.view.icon} size={size} />
         </span>
       )
     case 'terminal':
       return (
-        <SquareTerminal className="dock-tab__icon" size={16} strokeWidth={1.5} aria-hidden="true" />
+        <SquareTerminal className={className} size={size} strokeWidth={1.5} aria-hidden="true" />
       )
   }
 }

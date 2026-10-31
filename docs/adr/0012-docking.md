@@ -53,17 +53,39 @@ out of it.
 - **Documents** go to the group most recently used for a document, or the main group.
 - **Terminals** join the current group of terminals, else any group of terminals, else a new
   group along the bottom.
-- **Views** reopen where they were closed if that group still exists. Otherwise they join a
-  group of views, or a new group on the left.
+- **Views** reopen where they were closed if that group still exists. Otherwise they join the
+  side bar's views, or a new group on the left.
+
+### The side bar
+
+The side bar is the groups along the dock's left edge, beside the activity bar
+(`sidebarGroups`): those that nothing comes before in any row they're in, except the main group.
+It's worked out from the tree, so nothing more is saved, and stacking groups in the left column
+keeps them all in it. Groups docked along the top or bottom of the whole dock span it rather than
+sit beside the activity bar, so they aren't in it.
+
+A hidden group keeps its place in the side bar, so the activity bar can show it again. Hidden
+groups don't count as coming before others, so what's beside one joins the side bar too: that's
+what now lies along the edge.
+
+- **The activity bar** has a button for each item in the side bar (views, terminals, documents),
+  in tab order, then for each view not docked anywhere. An item docked elsewhere has no button:
+  it's reached from its tab or its command.
+- **Opening from the activity bar.** A view that isn't docked opens in the side bar: where it was
+  closed, if that group is in the side bar, else with the side bar's views.
+- **Dropping on the activity bar** moves any item into the side bar: among items of its kind
+  there, else in a new group below the side bar's others. A new group along the left edge would
+  push them out of the side bar.
 
 ### Hiding, not just closing
 
 Groups can be hidden. A hidden group keeps its items and its place, and showing it puts it back
 as it was:
 
-- **Activity bar.** Selecting a view shows it. Selecting the view already showing hides its
+- **Activity bar.** Selecting an item shows it. Selecting the item already showing hides its
   group, as collapsing the side bar did.
-- **View: Toggle Side Bar** (`Ctrl+B`) hides or shows every group of views.
+- **View: Toggle Side Bar** (`Ctrl+B`) hides or shows every group in the side bar, whatever it
+  holds. Groups docked elsewhere stay as they are.
 - **View: Toggle Terminals** (`Ctrl+J`) does the same for groups of terminals.
 - **View: Toggle Terminal** (`` Ctrl+` ``) focuses a terminal, starting one if needed. From a
   terminal, it hides the terminal groups.
@@ -99,8 +121,8 @@ item kinds. A malformed tree gives the default layout.
 
 ### Drag and drop, and the keyboard
 
-- **Dragging.** Tabs, and activity bar buttons, drag with the HTML5 drag events. On Windows
-  that needs Tauri's own drop handler off (`dragDropEnabled: false`), which replaces WebView2's;
+- **Dragging.** Tabs, and activity bar buttons, drag with the HTML5 drag events. A tab dropped
+  on the activity bar joins the side bar. On Windows that needs Tauri's own drop handler off (`dragDropEnabled: false`), which replaces WebView2's;
   Ferrite didn't use it. With it off, the frontend refuses drops of anything but dock items, so a
   file dropped from another program can't replace the page. A preview shows where the item will
   land:

@@ -12,6 +12,7 @@ import {
   removeItem,
   resizeSplit,
   setHidden,
+  sidebarGroups,
   type DockLayout,
   type DockNode,
 } from './model'
@@ -122,6 +123,40 @@ describe('dock model', () => {
     // Placing into a hidden group shows it.
     layout = placeItem(layout, 'document:1', { kind: 'tabs', group: 'g1', index: 0 })
     expect(findGroup(layout, 'g1')!.hidden).toBe(false)
+  })
+
+  it('finds the side bar: the groups along the left edge, but not the main group', () => {
+    const ids = (layout: DockLayout) => sidebarGroups(layout).map(group => group.id)
+    expect(ids(classic())).toEqual(['g1'])
+
+    // A view moved to the right leaves it; one stacked in the left column joins it.
+    let layout = placeItem(classic(), 'view:explorer', { kind: 'root', edge: 'right' })
+    expect(ids(layout)).toEqual(['g1'])
+    expect(ids(placeItem(layout, 'view:search', { kind: 'tabs', group: 'g2', index: 1 }))).toEqual(
+      [],
+    )
+    layout = placeItem(classic(), 'view:search', { kind: 'split', group: 'g1', edge: 'bottom' })
+    expect(ids(layout)).toEqual(['g1', 'g2'])
+
+    // Docked along the bottom or top, a group spans the window rather than sitting beside it.
+    expect(ids(placeItem(classic(), 'terminal:1', { kind: 'root', edge: 'bottom' }))).toEqual([
+      'g1',
+    ])
+    expect(ids(placeItem(classic(), 'view:search', { kind: 'root', edge: 'top' }))).toEqual(['g1'])
+
+    // Only the main group on the left: no side bar.
+    const mainFirst = removeItem(removeItem(classic(), 'view:explorer'), 'view:search')
+    expect(ids(mainFirst)).toEqual([])
+  })
+
+  it('keeps hidden groups in the side bar, joined by what is beside them', () => {
+    const ids = (layout: DockLayout) => sidebarGroups(layout).map(group => group.id)
+    const terminalsLeft = placeItem(classic(), 'terminal:1', { kind: 'root', edge: 'left' })
+    expect(ids(terminalsLeft)).toEqual(['g2'])
+    const hidden = setHidden(terminalsLeft, 'g2', true)
+    expect(ids(hidden)).toEqual(['g2', 'g1'])
+    // Never the main group, even when it's what lies along the edge.
+    expect(ids(setHidden(hidden, 'g1', true))).toEqual(['g2', 'g1'])
   })
 
   it('resizes splits, keeping sizes summing to 1', () => {

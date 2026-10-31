@@ -45,6 +45,7 @@ import {
   removeItem,
   resizeSplit,
   setHidden,
+  sidebarGroups,
   updateGroup,
   type DockGroup,
   type DockLayout,
@@ -139,10 +140,42 @@ function placementFor(layout: DockLayout, item: ItemId): { target: DropTarget; s
           size: 0.2,
         }
       }
-      const group = holding('view')[0]
-      return { target: group ? appendTo(group) : { kind: 'root', edge: 'left' }, size: 0.2 }
+      return { target: sidebarTarget(layout, 'view'), size: 0.2 }
     }
   }
+}
+
+/**
+ * Where an item of `kind` joins the side bar: after the items of its kind
+ * there, else in a new group below the side bar's others (not along the
+ * left edge, which would push them out of it), else on the left.
+ */
+function sidebarTarget(layout: DockLayout, kind: ReturnType<typeof itemKind>): DropTarget {
+  const sidebar = sidebarGroups(layout)
+  const same = sidebar.find(group => group.items.some(item => itemKind(item) === kind))
+  if (same) {
+    return { kind: 'tabs', group: same.id, index: same.items.length }
+  }
+  const last = sidebar.at(-1)
+  return last ? { kind: 'split', group: last.id, edge: 'bottom' } : { kind: 'root', edge: 'left' }
+}
+
+/** Whether `item` is in the side bar. */
+function inSidebar(layout: DockLayout, item: ItemId): boolean {
+  return sidebarGroups(layout).some(group => group.items.includes(item))
+}
+
+/**
+ * What the activity bar shows: everything in the side bar (views, terminals,
+ * documents), in tab order, then the views not docked anywhere (which open
+ * in the side bar). `views` are the known view ids.
+ */
+export function activityBarItems(layout: DockLayout, views: readonly string[]): ItemId[] {
+  const docked = new Set(allItems(layout))
+  return [
+    ...sidebarGroups(layout).flatMap(group => group.items),
+    ...views.map(viewItem).filter(item => !docked.has(item)),
+  ]
 }
 
 /** `layout` with `item` in it, placed by the usual rules if it wasn't. */
@@ -412,16 +445,36 @@ export function groupFocused(id: string): void {
 }
 
 /**
- * The activity bar's buttons: shows a view, or, when it's already the
+ * The activity bar's buttons: shows an item, or, when it's already the
  * shown tab of its group, hides that group (as collapsing a side bar does).
+ * A view that isn't docked opens in the side bar, where its button is.
  */
-export function toggleView(id: string): void {
-  const item = viewItem(id)
-  const group = groupOf(dockStore.get(), item)
+export function toggleItem(item: ItemId): void {
+  const layout = dockStore.get()
+  const group = groupOf(layout, item)
   if (group && !group.hidden && group.active === item) {
     hideGroups([group.id])
+    return
+  }
+  if (!group) {
+    const remembered = closedViews.get(item)
+    const target =
+      remembered && sidebarGroups(layout).some(g => g.id === remembered.group)
+        ? ({ kind: 'tabs', group: remembered.group, index: remembered.index } as const)
+        : sidebarTarget(layout, 'view')
+    setLayout(placeItem(layout, item, target, 0.2))
+  }
+  showItem(item)
+}
+
+/** An item dropped on the activity bar: moves it into the side bar. */
+export function dockInSidebar(item: ItemId): void {
+  const layout = dockStore.get()
+  if (inSidebar(layout, item)) {
+    showItem(item)
   } else {
-    showView(id)
+    moveItem(item, sidebarTarget(layout, itemKind(item)))
+    focusItem(item)
   }
 }
 
@@ -439,7 +492,7 @@ function showGroups(ids: readonly string[]): void {
 }
 
 /** Groups holding only items of `kind` (never the main group). */
-function groupsOfKind(kind: 'view' | 'terminal'): DockGroup[] {
+function groupsOfKind(kind: 'terminal'): DockGroup[] {
   const layout = dockStore.get()
   return groups(layout).filter(
     group =>
@@ -449,15 +502,23 @@ function groupsOfKind(kind: 'view' | 'terminal'): DockGroup[] {
   )
 }
 
-/** Hides every group of views, or shows them again (View: Toggle Side Bar). */
-export function toggleViews(): void {
-  const viewGroups = groupsOfKind('view')
-  if (viewGroups.some(group => !group.hidden)) {
-    hideGroups(viewGroups.map(group => group.id))
-  } else if (viewGroups.length > 0) {
-    showGroups(viewGroups.map(group => group.id))
+/**
+ * Hides the side bar, or shows it again (View: Toggle Side Bar). With
+ * nothing in it, opens the first built-in view not docked elsewhere there.
+ */
+export function toggleSidebar(): void {
+  const layout = dockStore.get()
+  const sidebar = sidebarGroups(layout).map(group => group.id)
+  if (sidebar.some(id => !findGroup(layout, id)!.hidden)) {
+    hideGroups(sidebar)
+  } else if (sidebar.length > 0) {
+    showGroups(sidebar)
   } else {
-    showView('explorer', false)
+    const undocked = BUILTIN_VIEWS.find(item => !groupOf(layout, item))
+    if (undocked) {
+      setLayout(placeItem(layout, undocked, sidebarTarget(layout, 'view'), 0.2))
+      showItem(undocked, false)
+    }
   }
 }
 

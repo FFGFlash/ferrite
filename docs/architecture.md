@@ -673,9 +673,11 @@ them. Extensions fill in content through the `workbench` interface (API 1.1).
   phase before the editor sees the key.
 - **Extensions view** (`panels/ExtensionsPanel`, `Ctrl+Shift+X`): each extension's state,
   permissions (checkboxes that grant or deny), what it contributes, commands, errors, and
-  Restart and Disable buttons. The activity bar lists built-in views followed by the views of
-  enabled extensions (`app/views.ts`). Its buttons show a view, hide the group of a view
-  already showing, and can be dragged into the dock.
+  Restart and Disable buttons. The views are the built-in ones followed by those of enabled
+  extensions (`app/views.ts`). The activity bar lists everything in the side bar (the groups
+  along the dock's left edge: views, terminals, documents), then the views not docked anywhere
+  (`activityBarItems`). Its buttons show an item, hide the group of an item already showing,
+  and can be dragged into the dock; a tab dropped on it joins the side bar.
 - **Context menus** (`components/ContextMenu`) are a generic keyboard-navigable menu, opened by
   the editor (clipboard, Go to Definition, extension items, Command Palette) and by explorer
   file rows (Open, extension items).

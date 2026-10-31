@@ -25,9 +25,9 @@ import {
   resetLayout,
   showView,
   splitCurrentTab,
+  toggleSidebar,
   toggleTerminal,
   toggleTerminals,
-  toggleViews,
 } from '../dock/dock'
 import { bindingsOf, commandLabel, formatKeybinding, listCommands, type Command } from './registry'
 
@@ -109,7 +109,7 @@ export const builtinCommands: Command[] = [
     title: 'Toggle Side Bar',
     keybinding: 'mod+b',
     terminal: true,
-    run: toggleViews,
+    run: toggleSidebar,
   },
   {
     id: 'view.toggleMinimap',

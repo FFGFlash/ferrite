@@ -83,6 +83,11 @@ export function installDropGuard(): void {
   }
 }
 
+/** The item being dragged, if any. */
+export function draggedItem(): ItemId | null {
+  return dragging.get()
+}
+
 export function endDrag(): void {
   dragging.set(null)
   dropHint.set(null)

@@ -15,7 +15,7 @@ vi.mock('../ipc/editor', () => ({ closeDocument: vi.fn(async () => true) }))
 
 const terminalIpc = await import('../ipc/terminal')
 const dock = await import('./dock')
-const { findGroup, groupOf, groups } = await import('./model')
+const { findGroup, groupOf, groups, sidebarGroups } = await import('./model')
 const { documentsStore } = await import('../state/documents')
 const { DEFAULT_LAYOUT, layoutStore } = await import('../state/layout')
 const terminals = await import('../terminal/terminals')
@@ -97,20 +97,20 @@ describe('dock', () => {
   })
 
   it('hides a shown view group from the activity bar, and shows it again', () => {
-    dock.toggleView('explorer')
+    dock.toggleItem('view:explorer')
     expect(findGroup(layout(), 'g1')!.hidden).toBe(true)
-    dock.toggleView('explorer')
+    dock.toggleItem('view:explorer')
     expect(findGroup(layout(), 'g1')!.hidden).toBe(false)
 
     // Another view in the group is switched to, not hidden.
-    dock.toggleView('search')
+    dock.toggleItem('view:search')
     expect(findGroup(layout(), 'g1')).toMatchObject({ hidden: false, active: 'view:search' })
   })
 
-  it('toggles every view group, and every terminal group', async () => {
-    dock.toggleViews()
+  it('toggles the side bar, and every terminal group', async () => {
+    dock.toggleSidebar()
     expect(findGroup(layout(), 'g1')!.hidden).toBe(true)
-    dock.toggleViews()
+    dock.toggleSidebar()
     expect(findGroup(layout(), 'g1')!.hidden).toBe(false)
 
     await dock.toggleTerminals()
@@ -121,6 +121,95 @@ describe('dock', () => {
     await dock.toggleTerminals()
     expect(findGroup(layout(), terminalGroup.id)!.hidden).toBe(false)
     expect(terminalIpc.createTerminal).toHaveBeenCalledOnce()
+  })
+
+  it('shows what is in the side bar, and the views not docked, on the activity bar', async () => {
+    const bar = () => dock.activityBarItems(layout(), ['explorer', 'search', 'extensions', 'todos'])
+    expect(bar()).toEqual(['view:explorer', 'view:search', 'view:extensions', 'view:todos'])
+
+    dock.moveItem('view:explorer', { kind: 'root', edge: 'right' })
+    expect(bar()).toEqual(['view:search', 'view:extensions', 'view:todos'])
+
+    // Tab order is button order; views not docked follow, in their usual order.
+    dock.moveItem('view:extensions', { kind: 'tabs', group: 'g1', index: 0 })
+    dock.closeItem('view:search')
+    dock.moveItem('view:explorer', { kind: 'tabs', group: 'g1', index: 2 })
+    dock.closeItem('view:explorer')
+    expect(bar()).toEqual(['view:extensions', 'view:explorer', 'view:search', 'view:todos'])
+
+    // Terminals and documents on the left are there too; along the bottom, they aren't.
+    await dock.openTerminal()
+    const terminal = dock.terminalItem(terminals.terminalsStore.get().activeId!)
+    expect(bar()).not.toContain(terminal)
+    dock.moveItem(terminal, { kind: 'split', group: 'g1', edge: 'bottom' })
+    documentsStore.set({ documents: [doc(1)], activeId: 1 })
+    dock.moveItem('document:1', { kind: 'tabs', group: 'g1', index: 1 })
+    expect(bar()).toEqual([
+      'view:extensions',
+      'document:1',
+      terminal,
+      'view:explorer',
+      'view:search',
+      'view:todos',
+    ])
+  })
+
+  it('opens views from the activity bar in the side bar', () => {
+    dock.moveItem('view:explorer', { kind: 'root', edge: 'right' })
+    const right = groupHolding('view:explorer')!.id
+    dock.closeItem('view:explorer')
+
+    // Not where it was closed: its button is in the side bar.
+    dock.toggleItem('view:explorer')
+    expect(groupHolding('view:explorer')!.id).toBe('g1')
+    expect(right).not.toBe('g1')
+
+    // With nothing on the left, a new side bar group.
+    dock.moveItem('view:search', { kind: 'tabs', group: 'main', index: 0 })
+    dock.moveItem('view:extensions', { kind: 'tabs', group: 'main', index: 0 })
+    dock.moveItem('view:explorer', { kind: 'tabs', group: 'main', index: 0 })
+    dock.toggleItem('view:todos')
+    const root = layout().root
+    expect(root.kind === 'split' && root.children[0]).toBe(groupHolding('view:todos'))
+  })
+
+  it('moves an item dropped on the activity bar into the side bar', async () => {
+    dock.moveItem('view:search', { kind: 'root', edge: 'right' })
+    dock.dockInSidebar('view:search')
+    expect(groupItems('g1')).toEqual(['view:explorer', 'view:extensions', 'view:search'])
+    expect(findGroup(layout(), 'g1')!.active).toBe('view:search')
+
+    // Other kinds get a group of their own below, keeping the views beside the activity bar.
+    const activeTerminal = () => dock.terminalItem(terminals.terminalsStore.get().activeId!)
+    await dock.openTerminal()
+    const first = activeTerminal()
+    dock.dockInSidebar(first)
+    const sidebar = sidebarGroups(layout())
+    expect(sidebar.map(group => group.items)).toEqual([
+      ['view:explorer', 'view:extensions', 'view:search'],
+      [first],
+    ])
+    await dock.openTerminal()
+    const second = activeTerminal()
+    dock.dockInSidebar(second)
+    expect(groupItems(sidebar[1]!.id)).toEqual([first, second])
+  })
+
+  it('toggles only the side bar, whatever is in it', async () => {
+    dock.moveItem('view:search', { kind: 'root', edge: 'right' })
+    const right = groupHolding('view:search')!.id
+    await dock.openTerminal()
+    const terminal = dock.terminalItem(terminals.terminalsStore.get().activeId!)
+    dock.dockInSidebar(terminal)
+    const terminalGroup = groupHolding(terminal)!.id
+
+    dock.toggleSidebar()
+    expect(findGroup(layout(), 'g1')!.hidden).toBe(true)
+    expect(findGroup(layout(), terminalGroup)!.hidden).toBe(true)
+    expect(findGroup(layout(), right)!.hidden).toBeFalsy()
+    dock.toggleSidebar()
+    expect(findGroup(layout(), 'g1')!.hidden).toBe(false)
+    expect(findGroup(layout(), terminalGroup)!.hidden).toBe(false)
   })
 
   it('reopens a closed view where it was', () => {
