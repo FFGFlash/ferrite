@@ -1,11 +1,11 @@
 /**
- * The dock's state: where every document, view, terminal, and preview
- * shows, which group the user is working in, and the actions on them.
+ * The dock's state: where every document, view, terminal, preview, and
+ * page shows, which group the user is working in, and the actions on them.
  *
  * The documents, terminals, and previews stores own what's open; the dock
  * follows them (adding a tab for a new document, removing it when the
- * document closes) and decides only where things go. Views are added when
- * shown.
+ * document closes) and decides only where things go. Views and pages are
+ * added when shown.
  *
  * The layout is saved with the rest of the workbench layout. Documents are
  * saved by path (`file:<path>`), because document ids change between
@@ -27,7 +27,7 @@ import {
   takeBesideRequest,
 } from '../state/previews'
 import { createStore } from '../state/store'
-import { setViewHandler } from '../state/viewRequests'
+import { setPageHandler, setViewHandler } from '../state/viewRequests'
 import {
   closeTerminal,
   focusTerminal,
@@ -67,10 +67,12 @@ export const documentItem = (id: number): ItemId => `document:${id}`
 export const viewItem = (id: string): ItemId => `view:${id}`
 export const terminalItem = (id: number): ItemId => `terminal:${id}`
 export const previewItem = (id: string): ItemId => `preview:${id}`
+/** A built-in page, such as `settings`. */
+export const pageItem = (id: string): ItemId => `page:${id}`
 /** A saved document, until the documents load. */
 const fileItem = (path: string): ItemId => `file:${path}`
 
-/** The id after the kind: a document or terminal number, or a view or preview id. */
+/** The id after the kind: a document or terminal number, or a view, preview, or page id. */
 export function itemId(item: ItemId): string {
   return item.slice(item.indexOf(':') + 1)
 }
@@ -130,7 +132,8 @@ function placementFor(layout: DockLayout, item: ItemId): { target: DropTarget; s
     index: afterActive && group.active ? group.items.indexOf(group.active) + 1 : group.items.length,
   })
   switch (itemKind(item)) {
-    case 'document': {
+    case 'document':
+    case 'page': {
       const group = findGroup(layout, documentGroup) ?? findGroup(layout, layout.main)!
       return { target: appendTo(group, true), size: 0.5 }
     }
@@ -364,7 +367,7 @@ export function serializeDock(layout: DockLayout = dockStore.get()): DockLayout 
   return result
 }
 
-const SAVED_ITEM = /^(file:.+|view:.+|terminal:\d+)$/s
+const SAVED_ITEM = /^(file:.+|view:.+|terminal:\d+|page:.+)$/s
 
 /**
  * Restores the saved layout (or the default, honouring the side bar
@@ -495,6 +498,7 @@ export function showView(id: string, focus = true): void {
 }
 
 setViewHandler(showView)
+setPageHandler(id => showItem(pageItem(id)))
 
 /**
  * Shows a preview its extension asked to show. One opened beside its
@@ -668,7 +672,7 @@ export async function toggleTerminals(): Promise<void> {
   }
 }
 
-/** Closes a tab: closes the document, ends the terminal, or closes the view or preview. */
+/** Closes a tab: closes the document, ends the terminal, or closes the view, preview, or page. */
 export function closeItem(item: ItemId): void {
   const group = groupOf(dockStore.get(), item)
   const hadFocus = group ? hasFocus(group.id) : false
@@ -682,6 +686,9 @@ export function closeItem(item: ItemId): void {
       break
     case 'preview':
       closePreview(id)
+      setLayout(removeItem(dockStore.get(), item))
+      break
+    case 'page':
       setLayout(removeItem(dockStore.get(), item))
       break
     default:
@@ -831,6 +838,7 @@ export function resetLayout(): void {
   currentGroup.set(MAIN_GROUP)
   placeAll('view')
   placeAll('document')
+  placeAll('page')
   placeAll('preview')
   placeAll('terminal')
   setLayout(normalize(layout))

@@ -289,6 +289,26 @@ pub struct CommandInfo {
   pub hidden: bool,
 }
 
+/// The settings an extension declares, for a settings editor.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ExtensionConfiguration {
+  pub id: String,
+  pub name: String,
+  /// By key.
+  pub settings: Vec<ConfiguredSetting>,
+}
+
+/// A declared setting and the value in effect.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ConfiguredSetting {
+  pub key: String,
+  pub property: ConfigProperty,
+  /// The user's value if it's valid, the default otherwise.
+  pub value: ConfigValue,
+  /// Why the user's value isn't used, if they set an invalid one.
+  pub problem: Option<String>,
+}
+
 /// An extension and its state, for display.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -306,6 +326,8 @@ pub struct ExtensionStatus {
   pub commands: Vec<CommandInfo>,
   /// Problems with the user's configuration values.
   pub config_errors: Vec<String>,
+  /// Whether it declares settings (see [`ExtensionHost::configurations`]).
+  pub has_settings: bool,
   pub contributions: Contributions,
   pub usage: ResourceUsage,
 }

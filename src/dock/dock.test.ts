@@ -25,6 +25,7 @@ const { findGroup, groupOf, groups, sidebarGroups } = await import('./model')
 const { documentsStore } = await import('../state/documents')
 const { DEFAULT_LAYOUT, layoutStore } = await import('../state/layout')
 const terminals = await import('../terminal/terminals')
+const { showPage } = await import('../state/viewRequests')
 
 const doc = (id: number, path: string | null = `/w/file${id}.rs`): DocumentSummary => ({
   id,
@@ -80,6 +81,21 @@ describe('dock', () => {
 
     documentsStore.set({ documents: [doc(2)], activeId: 2 })
     expect(groupItems('main')).toEqual(['document:2'])
+  })
+
+  it('opens pages where documents open, once, and saves them', () => {
+    documentsStore.set({ documents: [doc(1), doc(2)], activeId: 2 })
+    dock.moveItem('document:2', { kind: 'split', group: 'main', edge: 'right' })
+    const side = groupHolding('document:2')!.id
+
+    showPage('settings')
+    showPage('settings')
+    expect(groupItems(side)).toEqual(['document:2', 'page:settings'])
+    expect(findGroup(layout(), side)!.active).toBe('page:settings')
+    expect(JSON.stringify(dock.serializeDock())).toContain('page:settings')
+
+    dock.closeItem('page:settings')
+    expect(groupItems(side)).toEqual(['document:2'])
   })
 
   it('opens documents in the group last used for documents', () => {

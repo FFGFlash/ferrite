@@ -35,8 +35,9 @@ use crate::worker::{
   self, Budgets, Event, Failure, MAX_PENDING_CHANGE_BYTES, Queue, Setup, Worker,
 };
 use crate::{
-  CommandInfo, Embedder, ExtensionDecoration, ExtensionDiagnostic, ExtensionState, ExtensionStatus,
-  HostOptions, Notification, PermissionStatus, Severity, StatusContent, StatusItem, ViewContent,
+  CommandInfo, ConfiguredSetting, Embedder, ExtensionConfiguration, ExtensionDecoration,
+  ExtensionDiagnostic, ExtensionState, ExtensionStatus, HostOptions, Notification,
+  PermissionStatus, Severity, StatusContent, StatusItem, ViewContent,
 };
 
 /// Synced versions kept per document, to interpret diagnostics published
@@ -958,6 +959,7 @@ impl ExtensionHost {
             })
             .collect(),
           config_errors: entry.config_errors.clone(),
+          has_settings: !manifest.configuration.is_empty(),
           contributions: manifest.contributions.clone(),
           usage: {
             let mut usage = entry.usage.snapshot();
@@ -986,11 +988,47 @@ impl ExtensionHost {
         permissions: Vec::new(),
         commands: Vec::new(),
         config_errors: Vec::new(),
+        has_settings: false,
         contributions: crate::Contributions::default(),
         usage: ResourceUsage::default(),
       }
     }));
     statuses
+  }
+
+  /// The settings each extension declares, with the values in effect, for
+  /// a settings editor. Extensions that declare none are left out.
+  pub fn configurations(&self) -> Vec<ExtensionConfiguration> {
+    let state = self.shared.lock();
+    state
+      .extensions
+      .iter()
+      .filter(|entry| !entry.manifest.configuration.is_empty())
+      .map(|entry| {
+        let manifest = &entry.manifest;
+        let values = entry.config.read().unwrap_or_else(PoisonError::into_inner);
+        let user = state.options.settings.get(&manifest.id);
+        ExtensionConfiguration {
+          id: manifest.id.clone(),
+          name: manifest.name.clone(),
+          settings: manifest
+            .configuration
+            .iter()
+            .map(|(key, property)| ConfiguredSetting {
+              key: key.clone(),
+              property: property.clone(),
+              value: values
+                .get(key)
+                .cloned()
+                .unwrap_or_else(|| property.default.clone()),
+              problem: user
+                .and_then(|user| user.get(key))
+                .and_then(|value| property.check(value).err()),
+            })
+            .collect(),
+        }
+      })
+      .collect()
   }
 
   /// The languages contributed by extensions that aren't turned off, with

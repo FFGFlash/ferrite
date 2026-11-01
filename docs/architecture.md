@@ -225,10 +225,15 @@ timestamp granularity and with the same length isn't detected.
 ## Settings and session state
 
 - **`settings.toml`** lives in the platform config directory (e.g. `%APPDATA%\dev.ferrite.editor`)
-  and is edited in Ferrite itself (**Preferences: Open Settings**, `Ctrl+,`). It's created from a
-  commented template the first time it's opened. Saving it validates and applies it immediately:
-  tab size and spaces apply to open documents, font and theme to the frontend, and exclusions
-  rebuild the index. Invalid settings (unknown keys, out-of-range values, bad globs) are reported
+  and is edited in Ferrite itself, in the settings editor (**Preferences: Open Settings**,
+  `Ctrl+,`) or as a document (**Open Settings (TOML)**). It's created from a commented template
+  the first time it's needed. The settings editor ([ADR 0017](adr/0017-settings-editor.md)) is a
+  page (`page:settings`) that lists `settings_schema`: every built-in setting
+  (`settings/schema.rs`) and every setting extensions declare, with its value, default, and
+  whether the file sets it. It writes one key at a time with `settings_set`, which keeps the
+  file's comments and refuses changes that would make it invalid. Saving the file, or a change in
+  the settings editor, validates and applies it immediately: tab size and spaces apply to open
+  documents, font and theme to the frontend, and exclusions rebuild the index. Invalid settings (unknown keys, out-of-range values, bad globs) are reported
   with the parser's message and the previous settings stay in effect. **Color Theme** commands
   edit the file with `toml_edit`, preserving comments and formatting. `workbench.theme` names a
   built-in theme or a contributed one; `workbench.colors` overrides theme tokens; `[keybindings]`
@@ -326,7 +331,7 @@ its id and keys.
   of the lines near the visible area.
 - **Commands are the only entry point.** Tauri commands are defined in `src-tauri/src/`
   (`commands.rs`, `editor/commands.rs`, `lsp/commands.rs`, `extensions.rs`, `workspace.rs`,
-  `settings.rs`, `ui_state.rs`, `events.rs`). They are mirrored by typed wrappers in `src/ipc/`, the only frontend code that
+  `settings/`, `ui_state.rs`, `events.rs`). They are mirrored by typed wrappers in `src/ipc/`, the only frontend code that
   calls `invoke`.
 - **Backend events** (workspace changed, files changed, document reloaded or changed on disk,
   settings changed, index status, match counts, syntax parsed, diagnostics changed, language
@@ -417,6 +422,7 @@ EditorView = { version, lineCount, rowCount, startRow, startLine, endLine,
 | `workspace_search`, `workspace_search_cancel`                 | Streaming find in files                                |
 | `settings_get`, `settings_file`, `settings_set_theme`         | Frontend settings, the settings file path, theme       |
 | `settings_set_icon_theme`                                     | File icon theme                                        |
+| `settings_schema`, `settings_set`                             | Every setting for the settings editor; set one         |
 | `ui_state_get`, `ui_state_save`                               | Saved layout and active file                           |
 | `events_subscribe`                                            | Register the backend event channel                     |
 | `perf_stats`                                                  | Backend timings, scheduler statistics, memory          |
@@ -685,7 +691,8 @@ them. Extensions fill in content through the `workbench` interface (API 1.1; pre
   - `DockArea.tsx` and `items.tsx`: rendering, with splitters (`Sash`), tab strips, drag and drop
     with a drop preview, the tab menu, and each item kind's tab, content, and buttons.
 
-  Views are shown through `state/viewRequests.ts`, so state modules needn't import the dock.
+  Views and pages (`app/pages.ts`, such as the settings editor) are shown through
+  `state/viewRequests.ts`, so state modules needn't import the dock.
 
 - **`commands/`**: the command registry, keybinding matching, fuzzy matching, and the built-in
   commands. `editor/activeEditor.ts` exposes the active editor to commands (find, go to line,
@@ -872,7 +879,8 @@ These are tracked for later milestones:
   explorer (files), and keybindings support only the `editorFocus` condition.
 - Extension diagnostics count toward the status bar's problem counts only in files with a known
   language, because the counts live in the language status.
-- There's no graphical settings or keybindings UI; both are edited as TOML.
+- There's no keybindings UI; keybindings are edited as TOML. The settings editor doesn't edit
+  tables of entries (theme colors, language servers, terminal profiles, keybindings).
 - Screen readers read the cursor's line and selection. Diagnostics under the cursor, hover cards,
   and completion items aren't announced yet. Forced-colors mode shows syntax in the system's
   text color.

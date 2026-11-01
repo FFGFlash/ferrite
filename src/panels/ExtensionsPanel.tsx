@@ -11,6 +11,7 @@ import {
 } from '../ipc/extensions'
 import { extensionsStore, useExtensionUsage } from '../state/extensions'
 import { reportError } from '../state/notifications'
+import { extensionQuery, openSettings } from '../state/settings'
 import { useStore } from '../state/store'
 import './ExtensionsPanel.css'
 
@@ -161,6 +162,16 @@ function ExtensionItem({ extension, usage }: { extension: ExtensionStatus; usage
         </span>
         {valid && (
           <>
+            {extension.hasSettings && (
+              <button
+                type="button"
+                className="extensions-panel__button"
+                aria-label={`${extension.name} Settings`}
+                onClick={() => openSettings(extensionQuery(extension.id))}
+              >
+                Settings
+              </button>
+            )}
             {runs && (
               <button
                 type="button"

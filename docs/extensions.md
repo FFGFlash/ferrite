@@ -252,7 +252,10 @@ Each diagnostic has a range, a severity, a message, and an optional code.
 ### Settings, logging, and messages
 
 **Settings.** `configuration(key)` returns the user's value for a declared setting, or its
-default. Users set values in `settings.toml`:
+default. Users change them in the settings editor (**Preferences: Open Settings**), which lists
+each declared setting under the extension's name, titled from its key (`max_line_length` is "Max
+Line Length"), with its description, and a control for its type, range, and choices. The values
+are stored in `settings.toml`:
 
 ```toml
 [extensions.settings."example.tidy"]
@@ -260,7 +263,7 @@ max_line_length = 120
 ```
 
 Values are checked against the declaration. Invalid values are listed in the Extensions view and
-the default is used instead. Values are read at call time, so a changed setting applies on the
+the settings editor, and the default is used instead. Values are read at call time, so a changed setting applies on the
 next read.
 
 **Logging and messages:**

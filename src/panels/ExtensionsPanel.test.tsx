@@ -38,6 +38,7 @@ const tidy: ExtensionStatus = {
   ],
   commands: [{ id: 'example.tidy.trim', title: 'Trim', category: 'Tidy', hidden: false }],
   configErrors: ['width must be at least 0; using the default'],
+  hasSettings: false,
   contributions: {
     themes: [{ id: 'example.tidy.night', label: 'Night', kind: 'dark', colors: {} }],
     iconThemes: [],
@@ -82,6 +83,7 @@ describe('ExtensionsPanel', () => {
       permissions: [],
       commands: [],
       configErrors: [],
+      hasSettings: false,
       development: false,
       usage: { ...tidy.usage, calls: 0 },
     }

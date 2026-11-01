@@ -150,6 +150,8 @@ pub fn run() {
       settings::settings_set_theme,
       settings::settings_set_icon_theme,
       settings::settings_set_default_profile,
+      settings::settings_schema,
+      settings::settings_set,
       ui_state::ui_state_get,
       ui_state::ui_state_save,
       workspace::workspace_get,

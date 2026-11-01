@@ -42,7 +42,8 @@ Please report it with the log file's last lines: the error and where it happened
 
 Ferrite applies `settings.toml` when you save it in Ferrite. If the file has a mistake (an
 unknown key, a value out of range, invalid TOML), a notification names it and the previous
-settings stay in effect. Every available setting is listed, commented out, in the file.
+settings stay in effect. **Preferences: Open Settings** shows the mistake too, and can't change
+settings until it's fixed. It lists every available setting with the value in effect.
 
 To start over, delete `settings.toml`. **Preferences: Open Settings (TOML)** creates a fresh one.
 

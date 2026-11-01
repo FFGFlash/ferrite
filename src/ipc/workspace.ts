@@ -83,6 +83,50 @@ export interface FrontendSettings {
   minimapMarkHeaders: boolean
 }
 
+/** A value the settings editor shows or sets. */
+export type SettingValue = boolean | number | string | string[]
+
+export interface SettingChoice {
+  value: string
+  label: string
+}
+
+/** What a setting holds, and how it's edited. */
+export type SettingKind =
+  | { type: 'boolean' }
+  | { type: 'integer' | 'number'; minimum: number | null; maximum: number | null }
+  /** `choices`: the values offered (built-in settings may hold others, set in the file). */
+  | { type: 'string'; choices: SettingChoice[] | null }
+  | { type: 'list' }
+  /** Entries edited in `settings.toml`; the value is their names. */
+  | { type: 'table' }
+
+/** One setting, built in or declared by an extension (`settings_schema`). */
+export type Setting = SettingKind & {
+  /** Its keys in `settings.toml`, e.g. `["editor", "tab_size"]`. */
+  path: string[]
+  section: string
+  /** The id of the extension that declares it. */
+  extension: string | null
+  title: string
+  description: string
+  default: SettingValue
+  /** The value in effect. */
+  value: SettingValue
+  /** Whether `settings.toml` sets it. */
+  modified: boolean
+  /** Why the value in `settings.toml` isn't used. */
+  problem: string | null
+}
+
+export interface SettingsSchema {
+  /** The settings file, if there's a configuration directory. */
+  file: string | null
+  /** Why the settings file isn't in effect, if it's invalid. */
+  error: string | null
+  settings: Setting[]
+}
+
 export interface SavedUi {
   layout: Record<string, unknown>
   activeFile: string | null
@@ -93,7 +137,8 @@ export type AppEvent =
   | { type: 'filesChanged'; directories: string[] }
   | { type: 'documentReloaded'; document: DocumentSummary }
   | { type: 'documentChangedOnDisk'; document: DocumentSummary }
-  | { type: 'settingsChanged'; settings: FrontendSettings }
+  /** `announce`: tell the user (not when they changed one setting in the settings editor). */
+  | { type: 'settingsChanged'; settings: FrontendSettings; announce: boolean }
   | { type: 'searchCounted'; documentId: number }
   | { type: 'syntaxUpdated'; documentId: number }
   | { type: 'diagnosticsChanged'; documentId: number }
@@ -141,6 +186,10 @@ export const settingsFilePath = () => call<string>('settings_file')
 export const setTheme = (theme: Theme) => call<void>('settings_set_theme', { theme })
 export const setIconTheme = (iconTheme: string) =>
   call<void>('settings_set_icon_theme', { iconTheme })
+export const getSettingsSchema = () => call<SettingsSchema>('settings_schema')
+/** Sets one setting in `settings.toml`; `null` removes it, so its default applies. */
+export const setSetting = (path: string[], value: SettingValue | null) =>
+  call<void>('settings_set', { path, value })
 
 export const getSavedUi = () => call<SavedUi>('ui_state_get')
 export const saveUi = (layout: Record<string, unknown>, activeFile: string | null) =>

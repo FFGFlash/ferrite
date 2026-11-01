@@ -14,8 +14,8 @@ use std::time::{Duration, Instant};
 use ferrite_core::{DocumentId, Editor, EditorOp};
 use ferrite_extension_host::preview::{ImageSource, LinkTarget, PreviewElement};
 use ferrite_extension_host::{
-  Embedder, ExtensionHost, ExtensionState, HostOptions, Limits, Notification, Permission,
-  PreviewInfo, Severity,
+  ConfigValue, Embedder, ExtensionHost, ExtensionState, HostOptions, Limits, Notification,
+  Permission, PreviewInfo, Severity,
 };
 
 /// Builds the extensions workspace once and returns its output folder.
@@ -586,6 +586,24 @@ fn configuration_comes_from_settings_with_declared_defaults() {
   let errors = &s.host.statuses()[0].config_errors;
   assert_eq!(errors.len(), 1);
   assert!(errors[0].contains("on_change"), "{errors:?}");
+  assert!(s.host.statuses()[0].has_settings);
+
+  // For a settings editor: every declared setting with the value in use.
+  let configurations = s.host.configurations();
+  assert_eq!(configurations.len(), 1);
+  assert_eq!(configurations[0].id, "test.misbehaving");
+  let setting = |key: &str| {
+    configurations[0]
+      .settings
+      .iter()
+      .find(|setting| setting.key == key)
+      .expect(key)
+  };
+  assert_eq!(setting("limit").value, ConfigValue::Integer(7));
+  assert_eq!(setting("limit").problem, None);
+  let on_change = setting("on_change");
+  assert_eq!(on_change.value, on_change.property.default);
+  assert!(on_change.problem.is_some(), "an invalid value is explained");
 }
 
 #[test]

@@ -24,39 +24,28 @@ use crate::settings::FrontendSettings;
 )]
 pub enum AppEvent {
   /// A workspace folder was opened or closed.
-  WorkspaceChanged {
-    workspace: Option<WorkspaceInfo>,
-  },
+  WorkspaceChanged { workspace: Option<WorkspaceInfo> },
   /// Listings of these directories may have changed.
-  FilesChanged {
-    directories: Vec<String>,
-  },
+  FilesChanged { directories: Vec<String> },
   /// A clean document was reloaded because its file changed on disk.
-  DocumentReloaded {
-    document: DocumentSummary,
-  },
+  DocumentReloaded { document: DocumentSummary },
   /// A document with unsaved changes was modified on disk by another program.
-  DocumentChangedOnDisk {
-    document: DocumentSummary,
-  },
+  DocumentChangedOnDisk { document: DocumentSummary },
+  /// Settings were applied; `announce` tells the user (not when they
+  /// changed one setting in the settings editor).
   SettingsChanged {
     settings: FrontendSettings,
+    announce: bool,
   },
   /// A background match count for a large document finished.
-  SearchCounted {
-    document_id: u64,
-  },
+  SearchCounted { document_id: u64 },
   /// A document's diagnostics changed.
-  DiagnosticsChanged {
-    document_id: u64,
-  },
+  DiagnosticsChanged { document_id: u64 },
   /// A language server started, stopped, or began or finished work.
   LanguageServerChanged,
   /// A background parse finished, so a document's highlighting may have
   /// changed.
-  SyntaxUpdated {
-    document_id: u64,
-  },
+  SyntaxUpdated { document_id: u64 },
   /// A file was opened in the background (e.g. at startup).
   DocumentOpened {
     document: DocumentSummary,
@@ -87,23 +76,15 @@ pub enum AppEvent {
     reason: String,
   },
   /// An extension edited a document.
-  DocumentEdited {
-    document_id: u64,
-  },
+  DocumentEdited { document_id: u64 },
   /// Extension status bar items changed.
   ExtensionStatusItemsChanged,
   /// The content of an extension view changed.
-  ExtensionViewChanged {
-    view: String,
-  },
+  ExtensionViewChanged { view: String },
   /// An extension asked to show one of its views.
-  ExtensionShowView {
-    view: String,
-  },
+  ExtensionShowView { view: String },
   /// A document's extension decorations changed.
-  DecorationsChanged {
-    document_id: u64,
-  },
+  DecorationsChanged { document_id: u64 },
   /// An extension asked to select and show a range in a document.
   ExtensionReveal {
     document_id: u64,
@@ -113,9 +94,7 @@ pub enum AppEvent {
   /// Extension previews were opened or closed, or one's title changed.
   ExtensionPreviewsChanged,
   /// The content of an extension preview changed.
-  ExtensionPreviewChanged {
-    preview: String,
-  },
+  ExtensionPreviewChanged { preview: String },
   /// An extension asked to show one of its previews.
   ExtensionShowPreview {
     preview: String,
@@ -124,10 +103,7 @@ pub enum AppEvent {
   },
   /// Something the user should know about, such as files that could not be
   /// reopened or restored unsaved changes.
-  Notice {
-    level: NoticeLevel,
-    message: String,
-  },
+  Notice { level: NoticeLevel, message: String },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]

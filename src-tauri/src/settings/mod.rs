@@ -1,6 +1,9 @@
 //! User settings, stored as TOML in the platform config directory and edited
-//! in Ferrite itself. Saving the file applies it; invalid files are reported
-//! and the previous settings stay in effect.
+//! in Ferrite itself, as a file or in the settings editor. Saving the file
+//! applies it; invalid files are reported and the previous settings stay in
+//! effect.
+
+mod schema;
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -19,6 +22,8 @@ use tauri::{AppHandle, Manager, State};
 use crate::editor::EditorState;
 use crate::error::CommandError;
 use crate::events::{self, AppEvent};
+use crate::extensions::ExtensionsState;
+use crate::terminal::TerminalState;
 
 const FILE_NAME: &str = "settings.toml";
 
@@ -615,6 +620,12 @@ fn apply_profile_change(profile: &mut Profile, change: &ProfileSettings) {
 /// Re-reads the settings file after it was saved and applies it everywhere.
 /// Returns an error message for the user if the file is invalid.
 pub fn reload(app: &AppHandle) -> Result<(), CommandError> {
+  reload_and_announce(app, true)
+}
+
+/// Re-reads and applies the settings file; `announce` tells the user it was
+/// applied (not needed when they changed one setting and can see it).
+fn reload_and_announce(app: &AppHandle, announce: bool) -> Result<(), CommandError> {
   let state = app.state::<SettingsState>();
   let Some(path) = state.path() else {
     return Ok(());
@@ -626,12 +637,12 @@ pub fn reload(app: &AppHandle) -> Result<(), CommandError> {
   })?;
   let previous = state.get();
   state.replace(settings.clone());
-  apply(app, &previous, &settings);
+  apply(app, &previous, &settings, announce);
   tracing::info!("settings applied");
   Ok(())
 }
 
-fn apply(app: &AppHandle, previous: &Settings, settings: &Settings) {
+fn apply(app: &AppHandle, previous: &Settings, settings: &Settings, announce: bool) {
   app
     .state::<EditorState>()
     .lock()
@@ -647,6 +658,7 @@ fn apply(app: &AppHandle, previous: &Settings, settings: &Settings) {
     app,
     AppEvent::SettingsChanged {
       settings: settings.frontend(),
+      announce,
     },
   );
 }
@@ -729,7 +741,8 @@ pub fn settings_set_icon_theme(app: AppHandle, icon_theme: String) -> Result<(),
 }
 
 /// Changes the settings file with `change`, keeping its comments and
-/// formatting, and applies the result.
+/// formatting, and applies the result. Nothing is written if the result
+/// would be invalid.
 pub fn edit(
   app: &AppHandle,
   change: impl FnOnce(&mut toml_edit::DocumentMut) -> Result<(), String>,
@@ -744,14 +757,299 @@ pub fn edit(
     )
   })?;
   change(&mut document).map_err(|message| CommandError::new("invalidSettings", message))?;
-  ferrite_workspace::write_file_atomically(&path, document.to_string().as_bytes())
+  let text = document.to_string();
+  Settings::parse(&text).map_err(|error| {
+    CommandError::new("invalidSettings", format!("Settings not changed: {error}"))
+  })?;
+  ferrite_workspace::write_file_atomically(&path, text.as_bytes())
     .map_err(|error| CommandError::new("settings", format!("Could not write settings: {error}")))?;
-  reload(app)
+  reload_and_announce(app, false)
+}
+
+/// Sets the value at `path` (`None` removes it), creating the tables on the
+/// way. A replaced value keeps its comments.
+fn set_value(
+  document: &mut toml_edit::DocumentMut,
+  path: &[String],
+  value: Option<toml_edit::Value>,
+) -> Result<(), String> {
+  let (key, tables) = path.split_last().ok_or("no setting was named")?;
+  let mut table: &mut dyn toml_edit::TableLike = document.as_table_mut();
+  for (depth, name) in tables.iter().enumerate() {
+    if value.is_none() && !table.contains_key(name) {
+      return Ok(());
+    }
+    let item = table.entry(name).or_insert_with(|| {
+      let mut new = toml_edit::Table::new();
+      // Only the innermost table gets a header.
+      new.set_implicit(depth + 1 < tables.len());
+      toml_edit::Item::Table(new)
+    });
+    table = item
+      .as_table_like_mut()
+      .ok_or_else(|| format!("{} must be a table", tables[..=depth].join(".")))?;
+  }
+  match value {
+    Some(mut value) => {
+      if let Some(old) = table.get(key).and_then(toml_edit::Item::as_value) {
+        *value.decor_mut() = old.decor().clone();
+      }
+      table.insert(key, toml_edit::Item::Value(value));
+    }
+    None => {
+      table.remove(key);
+      prune_empty_tables(document, tables);
+    }
+  }
+  Ok(())
+}
+
+/// Removes the tables on `path` that removing a key left empty, innermost
+/// first, such as `[extensions.settings."example.tidy"]`. Top-level tables
+/// (the template's sections) and tables with comments stay.
+fn prune_empty_tables(document: &mut toml_edit::DocumentMut, path: &[String]) {
+  for depth in (1..path.len()).rev() {
+    let mut parent: &mut dyn toml_edit::TableLike = document.as_table_mut();
+    for name in &path[..depth] {
+      let Some(table) = parent
+        .get_mut(name)
+        .and_then(toml_edit::Item::as_table_like_mut)
+      else {
+        return;
+      };
+      parent = table;
+    }
+    let name = &path[depth];
+    let Some(item) = parent.get(name) else {
+      return;
+    };
+    let empty = item
+      .as_table_like()
+      .is_some_and(toml_edit::TableLike::is_empty);
+    let commented = item.as_table().is_some_and(|table| {
+      table
+        .decor()
+        .prefix()
+        .and_then(toml_edit::RawString::as_str)
+        .is_some_and(|prefix| prefix.contains('#'))
+    });
+    if !empty || commented {
+      return;
+    }
+    parent.remove(name);
+  }
+}
+
+/// Every setting for the settings editor, with what `settings.toml` sets.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SettingsSchemaDto {
+  /// The settings file, if there's a configuration directory.
+  file: Option<String>,
+  /// Why the settings file isn't in effect, if it's invalid.
+  error: Option<String>,
+  settings: Vec<schema::SettingDto>,
+}
+
+/// Every built-in setting and every setting extensions declare, with its
+/// description, default, and value in effect.
+#[tauri::command]
+pub async fn settings_schema(app: AppHandle) -> Result<SettingsSchemaDto, CommandError> {
+  // Finding terminal profiles can take a moment.
+  tauri::async_runtime::spawn_blocking(move || {
+    let state = app.state::<SettingsState>();
+    let settings = state.get();
+    let text = state.path().map(std::fs::read_to_string);
+    let (file, error) = match &text {
+      None => (None, None),
+      Some(Err(error)) if error.kind() == std::io::ErrorKind::NotFound => (None, None),
+      Some(Err(error)) => (None, Some(format!("Could not read settings: {error}"))),
+      Some(Ok(text)) => (
+        toml::from_str::<toml::Table>(text).ok(),
+        Settings::parse(text).err(),
+      ),
+    };
+    let mut installed = schema::Installed::default();
+    if let Some(host) = app.state::<ExtensionsState>().host() {
+      for status in host.statuses() {
+        if matches!(
+          status.state,
+          ferrite_extension_host::ExtensionState::Disabled
+            | ferrite_extension_host::ExtensionState::Invalid
+        ) {
+          continue;
+        }
+        let contributions = status.contributions;
+        installed.themes.extend(
+          contributions
+            .themes
+            .into_iter()
+            .map(|theme| schema::Choice::new(theme.id, theme.label)),
+        );
+        installed.icon_themes.extend(
+          contributions
+            .icon_themes
+            .into_iter()
+            .map(|theme| schema::Choice::new(theme.id, theme.label)),
+        );
+      }
+      installed.extensions = host.configurations();
+    }
+    let detected = app.state::<TerminalState>().detected_profiles();
+    // What "automatic" picks: the default without the user's choice.
+    let mut automatic = settings.clone();
+    automatic.terminal.default_profile.clear();
+    installed.default_profile = automatic.terminal_profiles(detected.clone()).default;
+    installed.profiles = settings
+      .terminal_profiles(detected)
+      .profiles
+      .into_iter()
+      .map(|profile| profile.name)
+      .collect();
+    SettingsSchemaDto {
+      file: state.path().map(|path| path.display().to_string()),
+      error,
+      settings: schema::describe(&settings, file.as_ref(), &installed),
+    }
+  })
+  .await
+  .map_err(CommandError::internal)
+}
+
+/// Sets one setting in the settings file from the settings editor, keeping
+/// the file's comments and formatting, and applies it. `path` is the
+/// setting's keys; `None` removes it, so its default applies.
+#[tauri::command]
+pub fn settings_set(
+  app: AppHandle,
+  path: Vec<String>,
+  value: Option<serde_json::Value>,
+) -> Result<(), CommandError> {
+  let name = path.join(".");
+  let invalid = |message: String| CommandError::new("invalidSetting", message);
+  let value = match path.as_slice() {
+    [extensions, settings, id, key] if extensions == "extensions" && settings == "settings" => {
+      let property = app
+        .state::<ExtensionsState>()
+        .host()
+        .and_then(|host| {
+          host
+            .configurations()
+            .into_iter()
+            .find(|extension| extension.id == *id)?
+            .settings
+            .into_iter()
+            .find(|setting| setting.key == *key)
+        })
+        .map(|setting| setting.property)
+        .ok_or_else(|| invalid(format!("{name} is not a setting of an extension")))?;
+      value
+        .map(|value| {
+          let converted = schema::to_toml(schema::config_kind(property.kind), &value)?;
+          property.check(&converted)?;
+          Ok(converted)
+        })
+        .transpose()
+        .map_err(|error: String| invalid(format!("{name} {error}")))?
+    }
+    _ => {
+      let kind = schema::builtin_kind(&path).ok_or_else(|| {
+        invalid(format!(
+          "{name} can't be set here; change it in settings.toml"
+        ))
+      })?;
+      value
+        .map(|value| schema::to_toml(kind, &value))
+        .transpose()
+        .map_err(|error| invalid(format!("{name} {error}")))?
+    }
+  };
+  let value = value.as_ref().map(schema::to_edit);
+  edit(&app, |document| set_value(document, &path, value))
 }
 
 #[cfg(test)]
 mod tests {
   use super::*;
+
+  fn set(text: &str, path: &[&str], value: Option<toml_edit::Value>) -> String {
+    let mut document: toml_edit::DocumentMut = text.parse().expect("toml");
+    let path: Vec<String> = path.iter().map(|&key| key.to_owned()).collect();
+    set_value(&mut document, &path, value).expect("set");
+    document.to_string()
+  }
+
+  #[test]
+  fn sets_and_removes_values_keeping_the_file_as_written() {
+    let changed = set(TEMPLATE, &["editor", "tab_size"], Some(2.into()));
+    assert!(
+      changed.contains("[editor]\ntab_size = 2\n# tab_size = 4"),
+      "{changed}"
+    );
+    assert_eq!(Settings::parse(&changed).expect("valid").editor.tab_size, 2);
+
+    // A replaced value keeps its comment; removing it brings the default back.
+    let commented = "[editor]\ntab_size = 2 # narrow\n";
+    assert_eq!(
+      set(commented, &["editor", "tab_size"], Some(8.into())),
+      "[editor]\ntab_size = 8 # narrow\n"
+    );
+    assert_eq!(set(commented, &["editor", "tab_size"], None), "[editor]\n");
+    assert_eq!(set("", &["editor", "tab_size"], None), "");
+
+    // Extension settings go in their own table, after [extensions].
+    let tidy = set(
+      TEMPLATE,
+      &["extensions", "settings", "example.tidy", "max_line_length"],
+      Some(80.into()),
+    );
+    let at = |needle: &str| {
+      tidy
+        .find(needle)
+        .unwrap_or_else(|| panic!("{needle} in {tidy}"))
+    };
+    assert!(
+      at("[extensions]") < at("[extensions.settings.\"example.tidy\"]\nmax_line_length = 80")
+    );
+    assert!(at("max_line_length = 80") < at("[keybindings]"));
+    assert!(!tidy.contains("[extensions.settings]\n"));
+    let parsed = Settings::parse(&tidy).expect("valid");
+    assert_eq!(
+      parsed.extensions.settings["example.tidy"]["max_line_length"].as_integer(),
+      Some(80)
+    );
+    // Resetting it leaves the file as it was, without an empty table.
+    let path = ["extensions", "settings", "example.tidy", "max_line_length"];
+    assert_eq!(set(&tidy, &path, None), TEMPLATE);
+    // Tables that hold other settings, or comments, stay.
+    let two = "[extensions.settings.\"x\"]\na = 1\nb = 2\n";
+    assert_eq!(
+      set(two, &["extensions", "settings", "x", "a"], None),
+      "[extensions.settings.\"x\"]\nb = 2\n"
+    );
+    let commented = "# Tidy\n[extensions.settings.\"x\"]\na = 1\n";
+    assert_eq!(
+      set(commented, &["extensions", "settings", "x", "a"], None),
+      "# Tidy\n[extensions.settings.\"x\"]\n"
+    );
+
+    // A table may also be written inline.
+    let inline = set(
+      "extensions = { settings = { a = { b = 1 } } }\n",
+      &["extensions", "settings", "a", "b"],
+      Some(2.into()),
+    );
+    assert_eq!(inline, "extensions = { settings = { a = { b = 2 } } }\n");
+
+    let mut document: toml_edit::DocumentMut = "editor = 3\n".parse().expect("toml");
+    let error = set_value(
+      &mut document,
+      &["editor".to_owned(), "tab_size".to_owned()],
+      Some(2.into()),
+    )
+    .expect_err("not a table");
+    assert!(error.contains("editor must be a table"), "{error}");
+  }
 
   #[test]
   fn the_template_parses_to_the_defaults() {

@@ -5,6 +5,7 @@
  */
 import { ChevronDown, FileText, Plus, SquareTerminal, Trash2 } from 'lucide-react'
 import { useEffect, useRef, type ReactNode } from 'react'
+import { pages, type PageDescriptor } from '../app/pages'
 import { useViews, type ViewDescriptor } from '../app/views'
 import { executeCommand, getCommand, primaryKeybinding } from '../commands/registry'
 import { ErrorBoundary } from '../components/ErrorBoundary'
@@ -31,8 +32,9 @@ export type ResolvedItem =
   | { kind: 'view'; item: ItemId; view: ViewDescriptor }
   | { kind: 'terminal'; item: ItemId; terminal: TerminalTab }
   | { kind: 'preview'; item: ItemId; preview: PreviewInfo }
+  | { kind: 'page'; item: ItemId; page: PageDescriptor }
 
-/** The items that exist now (open documents, known views, running terminals, open previews). */
+/** The items that exist now (open documents, known views, running terminals, open previews, pages). */
 export function useResolver(): (item: ItemId) => ResolvedItem | null {
   const { documents } = useStore(documentsStore)
   const { tabs } = useStore(terminalsStore)
@@ -57,6 +59,10 @@ export function useResolver(): (item: ItemId) => ResolvedItem | null {
         const preview = previews.find(candidate => candidate.id === id)
         return preview ? { kind: 'preview', item, preview } : null
       }
+      case 'page': {
+        const page = pages.find(candidate => candidate.id === id)
+        return page ? { kind: 'page', item, page } : null
+      }
       default:
         return null
     }
@@ -73,6 +79,8 @@ export function itemTitle(resolved: ResolvedItem): string {
       return resolved.terminal.title
     case 'preview':
       return resolved.preview.title
+    case 'page':
+      return resolved.page.title
   }
 }
 
@@ -101,6 +109,8 @@ export function itemTooltip(resolved: ResolvedItem): string {
       const path = documentsStore.get().documents.find(d => d.id === document)?.path
       return path ? `${resolved.preview.title} (${path})` : resolved.preview.title
     }
+    case 'page':
+      return resolved.page.title
   }
 }
 
@@ -140,6 +150,10 @@ export function ItemIcon({ resolved, className = 'dock-tab__icon', size = 16 }: 
           <Icon name={resolved.preview.icon as IconName} size={size} />
         </span>
       )
+    case 'page': {
+      const PageIcon = resolved.page.icon
+      return <PageIcon className={className} size={size} strokeWidth={1.5} aria-hidden="true" />
+    }
   }
 }
 
@@ -179,6 +193,16 @@ export function ItemContent({ resolved }: { resolved: ResolvedItem }): ReactNode
           </ErrorBoundary>
         </div>
       )
+    case 'page': {
+      const Page = resolved.page.component
+      return (
+        <div className="dock-view">
+          <ErrorBoundary name={`The ${resolved.page.title} page`} resetKey={resolved.item}>
+            <Page />
+          </ErrorBoundary>
+        </div>
+      )
+    }
   }
 }
 

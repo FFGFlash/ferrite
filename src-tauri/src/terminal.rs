@@ -83,7 +83,7 @@ impl TerminalState {
 
   /// The installed shells, looked for again when the last look is stale.
   /// Blocks (it may run `wsl.exe`), so call it off the IPC thread.
-  fn detected_profiles(&self) -> Vec<Profile> {
+  pub(crate) fn detected_profiles(&self) -> Vec<Profile> {
     let mut detected = self.detected.lock().unwrap_or_else(PoisonError::into_inner);
     match detected.as_ref() {
       Some((at, profiles)) if at.elapsed() < PROFILES_FRESH_FOR => profiles.clone(),

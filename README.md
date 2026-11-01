@@ -323,9 +323,16 @@ any tab, a terminal can be docked anywhere.
 
 ## Settings
 
-Run **Preferences: Open Settings (TOML)** (`Ctrl+,`) to edit `settings.toml`; saving applies it.
-Every available setting is listed, commented out, in the file. Invalid settings are reported and
-the previous ones stay in effect.
+Run **Preferences: Open Settings** (`Ctrl+,`) to see every setting, including those your
+extensions declare, with its value and description. Changes are written to `settings.toml` and
+apply at once. Search by name, key, or description; `@modified` shows what you've set, and
+`@ext:<id>` shows one extension's settings (each extension's **Settings** button in the
+Extensions view opens them).
+
+**Preferences: Open Settings (TOML)** opens the file itself; saving applies it. Theme color
+overrides, language servers, terminal profiles, and keybindings are edited there. Every available
+setting is listed, commented out, in a new file. Invalid settings are reported and the previous
+ones stay in effect.
 
 ```toml
 [editor]

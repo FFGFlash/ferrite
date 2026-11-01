@@ -41,7 +41,7 @@ export async function openNewTerminalMenu(x: number, y: number): Promise<void> {
     ...(entries.length > 0 ? entries : [none]),
     null,
     { label: 'Select Default Profile…', run: () => openDefaultProfileMenu(x, y) },
-    { label: 'Configure Profiles…', run: () => executeCommand('preferences.openSettings') },
+    { label: 'Configure Profiles…', run: () => executeCommand('preferences.openSettingsFile') },
   ])
 }
 

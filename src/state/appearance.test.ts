@@ -30,6 +30,7 @@ const themes = {
   permissions: [],
   commands: [],
   configErrors: [],
+  hasSettings: false,
   contributions: {
     themes: [
       { id: 'example.themes.paper', label: 'Paper', kind: 'light', colors: { text: '#111111' } },

@@ -6,6 +6,7 @@ import { activeEditor } from '../editor/activeEditor'
 import { close, documentsStore, newFile, openFile, openPath, save } from '../state/documents'
 import { addDevelopmentExtension, reloadExtensions } from '../ipc/extensions'
 import { setIconTheme, setTheme, settingsFilePath } from '../ipc/workspace'
+import { openSettings } from '../state/settings'
 import { DEFAULT_ICON_THEME } from '../state/iconTheme'
 import { layoutStore, updateLayout } from '../state/layout'
 import { notify } from '../state/notifications'
@@ -533,8 +534,15 @@ export const builtinCommands: Command[] = [
   {
     id: 'preferences.openSettings',
     category: 'Preferences',
-    title: 'Open Settings (TOML)',
+    title: 'Open Settings',
     keybinding: 'mod+,',
+    terminal: true,
+    run: () => openSettings(),
+  },
+  {
+    id: 'preferences.openSettingsFile',
+    category: 'Preferences',
+    title: 'Open Settings (TOML)',
     terminal: true,
     run: async () => openPath(await settingsFilePath()),
   },
@@ -614,7 +622,7 @@ export function keyboardShortcutsText(mac = isMac()): string {
   return [
     'Keyboard shortcuts',
     '',
-    'Change them in settings.toml (Preferences: Open Settings) under [keybindings], e.g.',
+    'Change them in settings.toml (Preferences: Open Settings (TOML)) under [keybindings], e.g.',
     '  "workbench.showSearch" = "mod+shift+h"     "mod" is Ctrl, or Cmd on macOS; "" removes them',
     '',
     line(header),

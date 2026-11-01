@@ -252,6 +252,8 @@ export interface ExtensionStatus {
   permissions: PermissionStatus[]
   commands: ExtensionCommand[]
   configErrors: string[]
+  /** Whether it declares settings (shown in the settings editor). */
+  hasSettings: boolean
   contributions: Contributions
   usage: ResourceUsage
 }

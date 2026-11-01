@@ -3,9 +3,11 @@
  * itself stays in the backend) and which document is active.
  */
 import { editorFor, selectRange, setActiveDocument } from '../editor/activeEditor'
+import { CommandError } from '../ipc'
 import * as ipc from '../ipc/editor'
 import type { DocumentSummary, Position } from '../ipc/editor'
 import { reportError } from './notifications'
+import { refreshSettingsIfLoaded } from './settings'
 import { createStore } from './store'
 
 export interface DocumentsState {
@@ -160,6 +162,10 @@ export async function save(id = activeId(), as = false): Promise<void> {
     }
   } catch (error) {
     reportError('Saving', error)
+    if (error instanceof CommandError && error.code === 'invalidSettings') {
+      // settings.toml was saved with a mistake; the settings editor shows it.
+      refreshSettingsIfLoaded()
+    }
   }
 }
 

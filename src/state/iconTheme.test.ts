@@ -31,6 +31,7 @@ const icons = (state: ExtensionStatus['state'] = 'ready') =>
     permissions: [],
     commands: [],
     configErrors: [],
+    hasSettings: false,
     contributions: {
       themes: [],
       iconThemes: [{ id: 'example.icons.colorful', label: 'Colorful' }],
