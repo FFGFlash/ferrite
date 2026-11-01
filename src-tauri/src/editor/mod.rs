@@ -35,6 +35,9 @@ pub struct EditorState {
   pub(crate) counts: counts::MatchCounts,
   /// Syntax trees and highlighting state.
   pub(crate) syntax: syntax::SyntaxStates,
+  /// The text last copied as whole lines (copy with nothing selected), so
+  /// pasting it can insert whole lines too.
+  copied_lines: Mutex<Option<String>>,
   /// Set once the user has confirmed closing the window with unsaved changes.
   close_confirmed: AtomicBool,
   close_prompt_open: AtomicBool,
@@ -44,6 +47,21 @@ impl EditorState {
   pub(crate) fn lock(&self) -> MutexGuard<'_, Editor> {
     // A panic while holding the lock must not make every document inaccessible.
     self.editor.lock().unwrap_or_else(PoisonError::into_inner)
+  }
+
+  fn copied_lines(&self) -> Option<String> {
+    self
+      .copied_lines
+      .lock()
+      .unwrap_or_else(PoisonError::into_inner)
+      .clone()
+  }
+
+  fn set_copied_lines(&self, text: Option<String>) {
+    *self
+      .copied_lines
+      .lock()
+      .unwrap_or_else(PoisonError::into_inner) = text;
   }
 
   fn has_unsaved_changes(&self) -> bool {

@@ -8,10 +8,12 @@
 //! restarting a development extension) gets a new registration, and open
 //! documents of it are parsed again.
 
+use std::collections::HashMap;
 use std::path::Path;
 use std::sync::{Arc, Mutex, PoisonError, RwLock};
 use std::time::SystemTime;
 
+use ferrite_core::CommentTokens;
 use ferrite_extension_host::contributions::{LanguageContribution, LanguageServerContribution};
 use ferrite_lsp::{ServerCommand, ServerConfig};
 use ferrite_syntax::{Language, LanguageDefinition, Registry};
@@ -37,6 +39,8 @@ struct Current {
   /// What `registry` was built from, with when each file was modified.
   built_from: Vec<(LanguageDefinition, Vec<Option<SystemTime>>)>,
   servers: Vec<ServerConfig>,
+  /// Each language's comment syntax, by language id.
+  comments: HashMap<String, CommentTokens>,
 }
 
 impl LanguagesState {
@@ -47,6 +51,18 @@ impl LanguagesState {
   /// The language of a file, if it has one.
   pub fn for_path(&self, path: &Path) -> Option<Language> {
     self.read(|current| current.registry.for_path(path).cloned())
+  }
+
+  /// The comment syntax of a file's language; none for plain text.
+  pub fn comments_for(&self, path: &Path) -> CommentTokens {
+    self.read(|current| {
+      current
+        .registry
+        .for_path(path)
+        .and_then(|language| current.comments.get(language.id()))
+        .cloned()
+        .unwrap_or_default()
+    })
   }
 
   /// Language servers declared by extensions the user allowed to run them.
@@ -80,8 +96,23 @@ fn rebuild(app: &AppHandle) {
     .rebuilding
     .lock()
     .unwrap_or_else(PoisonError::into_inner);
-  let built_from: Vec<_> = host
-    .languages()
+  let languages = host.languages();
+  let mut comments = HashMap::new();
+  for language in &languages {
+    // As in the registry, the first language with an id wins.
+    comments
+      .entry(language.id.clone())
+      .or_insert_with(|| CommentTokens {
+        line: language.line_comment.clone(),
+        block: language.block_comment.clone(),
+      });
+  }
+  state
+    .current
+    .write()
+    .unwrap_or_else(PoisonError::into_inner)
+    .comments = comments;
+  let built_from: Vec<_> = languages
     .into_iter()
     .map(|language| {
       let definition = definition(language);

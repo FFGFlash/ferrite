@@ -25,6 +25,8 @@ grammar = "grammars/tree-sitter-html.wasm"
 highlights = "queries/html/highlights.scm"
 # Highlights <style> as CSS and <script> as JavaScript.
 injections = "queries/html/injections.scm"
+# No line comments: Toggle Line Comment wraps lines in a block comment.
+block_comment = ["<!--", "-->"]
 
 [[languages]]
 id = "css"
@@ -32,6 +34,7 @@ name = "CSS"
 file_extensions = ["css"]
 grammar = "grammars/tree-sitter-css.wasm"
 highlights = "queries/css/highlights.scm"
+block_comment = ["/*", "*/"]
 
 # `npm install -g vscode-langservers-extracted` provides both servers. Ferrite
 # looks for them on the PATH and shows "not installed" in the status bar if

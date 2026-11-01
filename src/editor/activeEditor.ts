@@ -20,6 +20,8 @@ export interface EditorController {
   lineCount(): number
   /** Scrolls so `line` is at the top of the viewport. */
   scrollToLine(line: number): void
+  /** Scrolls by `lines` lines (negative for up) without moving the cursor. */
+  scrollBy(lines: number): void
   /** Goes to the definition of the symbol at the cursor. */
   goToDefinition(): void
   /** Opens completion at the cursor. */

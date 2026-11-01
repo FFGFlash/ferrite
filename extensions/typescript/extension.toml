@@ -19,6 +19,8 @@ name = "TypeScript"
 file_extensions = ["ts", "mts", "cts"]
 grammar = "grammars/tree-sitter-typescript.wasm"
 highlights = "queries/typescript/highlights.scm"
+line_comment = "//"
+block_comment = ["/*", "*/"]
 
 [[languages]]
 # The LSP id for TSX.
@@ -28,6 +30,8 @@ file_extensions = ["tsx"]
 grammar = "grammars/tree-sitter-tsx.wasm"
 grammar_name = "tsx"
 highlights = "queries/tsx/highlights.scm"
+line_comment = "//"
+block_comment = ["/*", "*/"]
 
 # `npm install -g typescript-language-server typescript`. The JavaScript
 # extension declares the same server for JavaScript; one runs for both.

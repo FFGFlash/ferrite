@@ -264,6 +264,12 @@ export function EditorView({ documentId, title, transport = ipcTransport }: Edit
           scroller.scrollTop = line * lineHeightRef.current
         }
       },
+      scrollBy: lines => {
+        const scroller = scrollRef.current
+        if (scroller) {
+          scroller.scrollTop += lines * lineHeightRef.current
+        }
+      },
       goToDefinition: () => void goToDefinition(),
       triggerSuggest: () => requestCompletion(null, false),
       showHover: () => void showHoverAtCursor(),
@@ -552,7 +558,7 @@ export function EditorView({ documentId, title, transport = ipcTransport }: Edit
     event.preventDefault()
     const text = event.clipboardData.getData('text/plain')
     if (text) {
-      dispatch({ type: 'insert', text })
+      dispatch({ type: 'paste', text })
     }
   }
 

@@ -521,6 +521,8 @@ grammar = "grammars/tree-sitter-html.wasm"
 grammar_name = "html"             # optional: the id, with '-' as '_'
 highlights = "queries/html/highlights.scm"
 injections = "queries/html/injections.scm"   # optional
+block_comment = ["<!--", "-->"]   # optional; for Toggle Line Comment
+# line_comment = "//"             # optional; preferred over block_comment when both are set
 ```
 
 All paths must be inside the extension's folder, and the files must exist when the extension
@@ -528,6 +530,10 @@ loads. The language id is what language servers, `on-language:` activation, sett
 languages' injections use, so it is global: a language whose id another extension already
 registered is left out (the log says so). Ids are 1 to 32 lowercase
 letters, digits, `-`, and `_`.
+
+**Comments.** **Toggle Line Comment** (Ctrl+/) uses `line_comment`, or wraps the lines in
+`block_comment` for languages without line comments. Each delimiter is 1 to 8 characters without
+spaces. Without either, the command does nothing for the language.
 
 **Which language a file gets.** A whole file name beats an extension, and a longer extension
 beats a shorter one (`d.ts` beats `ts`). When two languages claim a file equally, the one

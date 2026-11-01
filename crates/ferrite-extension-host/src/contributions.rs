@@ -185,6 +185,10 @@ pub struct LanguageContribution {
   pub highlights: PathBuf,
   #[serde(skip)]
   pub injections: Option<PathBuf>,
+  /// Starts a comment to the end of the line, e.g. `//`.
+  pub line_comment: Option<String>,
+  /// Open and close a block comment, e.g. `/*` and `*/`.
+  pub block_comment: Option<(String, String)>,
 }
 
 /// A language server the editor starts for documents of some languages,
@@ -349,6 +353,8 @@ pub struct RawLanguage {
   grammar_name: Option<String>,
   highlights: String,
   injections: Option<String>,
+  line_comment: Option<String>,
+  block_comment: Option<(String, String)>,
 }
 
 #[derive(Deserialize)]
@@ -659,6 +665,21 @@ pub fn parse(
         .as_deref()
         .map(|path| inside(&section, path))
         .transpose()?,
+      line_comment: language
+        .line_comment
+        .as_deref()
+        .map(|token| comment_token(&section, "line_comment", token))
+        .transpose()?,
+      block_comment: language
+        .block_comment
+        .as_ref()
+        .map(|(open, close)| {
+          Ok::<_, ManifestError>((
+            comment_token(&section, "block_comment", open)?,
+            comment_token(&section, "block_comment", close)?,
+          ))
+        })
+        .transpose()?,
       id: language.id,
     });
   }
@@ -894,6 +915,17 @@ fn text(section: &str, field: &str, value: &str, max: usize) -> Result<String, M
     )))
   } else {
     Ok(value.to_owned())
+  }
+}
+
+/// A comment delimiter: 1 to 8 characters, without whitespace.
+fn comment_token(section: &str, field: &str, token: &str) -> Result<String, ManifestError> {
+  if (1..=8).contains(&token.chars().count()) && !token.contains(char::is_whitespace) {
+    Ok(token.to_owned())
+  } else {
+    Err(invalid(format!(
+      "{section}: {field} delimiters must be 1 to 8 characters without spaces"
+    )))
   }
 }
 

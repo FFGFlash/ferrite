@@ -15,10 +15,7 @@ export interface KeyInput {
 }
 
 export type EditorCommand =
-  | { kind: 'op'; op: EditorOp }
-  | { kind: 'clipboard'; action: ClipboardAction }
-  /** Handled: prevent the browser default but do nothing. */
-  | { kind: 'ignore' }
+  { kind: 'op'; op: EditorOp } | { kind: 'clipboard'; action: ClipboardAction }
 
 export const isMac = (): boolean => /Mac|iPhone|iPad/.test(navigator.userAgent)
 
@@ -85,8 +82,7 @@ export function keyToCommand(e: KeyInput, mac: boolean, pageLines: number): Edit
       if (mod || e.altKey) {
         return null
       }
-      // Outdenting is not implemented yet; keep focus in the editor.
-      return extend ? { kind: 'ignore' } : op({ type: 'tab' })
+      return op({ type: extend ? 'outdent' : 'tab' })
     case 'Escape':
       return op({ type: 'collapseSelections' })
   }

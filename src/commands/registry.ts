@@ -160,11 +160,21 @@ function unshiftedKey(code: string | undefined): string | undefined {
   return code === undefined ? undefined : (punctuation[code] ?? /^Digit(\d)$/.exec(code)?.[1])
 }
 
+/**
+ * The letter on a physical key. With Option on macOS, `key` reports a
+ * special character ("ˆ" for Option+Shift+I), but bindings name the letter.
+ */
+function letterKey(code: string | undefined): string | undefined {
+  return code === undefined ? undefined : /^Key([A-Z])$/.exec(code)?.[1]?.toLowerCase()
+}
+
 export function matchesKeybinding(binding: string, event: KeyInput, mac: boolean): boolean {
   const parsed = parse(binding, mac)
   const key = event.key === ' ' ? 'space' : event.key.toLowerCase()
   return (
-    (parsed.key === key || (event.shiftKey && parsed.key === unshiftedKey(event.code))) &&
+    (parsed.key === key ||
+      (event.shiftKey && parsed.key === unshiftedKey(event.code)) ||
+      (event.altKey && parsed.key === letterKey(event.code))) &&
     parsed.ctrl === event.ctrlKey &&
     parsed.meta === event.metaKey &&
     parsed.alt === event.altKey &&
@@ -173,6 +183,10 @@ export function matchesKeybinding(binding: string, event: KeyInput, mac: boolean
 }
 
 const keyNames: Record<string, string> = {
+  arrowup: '↑',
+  arrowdown: '↓',
+  arrowleft: '←',
+  arrowright: '→',
   pageup: 'PageUp',
   pagedown: 'PageDown',
   tab: 'Tab',

@@ -34,13 +34,26 @@ export type Motion =
 
 export type EditorOp =
   | { type: 'insert'; text: string }
+  /** Like insert, but text copied as whole lines pastes as whole lines. */
+  | { type: 'paste'; text: string }
   | { type: 'newline' }
+  | { type: 'insertLine'; direction: 'up' | 'down' }
   | { type: 'tab' }
+  | { type: 'indent' }
+  | { type: 'outdent' }
+  /** Uses the comment syntax of the document's language. */
+  | { type: 'toggleComment' }
+  | { type: 'moveLines'; direction: 'up' | 'down' }
+  | { type: 'copyLines'; direction: 'up' | 'down' }
+  | { type: 'deleteLines' }
   | { type: 'delete'; direction: 'backward' | 'forward'; unit: 'grapheme' | 'word' }
   | { type: 'deleteSelection' }
   | { type: 'move'; motion: Motion; extend: boolean; pageLines?: number }
   | { type: 'selectAll' }
+  | { type: 'selectLine' }
+  | { type: 'cursorsAtLineEnds' }
   | { type: 'collapseSelections' }
+  | { type: 'cursorUndo' }
   | { type: 'setCursor'; position: Position; extend: boolean; add: boolean }
   | { type: 'selectWord'; position: Position }
   | { type: 'addCursor'; direction: 'up' | 'down' }
@@ -51,6 +64,8 @@ export type EditorOp =
   | { type: 'replace'; query: SearchQuery; replacement: string }
   | { type: 'replaceAll'; query: SearchQuery; replacement: string }
   | { type: 'addNextMatch' }
+  | { type: 'selectAllOccurrences' }
+  | { type: 'jumpToBracket' }
 
 export interface SearchQuery {
   pattern: string

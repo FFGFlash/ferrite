@@ -65,10 +65,25 @@ preserved exactly, and new lines use the file's existing line ending.
 | Line start (smart) / end            | Home / End                       | ⌘← / ⌘→                  |
 | Document start / end                | Ctrl+Home / Ctrl+End             | ⌘↑ / ⌘↓                  |
 | Delete word                         | Ctrl+Backspace / Ctrl+Delete     | ⌥Backspace / ⌥Delete     |
+| Insert line below / above           | Ctrl+Enter / Ctrl+Shift+Enter    | ⌘Enter / ⇧⌘Enter         |
+| Move line up / down                 | Alt+↑ / ↓                        | ⌥↑ / ↓                   |
+| Copy line up / down                 | Shift+Alt+↑ / ↓                  | ⌥⇧↑ / ↓                  |
+| Delete line                         | Ctrl+Shift+K                     | ⇧⌘K                      |
+| Indent / outdent line               | Ctrl+] / Ctrl+[, Tab / Shift+Tab | ⌘] / ⌘[, Tab / ⇧Tab      |
+| Toggle line comment                 | Ctrl+/                           | ⌘/                       |
+| Go to matching bracket              | Ctrl+Shift+\                     | ⇧⌘\                      |
 | Add cursor above / below / at click | Ctrl+Alt+↑ / ↓, Alt+click        | ⌘⌥↑ / ↓, ⌥click          |
 | Select word / one cursor            | Double-click / Escape            | Double-click / Escape    |
+| Select line / all occurrences       | Ctrl+L / Ctrl+Shift+L            | ⌘L / ⇧⌘L                 |
+| Cursors at line ends / cursor undo  | Shift+Alt+I / Ctrl+U             | ⌥⇧I / ⌘U                 |
+| Scroll a line up / down             | Ctrl+↑ / ↓                       | ⌃↑ / ↓                   |
 | Go to definition                    | F12, Ctrl+click                  | F12, ⌘click              |
 | Trigger suggestions                 | Ctrl+Space                       | ⌃Space                   |
+
+With nothing selected, cut and copy take the whole line, and pasting it inserts it as a line
+above the cursor, as in VS Code. Tab indents when the selection spans lines. Toggle Line Comment
+uses the comment syntax the language's extension declares; languages without line comments (HTML,
+CSS) get a block comment around the lines.
 
 A minimap beside the scrollbar shows the whole document small, in its syntax colors. Click it to
 jump to that part of the file, or drag its slider to scroll. **View: Toggle Minimap** hides or

@@ -86,8 +86,8 @@ describe('keyToCommand', () => {
     expect(win(key('Enter', { ctrlKey: true }))).toBeNull()
   })
 
-  it('keeps Shift+Tab in the editor without inserting anything', () => {
-    expect(win(key('Tab', { shiftKey: true }))).toEqual({ kind: 'ignore' })
+  it('indents with Tab and outdents with Shift+Tab', () => {
+    expect(win(key('Tab', { shiftKey: true }))).toEqual({ kind: 'op', op: { type: 'outdent' } })
     expect(win(key('Tab'))).toMatchObject({ op: { type: 'tab' } })
   })
 })

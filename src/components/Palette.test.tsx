@@ -64,6 +64,7 @@ describe('Palette', () => {
       focus: vi.fn(),
       lineCount: () => 120,
       scrollToLine: vi.fn(),
+      scrollBy: vi.fn(),
       goToDefinition: vi.fn(),
       triggerSuggest: vi.fn(),
       showHover: vi.fn(),

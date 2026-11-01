@@ -1,3 +1,4 @@
+use std::collections::VecDeque;
 use std::fmt;
 use std::path::{Path, PathBuf};
 
@@ -33,6 +34,9 @@ impl fmt::Display for DocumentId {
 /// How far into a line visual columns are computed exactly (grapheme by
 /// grapheme, with tab stops). Past this they count characters.
 pub const EXACT_COLUMN_BYTES: usize = 4096;
+
+/// Most earlier selections kept for cursor undo.
+const MAX_CURSOR_HISTORY: usize = 100;
 
 #[derive(Debug, Clone)]
 pub struct EditorConfig {
@@ -87,6 +91,8 @@ pub struct Document {
   file: Option<FileBacking>,
   untitled_number: u32,
   saved_state: StateId,
+  /// Earlier selections, newest last, with the version they belong to.
+  cursor_history: VecDeque<(Version, Selections)>,
 }
 
 impl Document {
@@ -118,6 +124,7 @@ impl Document {
       }),
       untitled_number,
       saved_state,
+      cursor_history: VecDeque::new(),
     }
   }
 
@@ -274,6 +281,33 @@ impl Document {
       .record(changes, inverse, before, after, EditKind::Other, false);
     self.history.seal();
     Ok(true)
+  }
+
+  /// Records selections that were just replaced, for cursor undo.
+  pub(crate) fn remember_selections(&mut self, previous: Selections) {
+    if self.cursor_history.len() == MAX_CURSOR_HISTORY {
+      self.cursor_history.pop_front();
+    }
+    self
+      .cursor_history
+      .push_back((self.buffer.version(), previous));
+  }
+
+  /// Restores the selections from before the last selection change. Only
+  /// selections from the current text count: editing clears the history.
+  pub(crate) fn cursor_undo(&mut self) {
+    let version = self.buffer.version();
+    while let Some((at, selections)) = self.cursor_history.pop_back() {
+      if at != version {
+        self.cursor_history.clear();
+        return;
+      }
+      if selections != self.selections {
+        self.history.seal();
+        self.selections = selections;
+        return;
+      }
+    }
   }
 
   pub(crate) fn set_indentation(&mut self, tab_size: usize, insert_spaces: bool) {

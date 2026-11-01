@@ -777,6 +777,7 @@ file_extensions = ["html", "HTM"]
 grammar = "grammars/tree-sitter-html.wasm"
 highlights = "queries/html/highlights.scm"
 injections = "queries/html/injections.scm"
+block_comment = ["<!--", "-->"]
 
 [[languages]]
 id = "objective-c"
@@ -784,6 +785,7 @@ name = "Objective-C"
 file_names = ["Podfile"]
 grammar = "grammars/objc.wasm"
 highlights = "queries/objc.scm"
+line_comment = "//"
 
 [[language_servers]]
 name = "vscode-html-language-server"
@@ -806,8 +808,14 @@ root_markers = ["package.json"]
       html.injections.as_deref(),
       Some(Path::new("queries/html/injections.scm"))
     );
+    assert_eq!(html.line_comment, None);
+    assert_eq!(
+      html.block_comment,
+      Some(("<!--".to_owned(), "-->".to_owned()))
+    );
     let objc = &manifest.contributions.languages[1];
     assert_eq!(objc.grammar_name, "objective_c", "derived from the id");
+    assert_eq!(objc.line_comment.as_deref(), Some("//"));
     assert_eq!(objc.file_names, ["Podfile"]);
     let server = &manifest.contributions.language_servers[0];
     assert_eq!(server.command_line(), "vscode-html-language-server --stdio");
@@ -825,6 +833,8 @@ root_markers = ["package.json"]
     assert!(with("grammars/tree-sitter-html.wasm", "html.so").contains(".wasm"));
     assert!(with("queries/html/injections.scm", "/etc/x.scm").contains("inside"));
     assert!(with("id = \"objective-c\"", "id = \"html\"").contains("declared twice"));
+    assert!(with("line_comment = \"//\"", "line_comment = \"# \"").contains("line_comment"));
+    assert!(with("\"<!--\", \"-->\"", "\"<!--\", \"\"").contains("block_comment"));
     let name = LANGUAGES.replacen(
       "highlights = \"queries/objc.scm\"",
       "highlights = \"queries/objc.scm\"\ngrammar_name = \"Objective C\"",

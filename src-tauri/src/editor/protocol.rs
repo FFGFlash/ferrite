@@ -9,10 +9,12 @@
 use std::ops::Range;
 
 use ferrite_core::{
-  Direction, Document, EditorOp, KnownLines, LineText, Motion, Unit, VerticalDirection,
-  ViewportUpdate,
+  CommentTokens, Direction, Document, EditorOp, KnownLines, LineText, Motion, Unit,
+  VerticalDirection, ViewportUpdate,
 };
-use ferrite_text::{SearchQuery, TextBuffer, Utf16Position, Version};
+use ferrite_text::{
+  LineEnding, SearchQuery, TextBuffer, Utf16Position, Version, normalize_line_endings,
+};
 use serde::{Deserialize, Serialize};
 
 use super::syntax::LineHighlightsDto;
@@ -83,6 +85,15 @@ pub enum VerticalDto {
   Down,
 }
 
+impl From<VerticalDto> for VerticalDirection {
+  fn from(direction: VerticalDto) -> Self {
+    match direction {
+      VerticalDto::Up => Self::Up,
+      VerticalDto::Down => Self::Down,
+    }
+  }
+}
+
 #[derive(Debug, Clone, Copy, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum MotionDto {
@@ -133,8 +144,26 @@ pub enum OpDto {
   Insert {
     text: String,
   },
+  /// Pasted text; see [`OpContext::copied_lines`].
+  Paste {
+    text: String,
+  },
   Newline,
+  InsertLine {
+    direction: VerticalDto,
+  },
   Tab,
+  Indent,
+  Outdent,
+  /// Uses the comment syntax of the document's language.
+  ToggleComment,
+  MoveLines {
+    direction: VerticalDto,
+  },
+  CopyLines {
+    direction: VerticalDto,
+  },
+  DeleteLines,
   Delete {
     direction: DirectionDto,
     unit: UnitDto,
@@ -148,7 +177,10 @@ pub enum OpDto {
     page_lines: Option<usize>,
   },
   SelectAll,
+  SelectLine,
+  CursorsAtLineEnds,
   CollapseSelections,
+  CursorUndo,
   SetCursor {
     position: Position,
     extend: bool,
@@ -178,14 +210,40 @@ pub enum OpDto {
     replacement: String,
   },
   AddNextMatch,
+  SelectAllOccurrences,
+  JumpToBracket,
+}
+
+/// What some operations need besides the document.
+#[derive(Debug, Default)]
+pub struct OpContext {
+  /// The comment syntax of the document's language.
+  pub comments: CommentTokens,
+  /// The text last copied as whole lines. Pasting the same text pastes
+  /// whole lines.
+  pub copied_lines: Option<String>,
 }
 
 impl OpDto {
-  pub fn into_core(self, buffer: &TextBuffer) -> EditorOp {
+  pub fn into_core(self, buffer: &TextBuffer, context: &OpContext) -> EditorOp {
     match self {
       Self::Insert { text } => EditorOp::Insert(text),
+      Self::Paste { text } => EditorOp::Paste {
+        whole_lines: context
+          .copied_lines
+          .as_deref()
+          .is_some_and(|copied| same_text(copied, &text)),
+        text,
+      },
       Self::Newline => EditorOp::Newline,
+      Self::InsertLine { direction } => EditorOp::InsertLine(direction.into()),
       Self::Tab => EditorOp::Tab,
+      Self::Indent => EditorOp::Indent,
+      Self::Outdent => EditorOp::Outdent,
+      Self::ToggleComment => EditorOp::ToggleComment(context.comments.clone()),
+      Self::MoveLines { direction } => EditorOp::MoveLines(direction.into()),
+      Self::CopyLines { direction } => EditorOp::CopyLines(direction.into()),
+      Self::DeleteLines => EditorOp::DeleteLines,
       Self::Delete { direction, unit } => EditorOp::Delete {
         direction: match direction {
           DirectionDto::Backward => Direction::Backward,
@@ -220,7 +278,10 @@ impl OpDto {
         EditorOp::Move { motion, extend }
       }
       Self::SelectAll => EditorOp::SelectAll,
+      Self::SelectLine => EditorOp::SelectLine,
+      Self::CursorsAtLineEnds => EditorOp::CursorsAtLineEnds,
       Self::CollapseSelections => EditorOp::CollapseSelections,
+      Self::CursorUndo => EditorOp::CursorUndo,
       Self::SetCursor {
         position,
         extend,
@@ -233,10 +294,7 @@ impl OpDto {
       Self::SelectWord { position } => EditorOp::SelectWord {
         offset: position.to_offset(buffer),
       },
-      Self::AddCursor { direction } => EditorOp::AddCursor(match direction {
-        VerticalDto::Up => VerticalDirection::Up,
-        VerticalDto::Down => VerticalDirection::Down,
-      }),
+      Self::AddCursor { direction } => EditorOp::AddCursor(direction.into()),
       Self::Undo => EditorOp::Undo,
       Self::Redo => EditorOp::Redo,
       Self::FindNext { query, backward } => EditorOp::FindNext {
@@ -255,8 +313,16 @@ impl OpDto {
         replacement,
       },
       Self::AddNextMatch => EditorOp::AddNextMatch,
+      Self::SelectAllOccurrences => EditorOp::SelectAllOccurrences,
+      Self::JumpToBracket => EditorOp::JumpToBracket,
     }
   }
+}
+
+/// Whether two texts are the same apart from line endings, which the system
+/// clipboard may convert.
+pub fn same_text(a: &str, b: &str) -> bool {
+  normalize_line_endings(a, LineEnding::Lf) == normalize_line_endings(b, LineEnding::Lf)
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -639,7 +705,11 @@ mod tests {
       ]"#,
     );
     let buffer = TextBuffer::from_text("ab\n🦀x");
-    let core: Vec<_> = parsed.into_iter().map(|op| op.into_core(&buffer)).collect();
+    let context = OpContext::default();
+    let core: Vec<_> = parsed
+      .into_iter()
+      .map(|op| op.into_core(&buffer, &context))
+      .collect();
     assert_eq!(core[0], EditorOp::Insert("hi".into()));
     assert_eq!(
       core[2],
@@ -658,6 +728,48 @@ mod tests {
       }
     );
     assert_eq!(core[5], EditorOp::Undo);
+  }
+
+  #[test]
+  fn line_operations_take_their_context() {
+    let parsed = ops(
+      r#"[
+        {"type": "paste", "text": "a\r\n"},
+        {"type": "paste", "text": "b\n"},
+        {"type": "toggleComment"},
+        {"type": "moveLines", "direction": "down"},
+        {"type": "insertLine", "direction": "up"}
+      ]"#,
+    );
+    let context = OpContext {
+      comments: CommentTokens {
+        line: Some("#".into()),
+        block: None,
+      },
+      copied_lines: Some("a\n".into()),
+    };
+    let buffer = TextBuffer::from_text("");
+    let core: Vec<_> = parsed
+      .into_iter()
+      .map(|op| op.into_core(&buffer, &context))
+      .collect();
+    assert_eq!(
+      core[0],
+      EditorOp::Paste {
+        text: "a\r\n".into(),
+        whole_lines: true
+      }
+    );
+    assert!(matches!(
+      core[1],
+      EditorOp::Paste {
+        whole_lines: false,
+        ..
+      }
+    ));
+    assert_eq!(core[2], EditorOp::ToggleComment(context.comments.clone()));
+    assert_eq!(core[3], EditorOp::MoveLines(VerticalDirection::Down));
+    assert_eq!(core[4], EditorOp::InsertLine(VerticalDirection::Up));
   }
 
   #[test]

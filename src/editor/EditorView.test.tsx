@@ -164,12 +164,12 @@ describe('EditorView', () => {
     })
   })
 
-  it('inserts pasted text', async () => {
+  it('sends pasted text as a paste', async () => {
     const user = userEvent.setup()
     const { transport, applied } = fakeTransport(makeView(['']))
     const input = await renderEditor(transport)
     input.focus()
     await user.paste('pasted\ntext')
-    expect(applied[0]).toEqual([{ type: 'insert', text: 'pasted\ntext' }])
+    expect(applied[0]).toEqual([{ type: 'paste', text: 'pasted\ntext' }])
   })
 })

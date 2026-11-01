@@ -29,13 +29,38 @@ import {
   toggleTerminal,
   toggleTerminals,
 } from '../dock/dock'
-import { bindingsOf, commandLabel, formatKeybinding, listCommands, type Command } from './registry'
+import type { EditorOp } from '../ipc/editor'
+import {
+  bindingsOf,
+  commandLabel,
+  formatKeybinding,
+  listCommands,
+  type Command,
+  type Keybinding,
+} from './registry'
 
 const hasEditor = () => activeEditor.get() !== null
 const hasDocument = () => documentsStore.get().activeId !== null
 const hasWorkspace = () => workspaceStore.get().info !== null
 const hasTerminal = () => terminalsStore.get().activeId !== null
 const editor = () => activeEditor.get()
+
+/** A command that applies `op` in the active editor, bound while it has focus. */
+const editorOp = (
+  id: string,
+  category: string,
+  title: string,
+  keybinding: Keybinding,
+  op: EditorOp,
+): Command => ({
+  id,
+  category,
+  title,
+  keybinding,
+  editorFocus: true,
+  enabled: hasEditor,
+  run: () => editor()?.dispatch(op),
+})
 
 export const builtinCommands: Command[] = [
   { id: 'file.newFile', category: 'File', title: 'New File', keybinding: 'mod+n', run: newFile },
@@ -359,6 +384,67 @@ export const builtinCommands: Command[] = [
     editorFocus: true,
     enabled: hasEditor,
     run: () => editor()?.dispatch({ type: 'addNextMatch' }),
+  },
+  editorOp('editor.selectAllOccurrences', 'Selection', 'Select All Occurrences', 'mod+shift+l', {
+    type: 'selectAllOccurrences',
+  }),
+  editorOp('editor.expandLineSelection', 'Selection', 'Expand Line Selection', 'mod+l', {
+    type: 'selectLine',
+  }),
+  editorOp('editor.cursorsAtLineEnds', 'Selection', 'Add Cursors to Line Ends', 'alt+shift+i', {
+    type: 'cursorsAtLineEnds',
+  }),
+  editorOp('editor.cursorUndo', 'Selection', 'Cursor Undo', 'mod+u', { type: 'cursorUndo' }),
+  editorOp('editor.insertLineBelow', 'Edit', 'Insert Line Below', 'mod+enter', {
+    type: 'insertLine',
+    direction: 'down',
+  }),
+  editorOp('editor.insertLineAbove', 'Edit', 'Insert Line Above', 'mod+shift+enter', {
+    type: 'insertLine',
+    direction: 'up',
+  }),
+  editorOp('editor.moveLinesUp', 'Edit', 'Move Line Up', 'alt+arrowup', {
+    type: 'moveLines',
+    direction: 'up',
+  }),
+  editorOp('editor.moveLinesDown', 'Edit', 'Move Line Down', 'alt+arrowdown', {
+    type: 'moveLines',
+    direction: 'down',
+  }),
+  editorOp('editor.copyLinesUp', 'Edit', 'Copy Line Up', 'alt+shift+arrowup', {
+    type: 'copyLines',
+    direction: 'up',
+  }),
+  editorOp('editor.copyLinesDown', 'Edit', 'Copy Line Down', 'alt+shift+arrowdown', {
+    type: 'copyLines',
+    direction: 'down',
+  }),
+  editorOp('editor.deleteLines', 'Edit', 'Delete Line', 'mod+shift+k', { type: 'deleteLines' }),
+  editorOp('editor.indentLines', 'Edit', 'Indent Line', 'mod+]', { type: 'indent' }),
+  editorOp('editor.outdentLines', 'Edit', 'Outdent Line', 'mod+[', { type: 'outdent' }),
+  editorOp('editor.toggleLineComment', 'Edit', 'Toggle Line Comment', 'mod+/', {
+    type: 'toggleComment',
+  }),
+  editorOp('editor.jumpToBracket', 'Go', 'Go to Bracket', 'mod+shift+\\', {
+    type: 'jumpToBracket',
+  }),
+  {
+    id: 'editor.scrollLineUp',
+    category: 'View',
+    title: 'Scroll Line Up',
+    keybinding: 'ctrl+arrowup',
+    editorFocus: true,
+    enabled: hasEditor,
+    run: () => editor()?.scrollBy(-1),
+  },
+  {
+    id: 'editor.scrollLineDown',
+    category: 'View',
+    title: 'Scroll Line Down',
+    keybinding: 'ctrl+arrowdown',
+    editorFocus: true,
+    enabled: hasEditor,
+    run: () => editor()?.scrollBy(1),
   },
   {
     id: 'editor.goToDefinition',

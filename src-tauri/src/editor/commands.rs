@@ -18,13 +18,14 @@ use tauri_plugin_clipboard_manager::ClipboardExt;
 use super::EditorState;
 use super::minimap::{MinimapDto, Snapshot};
 use super::protocol::{
-  DocumentSummary, EditorView, KnownDto, MAX_OPS_PER_BATCH, OpDto, SearchQueryDto, SearchView,
-  Viewport,
+  DocumentSummary, EditorView, KnownDto, MAX_OPS_PER_BATCH, OpContext, OpDto, SearchQueryDto,
+  SearchView, Viewport, same_text,
 };
 use crate::backups::BackupState;
 use crate::dialogs::{self, UnsavedChoice};
 use crate::error::CommandError;
 use crate::extensions::ExtensionsState;
+use crate::languages::LanguagesState;
 use crate::lsp::LspState;
 use crate::paths;
 use crate::perf::Perf;
@@ -244,14 +245,34 @@ pub fn editor_apply(
   }
   let mut editor = state.lock();
   let document = editor.document_mut(DocumentId::from_raw(id))?;
+  let context = op_context(&app, &state, document, &ops);
   for op in ops {
-    let op = op.into_core(document.buffer());
+    let op = op.into_core(document.buffer(), &context);
     match document.apply(op) {
       Ok(_) | Err(CoreError::Search(_)) => {}
       Err(error) => return Err(error.into()),
     }
   }
   Ok(build_view(&app, document, viewport, known, search))
+}
+
+/// The context the operations in `ops` need, looked up only if they need it.
+fn op_context(
+  app: &AppHandle,
+  state: &EditorState,
+  document: &Document,
+  ops: &[OpDto],
+) -> OpContext {
+  let mut context = OpContext::default();
+  if ops.iter().any(|op| matches!(op, OpDto::ToggleComment))
+    && let Some(path) = document.path()
+  {
+    context.comments = app.state::<LanguagesState>().comments_for(path);
+  }
+  if ops.iter().any(|op| matches!(op, OpDto::Paste { .. })) {
+    context.copied_lines = state.copied_lines();
+  }
+  context
 }
 
 #[derive(Debug, Clone, Copy, Deserialize)]
@@ -263,8 +284,10 @@ pub enum ClipboardAction {
 }
 
 /// Copies (or cuts) the selected text to the system clipboard, or pastes
-/// from it. The text goes straight between the backend and the clipboard
-/// without crossing IPC. (Keyboard paste arrives as an insert instead.)
+/// from it. With nothing selected, copies (or cuts) the cursors' whole
+/// lines, which then paste as whole lines. The text goes straight between
+/// the backend and the clipboard without crossing IPC. (Keyboard paste
+/// arrives as a `paste` operation instead.)
 #[tauri::command]
 pub fn editor_clipboard(
   app: AppHandle,
@@ -281,23 +304,34 @@ pub fn editor_clipboard(
       .clipboard()
       .read_text()
       .map_err(|error| CommandError::new("clipboard", format!("Could not paste: {error}")))?;
+    let whole_lines = state
+      .copied_lines()
+      .is_some_and(|copied| same_text(&copied, &text));
     let mut editor = state.lock();
     let document = editor.document_mut(DocumentId::from_raw(id))?;
     if !text.is_empty() {
-      document.apply(EditorOp::Insert(text))?;
+      document.apply(EditorOp::Paste { text, whole_lines })?;
     }
     return Ok(build_view(&app, document, viewport, known, search));
   }
   let mut editor = state.lock();
   let document = editor.document_mut(DocumentId::from_raw(id))?;
-  if let Some(text) = document.selected_text() {
-    app
-      .clipboard()
-      .write_text(text)
-      .map_err(|error| CommandError::new("clipboard", format!("Could not copy: {error}")))?;
-    if let ClipboardAction::Cut = action {
-      document.apply(EditorOp::DeleteSelection)?;
-    }
+  let (text, whole_lines) = match document.selected_text() {
+    Some(text) => (text, false),
+    None => (document.cursor_lines_text(), true),
+  };
+  let remembered = whole_lines.then(|| text.clone());
+  app
+    .clipboard()
+    .write_text(text)
+    .map_err(|error| CommandError::new("clipboard", format!("Could not copy: {error}")))?;
+  state.set_copied_lines(remembered);
+  if let ClipboardAction::Cut = action {
+    document.apply(if whole_lines {
+      EditorOp::DeleteLines
+    } else {
+      EditorOp::DeleteSelection
+    })?;
   }
   Ok(build_view(&app, document, viewport, known, search))
 }

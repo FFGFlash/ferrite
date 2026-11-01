@@ -61,6 +61,20 @@ describe('keybindings', () => {
     expect(matchesKeybinding('mod+,', key(',', { ctrlKey: true }), false)).toBe(true)
   })
 
+  it('matches and shows arrow keys', () => {
+    expect(matchesKeybinding('alt+arrowup', key('ArrowUp', { altKey: true }), false)).toBe(true)
+    expect(matchesKeybinding('alt+arrowup', key('ArrowDown', { altKey: true }), false)).toBe(false)
+    expect(formatKeybinding('alt+shift+arrowdown', false)).toBe('Alt+Shift+↓')
+    expect(formatKeybinding('alt+shift+arrowdown', true)).toBe('⌥⇧↓')
+  })
+
+  it('matches Option+letter on macOS by the physical key', () => {
+    // Option+Shift+I types "ˆ" on a US Mac keyboard.
+    const circumflex = key('ˆ', { altKey: true, shiftKey: true, code: 'KeyI' })
+    expect(matchesKeybinding('alt+shift+i', circumflex, true)).toBe(true)
+    expect(matchesKeybinding('alt+shift+j', circumflex, true)).toBe(false)
+  })
+
   it('formats bindings for display', () => {
     expect(formatKeybinding('mod+shift+p', false)).toBe('Ctrl+Shift+P')
     expect(formatKeybinding('mod+shift+p', true)).toBe('⇧⌘P')

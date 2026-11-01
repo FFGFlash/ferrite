@@ -8,6 +8,7 @@ use ferrite_text::{ChangeSet, Edit, SearchQuery, normalize_line_endings};
 use crate::document::Document;
 use crate::error::CoreError;
 use crate::history::EditKind;
+use crate::lines::CommentTokens;
 use crate::selection::{Selection, Selections};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -54,10 +55,32 @@ pub enum EditorOp {
   /// Replaces each selection with the text. Line breaks are converted to the
   /// document's line ending.
   Insert(String),
+  /// Like [`Self::Insert`], except that text copied as whole lines (see
+  /// [`Document::cursor_lines_text`]) goes above each cursor's line when
+  /// nothing is selected.
+  Paste {
+    text: String,
+    whole_lines: bool,
+  },
   /// Inserts a line break, keeping the current line's indentation.
   Newline,
-  /// Inserts a tab, or spaces to the next tab stop.
+  /// Inserts a line above or below each selection's lines and moves there.
+  InsertLine(VerticalDirection),
+  /// Inserts a tab, or spaces to the next tab stop. Indents the lines
+  /// instead when a selection spans several.
   Tab,
+  /// Indents the selected lines to the next tab stop.
+  Indent,
+  /// Outdents the selected lines to the previous tab stop.
+  Outdent,
+  /// Comments out the selected lines, or uncomments them.
+  ToggleComment(CommentTokens),
+  /// Swaps the selected lines with the line above or below.
+  MoveLines(VerticalDirection),
+  /// Duplicates the selected lines above or below.
+  CopyLines(VerticalDirection),
+  /// Deletes the selected lines.
+  DeleteLines,
   /// Deletes each non-empty selection, or one unit next to each cursor.
   Delete {
     direction: Direction,
@@ -70,8 +93,15 @@ pub enum EditorOp {
     extend: bool,
   },
   SelectAll,
+  /// Selects the selections' whole lines, or extends by one more line.
+  SelectLine,
+  /// Puts a cursor at the end of each line in the selections.
+  CursorsAtLineEnds,
   /// Leaves a single cursor at the primary selection's head.
   CollapseSelections,
+  /// Restores the selections from before the last selection change, if the
+  /// text hasn't changed since.
+  CursorUndo,
   /// Places the cursor (snapped to a grapheme boundary). `extend` moves the
   /// primary selection's head instead; `add` adds a new cursor.
   SetCursor {
@@ -111,6 +141,11 @@ pub enum EditorOp {
   /// Selects the word at the cursor, or adds a selection at the next
   /// occurrence of the primary selection's text.
   AddNextMatch,
+  /// Selects every occurrence of the primary selection's text, or of the
+  /// whole word at the cursor.
+  SelectAllOccurrences,
+  /// Moves each cursor to the matching bracket.
+  JumpToBracket,
 }
 
 impl Document {
@@ -118,8 +153,16 @@ impl Document {
   pub fn apply(&mut self, op: EditorOp) -> Result<bool, CoreError> {
     match op {
       EditorOp::Insert(text) => self.insert(&text),
+      EditorOp::Paste { text, whole_lines } => self.paste(&text, whole_lines),
       EditorOp::Newline => self.newline(),
+      EditorOp::InsertLine(direction) => self.insert_line(direction),
       EditorOp::Tab => self.tab(),
+      EditorOp::Indent => self.shift_lines(false),
+      EditorOp::Outdent => self.shift_lines(true),
+      EditorOp::ToggleComment(tokens) => self.toggle_comment(&tokens),
+      EditorOp::MoveLines(direction) => self.move_lines(direction),
+      EditorOp::CopyLines(direction) => self.copy_lines(direction),
+      EditorOp::DeleteLines => self.delete_lines(),
       EditorOp::Delete { direction, unit } => self.delete(direction, unit),
       EditorOp::DeleteSelection => {
         self.edit_selections(|_, s| (s.range(), String::new()), EditKind::Other, false)
@@ -133,8 +176,20 @@ impl Document {
         self.set_selections(Selections::single(Selection::new(0, self.buffer.len())));
         Ok(false)
       }
+      EditorOp::SelectLine => {
+        self.select_line();
+        Ok(false)
+      }
+      EditorOp::CursorsAtLineEnds => {
+        self.cursors_at_line_ends();
+        Ok(false)
+      }
       EditorOp::CollapseSelections => {
         self.set_selections(Selections::cursor(self.selections.primary().head));
+        Ok(false)
+      }
+      EditorOp::CursorUndo => {
+        self.cursor_undo();
         Ok(false)
       }
       EditorOp::SetCursor {
@@ -172,6 +227,14 @@ impl Document {
       }
       EditorOp::AddNextMatch => {
         self.add_next_match();
+        Ok(false)
+      }
+      EditorOp::SelectAllOccurrences => {
+        self.select_all_occurrences();
+        Ok(false)
+      }
+      EditorOp::JumpToBracket => {
+        self.jump_to_bracket();
         Ok(false)
       }
     }
@@ -222,6 +285,13 @@ impl Document {
   }
 
   fn tab(&mut self) -> Result<bool, CoreError> {
+    let spans_lines = self
+      .selections
+      .iter()
+      .any(|s| self.buffer.line_of(s.start()) != self.buffer.line_of(s.end()));
+    if spans_lines {
+      return self.shift_lines(false);
+    }
     self.edit_selections(
       |document, s| {
         let text = if document.insert_spaces {
@@ -327,8 +397,9 @@ impl Document {
   pub(crate) fn set_selections(&mut self, selections: Selections) {
     if selections != self.selections {
       self.history.seal();
+      let previous = std::mem::replace(&mut self.selections, selections);
+      self.remember_selections(previous);
     }
-    self.selections = selections;
   }
 
   fn moved(&self, s: Selection, motion: Motion, extend: bool) -> Selection {
@@ -438,46 +509,7 @@ mod tests {
   use ferrite_workspace::FileStamp;
 
   use super::*;
-  use crate::document::{DocumentId, EditorConfig};
-
-  /// Builds a document from text where `|` marks a cursor and `[...]` a
-  /// selection whose head is at `]`.
-  fn doc(marked: &str) -> Document {
-    let mut text = String::new();
-    let mut selections = Vec::new();
-    let mut open = None;
-    for c in marked.chars() {
-      match c {
-        '|' => selections.push(Selection::cursor(text.len())),
-        '[' => open = Some(text.len()),
-        ']' => selections.push(Selection::new(open.take().expect("balanced"), text.len())),
-        c => text.push(c),
-      }
-    }
-    let mut document = Document::new(DocumentId(1), &text, None, 1, &EditorConfig::default());
-    document.selections = Selections::new(selections, 0);
-    document
-  }
-
-  fn render(document: &Document) -> String {
-    let mut text = document.buffer.contents();
-    for s in document.selections.iter().rev() {
-      if s.is_empty() {
-        text.insert(s.head, '|');
-      } else {
-        text.insert(s.end(), ']');
-        text.insert(s.start(), '[');
-      }
-    }
-    text
-  }
-
-  fn run(document: &mut Document, ops: impl IntoIterator<Item = EditorOp>) -> String {
-    for op in ops {
-      document.apply(op).expect("operation applies");
-    }
-    render(document)
-  }
+  use crate::testing::{doc, render, run};
 
   fn insert(text: &str) -> EditorOp {
     EditorOp::Insert(text.to_owned())
@@ -675,6 +707,32 @@ mod tests {
       run(&mut doc("|e\u{301}x"), [set(2, false, false)]),
       "|e\u{301}x"
     );
+  }
+
+  #[test]
+  fn cursor_undo_restores_earlier_selections_until_the_text_changes() {
+    let mut document = doc("|foo bar");
+    run(
+      &mut document,
+      [
+        move_by(Motion::WordRight, false),
+        move_by(Motion::WordRight, true),
+      ],
+    );
+    assert_eq!(run(&mut document, [EditorOp::CursorUndo]), "foo| bar");
+    assert_eq!(run(&mut document, [EditorOp::CursorUndo]), "|foo bar");
+    assert_eq!(run(&mut document, [EditorOp::CursorUndo]), "|foo bar");
+
+    let mut document = doc("|ab");
+    run(
+      &mut document,
+      [
+        move_by(Motion::Right, false),
+        insert("x"),
+        EditorOp::CursorUndo,
+      ],
+    );
+    assert_eq!(render(&document), "ax|b");
   }
 
   #[test]

@@ -118,8 +118,18 @@ See [ADR 0002](adr/0002-text-model-and-editor-protocol.md) for the reasoning.
 - **Operations** (`EditorOp`): insert, newline (keeps indentation), tab (spaces to the next tab
   stop by default), delete by grapheme or word, motions, select all/word, set or add cursors, add
   a cursor above or below, undo, redo, find next/previous, select all matches, replace, replace
-  all (one undo step, with `$1`/`${name}` expansion for regex queries), and add next occurrence
-  (Ctrl+D). Per-selection edits are merged into a single `ChangeSet`.
+  all (one undo step, with `$1`/`${name}` expansion for regex queries), add next occurrence
+  (Ctrl+D), and select all occurrences. Per-selection edits are merged into a single `ChangeSet`.
+- **Line operations** (`lines.rs`) work on the blocks of whole lines the selections cover; a
+  selection ending at the start of a line doesn't cover it. They insert a line above or below,
+  move or copy lines up or down, delete lines, indent and outdent to tab stops, toggle comments
+  (with the language's `CommentTokens`, falling back to a block comment), select lines, and put
+  cursors at line ends. With nothing selected, copying takes the cursors' whole lines
+  (`cursor_lines_text`); the backend remembers that text, and a `paste` of the same text inserts
+  it above the cursors' lines. Go to bracket (`brackets.rs`) scans the text for the matching
+  bracket, so brackets in strings and comments count.
+- **Cursor undo** keeps up to 100 earlier selections, each tagged with the text version; editing
+  the text makes them stale.
 - **Find** compiles a `SearchQuery` (literal or regex; case-sensitive; whole word) with
   `regex-cursor`, which searches the rope's chunks directly without copying the text. `^`/`$`
   match per line, including before CRLF. Counts stop at 20,000 matches and are reported as
@@ -284,7 +294,8 @@ editor-only keys. One capture-phase listener runs bound commands. While a termin
 only commands flagged `terminal` (the palette, Go to File, showing views, switching tabs,
 settings, terminal commands) run; other keys go to the shell. Bindings with Shift and
 punctuation (`` ctrl+shift+` ``) also match by the physical key, since the browser reports the
-shifted character. The **command palette** lists
+shifted character, as do bindings with Alt and a letter, since Option changes the character on
+macOS. The **command palette** lists
 enabled commands with their shortcuts (`>`), finds files (no prefix), and goes to a line (`:`).
 Editing keys that need the editor's textarea (arrows, Backspace, clipboard) stay in
 `editor/keymap.ts`. Extension commands, declared in their manifests, are registered into the

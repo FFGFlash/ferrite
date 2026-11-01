@@ -82,6 +82,29 @@ impl Document {
     self.set_selections(Selections::new(selections, primary));
   }
 
+  /// Selects every occurrence of the primary selection's text, or with an
+  /// empty selection, of the word at the cursor (matching whole words).
+  pub(crate) fn select_all_occurrences(&mut self) {
+    let primary = self.selections.primary();
+    let range = if primary.is_empty() {
+      self.buffer.word_at(primary.head)
+    } else {
+      primary.range()
+    };
+    let text = self.buffer.text_in(range);
+    if text.trim().is_empty() {
+      return;
+    }
+    let whole_word = primary.is_empty() && text.chars().all(|c| c.is_alphanumeric() || c == '_');
+    let query = SearchQuery {
+      whole_word,
+      ..SearchQuery::literal(text)
+    };
+    if let Ok(searcher) = query.compile() {
+      self.select_all_matches(&searcher);
+    }
+  }
+
   pub(crate) fn replace_current(
     &mut self,
     searcher: &Searcher,
@@ -279,6 +302,25 @@ mod tests {
       .apply(EditorOp::Insert("baz".into()))
       .expect("applies");
     assert_eq!(document.buffer().contents(), "baz bar baz baz");
+  }
+
+  #[test]
+  fn select_all_occurrences_uses_the_selection_or_the_whole_word() {
+    let mut document = doc("foo food foo", 1);
+    document
+      .apply(EditorOp::SelectAllOccurrences)
+      .expect("applies");
+    assert_eq!(ranges(&document), vec![0..3, 9..12]);
+    document.selections = Selections::single(Selection::new(0, 3));
+    document
+      .apply(EditorOp::SelectAllOccurrences)
+      .expect("applies");
+    assert_eq!(ranges(&document), vec![0..3, 4..7, 9..12]);
+    let mut document = doc("a  b", 2);
+    document
+      .apply(EditorOp::SelectAllOccurrences)
+      .expect("applies");
+    assert_eq!(ranges(&document), vec![2..2]);
   }
 
   #[test]
