@@ -1,6 +1,7 @@
 //! Syntax highlighting for open documents.
 //!
-//! Each document of a known language keeps a Tree-sitter tree. Edits update
+//! Each document of a known language keeps a syntax tree (with layers for
+//! languages injected into it). Edits update
 //! the tree's positions right away; then a small incremental reparse runs
 //! inline within [`INLINE_PARSE_BUDGET`], and anything longer (first parses,
 //! large documents) runs on the worker pool over a snapshot, after which the
@@ -15,11 +16,13 @@
 use std::collections::HashMap;
 use std::hash::{DefaultHasher, Hash, Hasher};
 use std::ops::Range;
-use std::sync::{Mutex, MutexGuard, PoisonError};
+use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::{Duration, Instant};
 
 use ferrite_core::{Document, DocumentId, MAX_DISPLAY_LINE_BYTES};
-use ferrite_syntax::{LanguageId, Span, Tree, apply_edits, deadline, highlight_lines, parse};
+use ferrite_syntax::{
+  Language, Registry, Span, SyntaxTree, apply_edits, deadline, highlight_lines, parse,
+};
 use ferrite_tasks::Priority;
 use ferrite_text::{TextBuffer, TextSnapshot, Version};
 use serde::Serialize;
@@ -27,6 +30,7 @@ use tauri::{AppHandle, Manager};
 
 use super::protocol::KnownDto;
 use crate::events::{self, AppEvent};
+use crate::languages::LanguagesState;
 use crate::perf::Perf;
 
 /// Larger documents are not highlighted.
@@ -50,15 +54,18 @@ struct Mirror {
 }
 
 struct ParseJob {
-  language: LanguageId,
+  language: Language,
+  registry: Arc<Registry>,
   snapshot: TextSnapshot,
-  old: Option<Tree>,
+  old: Option<SyntaxTree>,
   version: Version,
 }
 
 struct DocumentSyntax {
-  language: LanguageId,
-  tree: Option<Tree>,
+  language: Language,
+  /// Where injected languages are looked up.
+  registry: Arc<Registry>,
+  tree: Option<SyntaxTree>,
   /// The text version `tree` is a parse of.
   parsed: Version,
   /// The version `tree`'s positions have been edited to.
@@ -69,9 +76,10 @@ struct DocumentSyntax {
 }
 
 impl DocumentSyntax {
-  fn new(language: LanguageId) -> Self {
+  fn new(language: Language, registry: Arc<Registry>) -> Self {
     Self {
       language,
+      registry,
       tree: None,
       parsed: Version::INITIAL,
       edited: Version::INITIAL,
@@ -101,7 +109,8 @@ impl DocumentSyntax {
     }
     if let Some(tree) = &self.tree
       && let Ok(Some(tree)) = parse(
-        self.language,
+        &self.language,
+        &self.registry,
         buffer,
         Some(tree),
         deadline(INLINE_PARSE_BUDGET),
@@ -113,7 +122,8 @@ impl DocumentSyntax {
     }
     self.pending = Some(version);
     Some(ParseJob {
-      language: self.language,
+      language: self.language.clone(),
+      registry: self.registry.clone(),
       snapshot: buffer.snapshot(),
       old: self.tree.clone(),
       version,
@@ -122,7 +132,7 @@ impl DocumentSyntax {
 
   /// Takes the result of a background parse of `version`. Returns whether
   /// the highlighting may have changed.
-  fn finish(&mut self, version: Version, tree: Option<Tree>, buffer: &TextBuffer) -> bool {
+  fn finish(&mut self, version: Version, tree: Option<SyntaxTree>, buffer: &TextBuffer) -> bool {
     if self.pending == Some(version) {
       self.pending = None;
     }
@@ -152,13 +162,7 @@ impl DocumentSyntax {
     chunks: &[Range<usize>],
   ) -> Vec<LineHighlightsDto> {
     let spans = match &self.tree {
-      Some(tree) => highlight_lines(
-        self.language,
-        tree,
-        buffer,
-        lines.clone(),
-        MAX_DISPLAY_LINE_BYTES,
-      ),
+      Some(tree) => highlight_lines(tree, buffer, lines.clone(), MAX_DISPLAY_LINE_BYTES),
       None => vec![Vec::new(); lines.len()],
     };
     let carried = self.carried(buffer, known, lines.clone(), chunks);
@@ -291,7 +295,7 @@ impl SyntaxStates {
     chunks: &[Range<usize>],
   ) -> Vec<LineHighlightsDto> {
     let mut documents = self.lock();
-    let Some(syntax) = Self::entry(&mut documents, document) else {
+    let Some(syntax) = Self::entry(app, &mut documents, document) else {
       return Vec::new();
     };
     let started = Instant::now();
@@ -310,11 +314,11 @@ impl SyntaxStates {
   /// highlighting without the editor lock (the minimap). Unlike
   /// [`Self::highlights`], this leaves alone what the editor's view has been
   /// sent. Called with the editor locked.
-  pub fn tree(&self, app: &AppHandle, document: &Document) -> Option<(LanguageId, Tree)> {
+  pub fn tree(&self, app: &AppHandle, document: &Document) -> Option<SyntaxTree> {
     let mut documents = self.lock();
-    let syntax = Self::entry(&mut documents, document)?;
+    let syntax = Self::entry(app, &mut documents, document)?;
     let job = syntax.update(document.buffer());
-    let tree = syntax.tree.clone().map(|tree| (syntax.language, tree));
+    let tree = syntax.tree.clone();
     drop(documents);
     if let Some(job) = job {
       spawn_parse(app, document.id(), job);
@@ -322,17 +326,21 @@ impl SyntaxStates {
     tree
   }
 
-  /// The syntax state of `document`, created or reset for its language; or
-  /// `None`, dropping any state, if it isn't highlighted.
+  /// The syntax state of `document`, created or reset for its language
+  /// (or when the languages change); or `None`, dropping any state, if it
+  /// isn't highlighted.
   fn entry<'a>(
+    app: &AppHandle,
     documents: &'a mut HashMap<DocumentId, DocumentSyntax>,
     document: &Document,
   ) -> Option<&'a mut DocumentSyntax> {
     let id = document.id();
+    let registry = app.state::<LanguagesState>().registry();
     let language = document
       .path()
-      .and_then(LanguageId::from_path)
-      .filter(|_| document.buffer().len() <= MAX_SYNTAX_BYTES);
+      .and_then(|path| registry.for_path(path))
+      .filter(|_| document.buffer().len() <= MAX_SYNTAX_BYTES)
+      .cloned();
     let Some(language) = language else {
       documents.remove(&id);
       return None;
@@ -341,11 +349,11 @@ impl SyntaxStates {
       documents
         .entry(id)
         .and_modify(|syntax| {
-          if syntax.language != language {
-            *syntax = DocumentSyntax::new(language);
+          if syntax.language != language || !Arc::ptr_eq(&syntax.registry, &registry) {
+            *syntax = DocumentSyntax::new(language.clone(), registry.clone());
           }
         })
-        .or_insert_with(|| DocumentSyntax::new(language)),
+        .or_insert_with(|| DocumentSyntax::new(language.clone(), registry.clone())),
     )
   }
 
@@ -363,9 +371,13 @@ fn spawn_parse(app: &AppHandle, id: DocumentId, job: ParseJob) {
     Some(format!("parse:{id}")),
     move |token| {
       let started = Instant::now();
-      let tree = match parse(job.language, &job.snapshot, job.old.as_ref(), || {
-        token.is_cancelled()
-      }) {
+      let tree = match parse(
+        &job.language,
+        &job.registry,
+        &job.snapshot,
+        job.old.as_ref(),
+        || token.is_cancelled(),
+      ) {
         Ok(tree) => tree,
         Err(error) => {
           tracing::error!(%error, "syntax highlighting is unavailable");
@@ -407,13 +419,23 @@ mod tests {
 
   use super::*;
 
+  fn rust() -> DocumentSyntax {
+    let registry = Arc::new(crate::languages::examples(&["rust"]));
+    let rust = registry.get("rust").expect("the example").clone();
+    DocumentSyntax::new(rust, registry)
+  }
+
+  fn run(job: &ParseJob) -> Option<SyntaxTree> {
+    parse(&job.language, &job.registry, &job.snapshot, None, || false).expect("grammar")
+  }
+
   fn parsed(text: &str) -> (TextBuffer, DocumentSyntax) {
     let buffer = TextBuffer::from_text(text);
-    let mut syntax = DocumentSyntax::new(LanguageId::Rust);
+    let mut syntax = rust();
     let job = syntax
       .update(&buffer)
       .expect("first parse runs in the background");
-    let tree = parse(job.language, &job.snapshot, None, || false).expect("grammar");
+    let tree = run(&job);
     assert!(syntax.finish(job.version, tree, &buffer));
     (buffer, syntax)
   }
@@ -474,17 +496,23 @@ mod tests {
   #[test]
   fn stale_background_results_are_caught_up_or_dropped() {
     let mut buffer = TextBuffer::from_text("fn a() {}\n");
-    let mut syntax = DocumentSyntax::new(LanguageId::Rust);
+    let mut syntax = rust();
     let job = syntax.update(&buffer).expect("background parse");
     assert!(syntax.update(&buffer).is_none(), "one parse at a time");
     buffer
       .apply(&ChangeSet::single(Edit::insert(0, "\n")).expect("valid"))
       .expect("applies");
-    let tree = parse(job.language, &job.snapshot, None, || false).expect("grammar");
+    let tree = run(&job);
     assert!(syntax.finish(job.version, tree, &buffer));
     let tree = syntax.tree.as_ref().expect("tree");
     assert_eq!(
-      tree.root_node().child(0).expect("fn").start_position().row,
+      tree
+        .tree()
+        .root_node()
+        .child(0)
+        .expect("fn")
+        .start_position()
+        .row,
       1
     );
     assert_eq!(syntax.edited, buffer.version());

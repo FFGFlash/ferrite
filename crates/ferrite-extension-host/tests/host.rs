@@ -831,6 +831,135 @@ fn the_icons_example_contributes_an_icon_theme() {
 }
 
 #[test]
+fn the_language_examples_load_and_declare_their_languages_and_servers() {
+  let examples = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../extensions");
+  let folders = ["rust", "typescript", "javascript", "json", "toml", "python"];
+  let options = HostOptions {
+    editor_version: semver::Version::new(0, 1, 0),
+    extensions_dir: None,
+    development: folders.iter().map(|folder| examples.join(folder)).collect(),
+    permissions_file: None,
+    settings: BTreeMap::new(),
+    limits: limits(),
+  };
+  let host = ExtensionHost::new(Arc::new(Fake::default()), options);
+  host.load();
+  for status in host.statuses() {
+    assert_ne!(
+      status.state,
+      ExtensionState::Invalid,
+      "{}: {:?}",
+      status.name,
+      status.error
+    );
+  }
+  let mut languages: Vec<String> = host.languages().into_iter().map(|l| l.id).collect();
+  languages.sort();
+  assert_eq!(
+    languages,
+    [
+      "javascript",
+      "json",
+      "python",
+      "rust",
+      "toml",
+      "typescript",
+      "typescriptreact"
+    ]
+  );
+  for language in host.languages() {
+    assert!(language.grammar.is_file(), "{}", language.grammar.display());
+  }
+  // Servers wait for the user's permission.
+  assert!(host.language_servers().is_empty());
+  for id in [
+    "example.rust",
+    "example.typescript",
+    "example.javascript",
+    "example.python",
+  ] {
+    host.set_permissions(id, &[Permission::LanguageServers]);
+  }
+  let mut servers: Vec<String> = host
+    .language_servers()
+    .into_iter()
+    .map(|s| s.name)
+    .collect();
+  servers.sort();
+  assert_eq!(
+    servers,
+    [
+      "pyright",
+      "rust-analyzer",
+      "typescript-language-server",
+      "typescript-language-server"
+    ],
+    "JavaScript and TypeScript declare the same server, which settings merge"
+  );
+}
+
+#[test]
+fn the_html_css_example_contributes_languages_and_servers_once_allowed() {
+  let example = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../extensions/html-css");
+  let dir = tempfile::tempdir().expect("temp dir");
+  let fake = Arc::new(Fake::default());
+  let options = HostOptions {
+    editor_version: semver::Version::new(0, 1, 0),
+    extensions_dir: None,
+    development: vec![example.clone()],
+    permissions_file: Some(dir.path().join("permissions.json")),
+    settings: BTreeMap::new(),
+    limits: limits(),
+  };
+  let host = ExtensionHost::new(fake.clone(), options);
+  host.load();
+  let status = &host.statuses()[0];
+  assert_eq!(status.id, "example.html-css");
+  assert_eq!(
+    status.state,
+    ExtensionState::AwaitingPermission,
+    "{:?}",
+    status.error
+  );
+  let permission = &status.permissions[0];
+  assert_eq!(permission.permission, Permission::LanguageServers);
+  assert!(
+    permission
+      .description
+      .contains("vscode-html-language-server --stdio; vscode-css-language-server --stdio"),
+    "{}",
+    permission.description
+  );
+
+  // Languages don't wait for the permission; servers do.
+  let languages = host.languages();
+  let ids: Vec<&str> = languages.iter().map(|l| l.id.as_str()).collect();
+  assert_eq!(ids, ["html", "css"]);
+  assert_eq!(
+    languages[0].grammar,
+    example.join("grammars/tree-sitter-html.wasm")
+  );
+  assert!(languages[0].grammar.is_file());
+  assert!(host.language_servers().is_empty());
+
+  host.set_permissions("example.html-css", &[Permission::LanguageServers]);
+  fake.wait_for("a state change", |n| {
+    matches!(n, Notification::ExtensionsChanged)
+  });
+  assert_eq!(host.statuses()[0].state, ExtensionState::Ready);
+  let servers = host.language_servers();
+  assert_eq!(servers.len(), 2);
+  assert_eq!(servers[0].command, "vscode-html-language-server");
+  assert_eq!(servers[1].languages, ["css"]);
+
+  host.set_permissions("example.html-css", &[]);
+  assert!(host.language_servers().is_empty());
+  assert_eq!(host.statuses()[0].state, ExtensionState::Ready, "decided");
+  host.set_enabled("example.html-css", false);
+  assert!(host.languages().is_empty());
+}
+
+#[test]
 fn todos_example_highlights_lists_and_counts_markers() {
   let s = setup("todos", "todos", Some(ALL), "", |m| m);
   let id = s.fake.open(

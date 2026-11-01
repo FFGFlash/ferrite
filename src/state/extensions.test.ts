@@ -43,6 +43,8 @@ function extension(overrides: Partial<ExtensionStatus> = {}): ExtensionStatus {
       menus: [],
       views: [],
       decorations: [],
+      languages: [],
+      languageServers: [],
     },
     usage: {
       busyMs: 0,

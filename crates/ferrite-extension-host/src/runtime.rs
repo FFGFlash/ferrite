@@ -187,7 +187,10 @@ pub struct Runtime {
 impl Runtime {
   pub fn new() -> Result<Self, String> {
     let mut config = Config::new();
+    // Tree-sitter's grammar loader builds wasmtime with GC support; the
+    // extension API has no use for it.
     config
+      .wasm_gc(false)
       .wasm_component_model(true)
       .epoch_interruption(true)
       .max_wasm_stack(MAX_WASM_STACK);

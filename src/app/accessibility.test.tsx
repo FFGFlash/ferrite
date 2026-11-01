@@ -77,6 +77,8 @@ describe('accessibility (axe)', () => {
           menus: [],
           views: [],
           decorations: [],
+          languages: [],
+          languageServers: [],
         },
         usage: {
           busyMs: 12,

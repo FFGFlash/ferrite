@@ -1,4 +1,5 @@
-//! Which language servers exist and where their workspaces are.
+//! Language servers (all configured by extensions or settings) and where
+//! their workspaces are.
 
 use std::path::{Path, PathBuf};
 
@@ -15,52 +16,6 @@ pub struct ServerConfig {
   /// Files marking a project root, nearest first, used when a document is
   /// outside the open workspace folder.
   pub root_markers: Vec<String>,
-}
-
-fn config(
-  name: &str,
-  program: &str,
-  args: &[&str],
-  languages: &[&str],
-  markers: &[&str],
-) -> ServerConfig {
-  let strings = |items: &[&str]| items.iter().map(|&item| item.to_owned()).collect();
-  ServerConfig {
-    name: name.to_owned(),
-    command: ServerCommand {
-      program: program.to_owned(),
-      args: strings(args),
-    },
-    languages: strings(languages),
-    root_markers: strings(markers),
-  }
-}
-
-/// Servers used when installed, unless settings say otherwise.
-pub fn default_servers() -> Vec<ServerConfig> {
-  vec![
-    config(
-      "rust-analyzer",
-      "rust-analyzer",
-      &[],
-      &["rust"],
-      &["Cargo.toml"],
-    ),
-    config(
-      "typescript-language-server",
-      "typescript-language-server",
-      &["--stdio"],
-      &["typescript", "typescriptreact", "javascript"],
-      &["tsconfig.json", "jsconfig.json", "package.json"],
-    ),
-    config(
-      "pyright",
-      "pyright-langserver",
-      &["--stdio"],
-      &["python"],
-      &["pyproject.toml", "setup.py", "pyrightconfig.json"],
-    ),
-  ]
 }
 
 /// The workspace root for a server handling `file`: the open workspace
@@ -99,15 +54,5 @@ mod tests {
     assert_eq!(find_root(&file, &[], None), source);
     let elsewhere = tempfile::tempdir().expect("temp dir");
     assert_eq!(find_root(&file, &markers, Some(elsewhere.path())), project);
-  }
-
-  #[test]
-  fn defaults_cover_rust() {
-    let servers = default_servers();
-    assert!(
-      servers
-        .iter()
-        .any(|server| server.languages.contains(&"rust".to_owned()))
-    );
   }
 }

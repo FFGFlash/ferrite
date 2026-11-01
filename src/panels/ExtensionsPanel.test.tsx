@@ -45,6 +45,8 @@ const tidy: ExtensionStatus = {
     menus: [],
     views: [],
     decorations: [],
+    languages: [],
+    languageServers: [],
   },
   usage: {
     busyMs: 3.42,
@@ -112,5 +114,34 @@ describe('ExtensionsPanel', () => {
     expect(ipc.setExtensionEnabled).toHaveBeenCalledWith('example.tidy', false)
     await user.click(screen.getByRole('button', { name: 'Restart' }))
     expect(ipc.restartExtension).toHaveBeenCalledWith('example.tidy')
+  })
+
+  it('names the languages an extension adds', () => {
+    const server = {
+      command: 'server',
+      args: ['--stdio'],
+      languages: ['html'],
+      rootMarkers: [],
+    }
+    extensionsStore.set([
+      {
+        ...tidy,
+        state: 'ready',
+        contributions: {
+          ...tidy.contributions,
+          themes: [],
+          languages: [
+            { id: 'html', name: 'HTML', fileExtensions: ['html'], fileNames: [] },
+            { id: 'css', name: 'CSS', fileExtensions: ['css'], fileNames: [] },
+          ],
+          languageServers: [
+            { ...server, name: 'html' },
+            { ...server, name: 'css' },
+          ],
+        },
+      },
+    ])
+    render(<ExtensionsPanel />)
+    expect(screen.getByText('Adds HTML, CSS, 2 language servers')).toBeInTheDocument()
   })
 })

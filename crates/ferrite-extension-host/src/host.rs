@@ -24,6 +24,7 @@ use crate::bindings::ferrite::extension::types::{
   ApiError, CommandContext, DocumentInfo, Range as WitRange, TextChange,
 };
 use crate::config::{self, ConfigValue};
+use crate::contributions::{LanguageContribution, LanguageServerContribution};
 use crate::icons::IconTheme;
 use crate::manifest::{self, MANIFEST_FILE, Manifest};
 use crate::permissions::{Decision, Decisions, Permission};
@@ -631,6 +632,22 @@ impl CommandTicket {
   }
 }
 
+/// What a permission allows, for asking the user: for language servers,
+/// the commands that would run.
+fn describe(permission: Permission, manifest: &Manifest) -> String {
+  let description = permission.description();
+  if permission != Permission::LanguageServers {
+    return description.to_owned();
+  }
+  let commands: Vec<String> = manifest
+    .contributions
+    .language_servers
+    .iter()
+    .map(|server| server.command_line())
+    .collect();
+  format!("{description}: {}", commands.join("; "))
+}
+
 /// Loads and runs extensions for an editor. See the crate documentation.
 pub struct ExtensionHost {
   shared: Arc<Shared>,
@@ -804,10 +821,10 @@ impl ExtensionHost {
         let decision = state.decisions.get(&manifest.id);
         let (status, error) = match &entry.run {
           _ if decision.disabled => (ExtensionState::Disabled, None),
-          _ if manifest.entrypoint.is_none() => (ExtensionState::Ready, None),
           Run::Idle if !decision.pending(&manifest.permissions).is_empty() => {
             (ExtensionState::AwaitingPermission, None)
           }
+          _ if manifest.entrypoint.is_none() => (ExtensionState::Ready, None),
           Run::Idle => (ExtensionState::Inactive, None),
           Run::Running { active: false, .. } => (ExtensionState::Starting, None),
           Run::Running { active: true, .. } => (ExtensionState::Active, None),
@@ -827,7 +844,7 @@ impl ExtensionHost {
             .iter()
             .map(|&permission| PermissionStatus {
               permission,
-              description: permission.description(),
+              description: describe(permission, manifest),
               granted: decision.granted.contains(&permission),
               decided: decision.granted.contains(&permission)
                 || decision.denied.contains(&permission),
@@ -879,6 +896,62 @@ impl ExtensionHost {
     statuses
   }
 
+  /// The languages contributed by extensions that aren't turned off, with
+  /// their files' paths made absolute.
+  pub fn languages(&self) -> Vec<LanguageContribution> {
+    let state = self.shared.lock();
+    state
+      .extensions
+      .iter()
+      .filter(|entry| !state.decisions.get(&entry.manifest.id).disabled)
+      .flat_map(|entry| {
+        let dir = &entry.manifest.dir;
+        entry
+          .manifest
+          .contributions
+          .languages
+          .iter()
+          .map(move |language| LanguageContribution {
+            grammar: dir.join(&language.grammar),
+            highlights: dir.join(&language.highlights),
+            injections: language.injections.as_ref().map(|path| dir.join(path)),
+            ..language.clone()
+          })
+      })
+      .collect()
+  }
+
+  /// The language servers of extensions that aren't turned off and have
+  /// been granted `language-servers`. Commands inside an extension's folder
+  /// are made absolute.
+  pub fn language_servers(&self) -> Vec<LanguageServerContribution> {
+    let state = self.shared.lock();
+    state
+      .extensions
+      .iter()
+      .filter(|entry| {
+        let decision = state.decisions.get(&entry.manifest.id);
+        !decision.disabled && decision.granted.contains(&Permission::LanguageServers)
+      })
+      .flat_map(|entry| {
+        let dir = &entry.manifest.dir;
+        entry
+          .manifest
+          .contributions
+          .language_servers
+          .iter()
+          .map(move |server| LanguageServerContribution {
+            command: if server.command.contains(['/', '\\']) {
+              dir.join(&server.command).to_string_lossy().into_owned()
+            } else {
+              server.command.clone()
+            },
+            ..server.clone()
+          })
+      })
+      .collect()
+  }
+
   /// An icon theme (`<extension id>.<icon theme id>`) from an extension that
   /// isn't turned off.
   pub fn icon_theme(&self, id: &str) -> Option<Arc<IconTheme>> {
@@ -890,6 +963,28 @@ impl ExtensionHost {
       .flat_map(|entry| &entry.manifest.contributions.icon_themes)
       .find(|theme| theme.id == id)
       .map(|theme| theme.theme.clone())
+  }
+
+  /// Looks up the languages of open documents again, after the embedder's
+  /// languages changed (an extension contributed one), and starts
+  /// extensions that activate for them.
+  pub fn languages_changed(&self) {
+    let mut outbox = Outbox::default();
+    {
+      let mut guard = self.shared.lock();
+      let state = &mut *guard;
+      if state.shutting_down {
+        return;
+      }
+      for record in state.documents.values_mut() {
+        record.info.language = record
+          .path
+          .as_deref()
+          .and_then(|path| self.shared.embedder.language_of(path));
+      }
+      self.start_wanted(state, &mut outbox);
+    }
+    outbox.send(self.shared.embedder.as_ref());
   }
 
   /// Runs an extension command, starting the extension if needed.

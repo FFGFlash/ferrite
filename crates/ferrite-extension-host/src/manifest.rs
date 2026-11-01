@@ -145,6 +145,10 @@ struct RawManifest {
   views: Vec<contributions::RawView>,
   #[serde(default)]
   decorations: BTreeMap<String, contributions::RawDecoration>,
+  #[serde(default)]
+  languages: Vec<contributions::RawLanguage>,
+  #[serde(default)]
+  language_servers: Vec<contributions::RawLanguageServer>,
 }
 
 #[derive(Deserialize, Default)]
@@ -160,6 +164,8 @@ struct RawPermissions {
   documents_read: bool,
   #[serde(default)]
   documents_write: bool,
+  #[serde(default)]
+  language_servers: bool,
 }
 
 #[derive(Deserialize)]
@@ -226,6 +232,9 @@ pub fn load(
   }
   for theme in &mut manifest.contributions.icon_themes {
     contributions::load_icon_theme(dir, theme)?;
+  }
+  for language in &manifest.contributions.languages {
+    contributions::check_language_files(dir, language)?;
   }
   Ok(manifest)
 }
@@ -359,6 +368,14 @@ pub fn parse(
   if raw.permissions.documents_write {
     permissions.push(Permission::DocumentsWrite);
   }
+  if raw.permissions.language_servers {
+    permissions.push(Permission::LanguageServers);
+  }
+  if raw.permissions.language_servers == raw.language_servers.is_empty() {
+    return Err(invalid(
+      "permissions.language_servers must be requested exactly when language_servers are declared",
+    ));
+  }
 
   let mut configuration = BTreeMap::new();
   for (key, property) in raw.configuration {
@@ -385,19 +402,25 @@ pub fn parse(
       status_items: raw.status_items,
       views: raw.views,
       decorations: raw.decorations,
+      languages: raw.languages,
+      language_servers: raw.language_servers,
     },
     &raw.id,
     &commands,
   )?;
+  // The editor starts language servers itself.
+  let code_permissions = permissions
+    .iter()
+    .any(|&permission| permission != Permission::LanguageServers);
   if entrypoint.is_none()
     && (!commands.is_empty()
       || !activation.is_empty()
-      || !permissions.is_empty()
+      || code_permissions
       || !configuration.is_empty()
       || contributions.needs_code())
   {
     return Err(invalid(
-      "entrypoint is required unless the extension only contributes themes and icon themes",
+      "entrypoint is required unless the extension only contributes themes, icon themes, languages, and language servers",
     ));
   }
 
@@ -736,5 +759,154 @@ path = "themes/night.toml"
     assert!(error_of(&escaping).contains("inside the extension's folder"));
     let code = VALID.replace("entrypoint = \"tidy.wasm\"\n", "");
     assert!(error_of(&code).contains("entrypoint is required"));
+  }
+
+  const LANGUAGES: &str = r#"
+id = "example.web"
+name = "Web"
+version = "1.0.0"
+api_version = "1"
+
+[permissions]
+language_servers = true
+
+[[languages]]
+id = "html"
+name = "HTML"
+file_extensions = ["html", "HTM"]
+grammar = "grammars/tree-sitter-html.wasm"
+highlights = "queries/html/highlights.scm"
+injections = "queries/html/injections.scm"
+
+[[languages]]
+id = "objective-c"
+name = "Objective-C"
+file_names = ["Podfile"]
+grammar = "grammars/objc.wasm"
+highlights = "queries/objc.scm"
+
+[[language_servers]]
+name = "vscode-html-language-server"
+command = "vscode-html-language-server"
+args = ["--stdio"]
+languages = ["html"]
+root_markers = ["package.json"]
+"#;
+
+  #[test]
+  fn language_extensions_need_no_entrypoint() {
+    let manifest = parse_text(LANGUAGES).expect("valid");
+    assert!(manifest.entrypoint.is_none());
+    assert_eq!(manifest.permissions, vec![Permission::LanguageServers]);
+    let html = &manifest.contributions.languages[0];
+    assert_eq!(html.id, "html");
+    assert_eq!(html.file_extensions, ["html", "htm"]);
+    assert_eq!(html.grammar_name, "html");
+    assert_eq!(
+      html.injections.as_deref(),
+      Some(Path::new("queries/html/injections.scm"))
+    );
+    let objc = &manifest.contributions.languages[1];
+    assert_eq!(objc.grammar_name, "objective_c", "derived from the id");
+    assert_eq!(objc.file_names, ["Podfile"]);
+    let server = &manifest.contributions.language_servers[0];
+    assert_eq!(server.command_line(), "vscode-html-language-server --stdio");
+    assert_eq!(server.root_markers, ["package.json"]);
+  }
+
+  #[test]
+  fn rejects_invalid_languages() {
+    let with = |old: &str, new: &str| error_of(&LANGUAGES.replacen(old, new, 1));
+    assert!(with("id = \"html\"", "id = \"HTML\"").contains("lowercase"));
+    assert!(with("\"HTM\"", "\".htm\"").contains("without the leading dot"));
+    assert!(with("\"HTM\"", "\"a/b\"").contains("file extension"));
+    assert!(with("\"Podfile\"", "\"dir/Podfile\"").contains("without a folder"));
+    assert!(with("grammars/tree-sitter-html.wasm", "../html.wasm").contains("inside"));
+    assert!(with("grammars/tree-sitter-html.wasm", "html.so").contains(".wasm"));
+    assert!(with("queries/html/injections.scm", "/etc/x.scm").contains("inside"));
+    assert!(with("id = \"objective-c\"", "id = \"html\"").contains("declared twice"));
+    let name = LANGUAGES.replacen(
+      "highlights = \"queries/objc.scm\"",
+      "highlights = \"queries/objc.scm\"\ngrammar_name = \"Objective C\"",
+      1,
+    );
+    assert!(error_of(&name).contains("grammar_name"));
+  }
+
+  #[test]
+  fn language_servers_need_their_permission_and_valid_commands() {
+    let with = |old: &str, new: &str| error_of(&LANGUAGES.replacen(old, new, 1));
+    assert!(
+      with("language_servers = true", "language_servers = false")
+        .contains("permissions.language_servers")
+    );
+    let only_permission = LANGUAGES
+      .split("[[language_servers]]")
+      .next()
+      .expect("head");
+    assert!(error_of(only_permission).contains("permissions.language_servers"));
+    assert!(
+      with(
+        "command = \"vscode-html-language-server\"",
+        "command = \"/usr/bin/server\""
+      )
+      .contains("inside")
+    );
+    assert!(
+      with(
+        "command = \"vscode-html-language-server\"",
+        "command = \"../server\""
+      )
+      .contains("inside")
+    );
+    let shipped = LANGUAGES.replacen(
+      "command = \"vscode-html-language-server\"",
+      "command = \"bin/server\"",
+      1,
+    );
+    assert!(parse_text(&shipped).is_ok(), "a server inside the folder");
+    assert!(with("languages = [\"html\"]", "languages = []").contains("must not be empty"));
+    assert!(with("[\"package.json\"]", "[\"a/package.json\"]").contains("without a folder"));
+    assert!(
+      with(
+        "name = \"vscode-html-language-server\"",
+        "name = \"two words\""
+      )
+      .contains("name")
+    );
+    // Code permissions still need code.
+    let read = LANGUAGES.replacen(
+      "language_servers = true",
+      "language_servers = true\ndocuments_read = true",
+      1,
+    );
+    assert!(error_of(&read).contains("entrypoint is required"));
+  }
+
+  #[test]
+  fn language_files_must_exist() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let manifest = LANGUAGES
+      .split("[[languages]]\nid = \"objective-c\"")
+      .next()
+      .expect("html only")
+      .to_owned()
+      + &LANGUAGES[LANGUAGES.find("[[language_servers]]").expect("servers")..];
+    std::fs::write(dir.path().join(MANIFEST_FILE), &manifest).expect("writes");
+    let error = load(dir.path(), &editor(), false).expect_err("files are missing");
+    assert!(
+      error.to_string().contains("tree-sitter-html.wasm"),
+      "{error}"
+    );
+    for file in [
+      "grammars/tree-sitter-html.wasm",
+      "queries/html/highlights.scm",
+      "queries/html/injections.scm",
+    ] {
+      let path = dir.path().join(file);
+      std::fs::create_dir_all(path.parent().expect("parent")).expect("creates");
+      std::fs::write(path, "").expect("writes");
+    }
+    assert!(load(dir.path(), &editor(), false).is_ok());
   }
 }

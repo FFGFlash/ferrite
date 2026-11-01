@@ -13,7 +13,7 @@
 use std::ops::Range;
 
 use ferrite_core::Document;
-use ferrite_syntax::{LanguageId, Span, Tree, highlight_lines};
+use ferrite_syntax::{Span, SyntaxTree, highlight_lines};
 use ferrite_text::TextBuffer;
 use serde::Serialize;
 
@@ -45,11 +45,11 @@ pub struct Snapshot {
   tab_size: usize,
   buffer: TextBuffer,
   /// The syntax tree, edited to match `buffer`.
-  syntax: Option<(LanguageId, Tree)>,
+  syntax: Option<SyntaxTree>,
 }
 
 impl Snapshot {
-  pub fn of(document: &Document, syntax: Option<(LanguageId, Tree)>) -> Self {
+  pub fn of(document: &Document, syntax: Option<SyntaxTree>) -> Self {
     Self {
       document_id: document.id().get(),
       version: document.version().get(),
@@ -63,9 +63,7 @@ impl Snapshot {
   /// [`MAX_MINIMAP_LINES`].
   pub fn build(&self, lines: Range<usize>) -> MinimapDto {
     self.build_with(lines, |range| match &self.syntax {
-      Some((language, tree)) => {
-        highlight_lines(*language, tree, &self.buffer, range, MINIMAP_LINE_BYTES)
-      }
+      Some(tree) => highlight_lines(tree, &self.buffer, range, MINIMAP_LINE_BYTES),
       None => vec![Vec::new(); range.len()],
     })
   }

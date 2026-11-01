@@ -94,6 +94,7 @@ export type AppEvent =
   | { type: 'syntaxUpdated'; documentId: number }
   | { type: 'diagnosticsChanged'; documentId: number }
   | { type: 'languageServerChanged' }
+  | { type: 'languagesChanged' }
   | { type: 'documentOpened'; document: DocumentSummary; active: boolean }
   | { type: 'indexStatus'; indexing: boolean; files: number; truncated: boolean }
   | { type: 'extensionsChanged' }

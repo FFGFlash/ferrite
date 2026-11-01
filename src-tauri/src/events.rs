@@ -71,6 +71,9 @@ pub enum AppEvent {
   },
   /// Extensions were loaded or changed state.
   ExtensionsChanged,
+  /// The languages extensions contribute changed, so documents may be
+  /// highlighted differently.
+  LanguagesChanged,
   /// An extension asked to show a message.
   ExtensionMessage {
     extension: String,

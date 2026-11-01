@@ -27,17 +27,23 @@ const stateLabels: Record<ExtensionState, string> = {
 
 /** What an extension adds to the workbench, e.g. "2 themes, 1 view". */
 function contributionSummary(extension: ExtensionStatus): string | null {
-  const { themes, keybindings, menus, views, decorations } = extension.contributions
+  const { themes, keybindings, menus, views, decorations, languages, languageServers } =
+    extension.contributions
   const parts = [
     [themes.length, 'theme'],
     [views.length, 'view'],
     [keybindings.length, 'keybinding'],
     [menus.length, 'menu item'],
     [decorations.length, 'decoration type'],
+    [languageServers.length, 'language server'],
   ] as const
-  const listed = parts
-    .filter(([count]) => count > 0)
-    .map(([count, noun]) => `${count} ${noun}${count === 1 ? '' : 's'}`)
+  const listed = [
+    // Named, as a list of languages says more than a count.
+    ...(languages.length > 0 ? [languages.map(language => language.name).join(', ')] : []),
+    ...parts
+      .filter(([count]) => count > 0)
+      .map(([count, noun]) => `${count} ${noun}${count === 1 ? '' : 's'}`),
+  ]
   return listed.length > 0 ? `Adds ${listed.join(', ')}` : null
 }
 

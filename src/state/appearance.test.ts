@@ -37,6 +37,8 @@ const themes = {
     menus: [],
     views: [],
     decorations: [],
+    languages: [],
+    languageServers: [],
   },
   usage: {
     busyMs: 0,

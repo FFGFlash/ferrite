@@ -9,13 +9,16 @@ do only what the [extension API](../crates/ferrite-extension-api/wit/extension.w
 - publish diagnostics (squiggles and hover messages);
 - customize the workbench: color themes, keybindings, context menu items, status bar items,
   side bar views, and editor decorations;
+- add languages: syntax highlighting from Tree-sitter grammars, and language servers;
 - read their own settings;
 - log, and show messages.
 
 There is no filesystem, network, environment, clock, or process access. A manifest declares
 the permissions an extension needs, and the user grants them before the extension starts.
+(Language servers an extension declares are started by Ferrite, not by the extension, and only
+once the user allows it.)
 
-This guide uses three examples:
+This guide uses these examples:
 
 - [Tidy](../extensions/tidy/) flags trailing whitespace and long lines, and has commands to trim
   trailing whitespace and to count words.
@@ -23,6 +26,11 @@ This guide uses three examples:
   lists them in a side bar view, counts them in the status bar, and adds a keybinding and a
   context menu item.
 - [Example Themes](../extensions/themes/) contributes two color themes and no code at all.
+- [HTML & CSS](../extensions/html-css/) adds two languages, highlights CSS and JavaScript inside
+  HTML, and declares their language servers, also with no code. Ferrite has no languages of its
+  own: [Rust](../extensions/rust/), [TypeScript](../extensions/typescript/),
+  [JavaScript](../extensions/javascript/), [JSON](../extensions/json/),
+  [TOML](../extensions/toml/), and [Python](../extensions/python/) are extensions like it.
 
 ## Quick start
 
@@ -136,8 +144,9 @@ extension invalid in the Extensions view, with a message:
 | `on-view:<id>`     | When one of its side bar views is shown.          |
 
 Every extension also starts when one of its commands runs, so `on-command` is only
-documentation. Language ids are `rust`, `typescript`, `typescriptreact`, `javascript`, `json`,
-`toml`, and `python`.
+documentation. Language ids are those extensions add (see [Languages](#languages)), such as
+`rust`, `typescript`, `typescriptreact`, `javascript`, `json`, `toml`, `python`, `html`, and
+`css` in the examples.
 
 **Entry point.** An installed extension's entry point must be inside its folder. A development
 extension may point elsewhere, such as Tidy's
@@ -150,12 +159,13 @@ commands run only from view items or other contributions.
 
 ## Permissions
 
-| Manifest key      | Allows                                                                           |
-| ----------------- | -------------------------------------------------------------------------------- |
-| `documents_read`  | Listing and reading open documents, change notifications, publishing diagnostics |
-| `documents_write` | Editing open documents                                                           |
+| Manifest key       | Allows                                                                           |
+| ------------------ | -------------------------------------------------------------------------------- |
+| `documents_read`   | Listing and reading open documents, change notifications, publishing diagnostics |
+| `documents_write`  | Editing open documents                                                           |
+| `language_servers` | Ferrite running the extension's [language servers](#language-servers)            |
 
-Commands, settings, logging, and messages need no permission.
+Commands, settings, logging, messages, and languages need no permission.
 
 **Requesting a permission doesn't grant it.** When an extension requests permissions the user
 hasn't decided about, Ferrite asks before starting it. The user can allow or deny each
@@ -478,6 +488,174 @@ document active. TODOs uses it when a view item is chosen. It also needs `docume
 
 Misuse fails with `invalid-argument` or `too-large` and changes nothing: an undeclared id, a
 command that isn't the extension's own, or an item whose parent isn't listed before it.
+
+## Languages
+
+Every language Ferrite knows comes from an extension: which files it is for, syntax
+highlighting from a [Tree-sitter](https://tree-sitter.github.io/) grammar, highlighting of other
+languages embedded in it, and its language server. None of this needs code, so a language-only
+extension has no entrypoint. [HTML & CSS](../extensions/html-css/) is the example used below;
+the [Rust](../extensions/rust/), [TypeScript](../extensions/typescript/) (two languages, TS and
+TSX), [JavaScript](../extensions/javascript/), [JSON](../extensions/json/),
+[TOML](../extensions/toml/), and [Python](../extensions/python/) extensions are simpler ones.
+
+```text
+html-css/
+  extension.toml
+  grammars/
+    tree-sitter-html.wasm         Tree-sitter grammars, compiled to WebAssembly
+    tree-sitter-css.wasm
+  queries/
+    html/highlights.scm           what to color
+    html/injections.scm           where CSS and JavaScript are embedded
+    css/highlights.scm
+```
+
+```toml
+[[languages]]
+id = "html"                       # the language id (not prefixed with the extension's id)
+name = "HTML"                     # shown in the status bar
+file_extensions = ["html", "htm"] # without the dot; may contain dots, like "d.ts"
+file_names = []                   # whole file names, like "Makefile"
+grammar = "grammars/tree-sitter-html.wasm"
+grammar_name = "html"             # optional: the id, with '-' as '_'
+highlights = "queries/html/highlights.scm"
+injections = "queries/html/injections.scm"   # optional
+```
+
+All paths must be inside the extension's folder, and the files must exist when the extension
+loads. The language id is what language servers, `on-language:` activation, settings, and other
+languages' injections use, so it is global: a language whose id another extension already
+registered is left out (the log says so). Ids are 1 to 32 lowercase
+letters, digits, `-`, and `_`.
+
+**Which language a file gets.** A whole file name beats an extension, and a longer extension
+beats a shorter one (`d.ts` beats `ts`). When two languages claim a file equally, the one
+registered first wins (extensions are loaded in order of name). Names are matched
+case-insensitively.
+
+### Grammars
+
+A grammar is a Tree-sitter parser compiled to WebAssembly with `tree-sitter build --wasm`, which
+exports `tree_sitter_<grammar_name>`. Ferrite uses Tree-sitter 0.27, which loads grammars of
+language ABI 13 to 15. Many grammars publish a prebuilt `.wasm`: all the examples' grammars are the
+files from their npm packages (`tree-sitter-html@0.23.2`, `tree-sitter-css@0.25.0`,
+`tree-sitter-rust@0.24.0`, and so on; each extension's `grammars` folder has the license). To build one yourself:
+
+```sh
+npx tree-sitter-cli@0.27.1 build --wasm path/to/tree-sitter-html
+```
+
+A grammar runs in its own WebAssembly sandbox, separate from extensions'. It can use only
+Tree-sitter's small C library and up to 128 MiB of memory per thread that parses it. It is
+loaded and compiled the first time a file of its language is opened, not when Ferrite starts.
+
+**Grammars are trusted not to loop.** Ferrite stops a parse that takes too long between steps,
+but it can't interrupt a grammar's external scanner in the middle of a call. A scanner that
+never returns blocks the thread parsing, which can freeze the editor. Use grammars from sources
+you trust, as you would any program.
+
+### Highlight queries
+
+`highlights.scm` is a standard Tree-sitter
+[highlight query](https://tree-sitter.github.io/tree-sitter/3-syntax-highlighting.html#highlights):
+patterns that capture nodes with names like `@keyword` or `@function.method`. Ferrite colors a
+capture by the first part of its name, using the theme's `syntax-*` colors:
+
+| Capture names                                              | Color     |
+| ---------------------------------------------------------- | --------- |
+| `comment`                                                  | comment   |
+| `keyword`, `include`, `conditional`, `repeat`, `exception` | keyword   |
+| `string`, `character`                                      | string    |
+| `string.escape`, `escape`                                  | escape    |
+| `number`, `float`, `constant.numeric`                      | number    |
+| `constant`, `boolean`                                      | constant  |
+| `function`, `method`, `constructor`                        | function  |
+| `macro`, `function.macro`                                  | macro     |
+| `type`                                                     | type      |
+| `variable.builtin`                                         | variable  |
+| `property`, `field`                                        | property  |
+| `operator` / `punctuation` / `attribute` / `tag` / `label` | same name |
+| `module`, `namespace`                                      | module    |
+
+Other captures, including plain `@variable`, are left uncolored. Where captures overlap, the
+narrower one wins, and for the same node the earlier pattern wins, as highlight queries
+expect. Predicates such as `#eq?` and `#match?` work.
+
+### Injections
+
+`injections.scm` marks text in another language, which Ferrite parses with that language's
+grammar and highlights over the outer language:
+
+```scheme
+((style_element (raw_text) @injection.content)
+ (#set! injection.language "css"))
+```
+
+- **`@injection.content`** is the embedded text. The whole node is used, children included.
+- **The language** is a language id, set with `#set! injection.language`, or taken from the
+  text of a node captured as `@injection.language` (for example a Markdown code fence's info
+  string). It may be the extension's own language or another extension's; an id no language
+  has is ignored (HTML's scripts are highlighted only if the JavaScript extension is loaded).
+- **`#set! injection.combined`** parses all of a pattern's matches together, as one document.
+- **Limits.** Injections are followed 4 levels deep (CSS in HTML in Markdown, say), and a
+  document has at most 1,024 injected regions.
+
+Each injected region is parsed incrementally as you type, within the same 3 ms budget as the
+document itself; anything longer finishes in the background.
+
+### Language servers
+
+```toml
+[permissions]
+language_servers = true
+
+[[language_servers]]
+name = "vscode-html-language-server"     # unique; also its name in the settings
+command = "vscode-html-language-server"  # a program on the PATH, or a path in the folder
+args = ["--stdio"]
+languages = ["html"]                     # the language ids it serves
+root_markers = ["package.json"]          # optional: files marking a project root
+```
+
+- **Permission.** Declaring language servers requires `language_servers = true`, and the other
+  way around. Ferrite asks the user before running them, showing each command line. Until the
+  user allows it, or if they deny it, the servers don't run; the languages are highlighted
+  either way.
+- **Ferrite runs them**: started on demand when a file of
+  one of their languages is opened, with hover, go to definition, completion, and diagnostics.
+  The extension's code, if any, has no access to them.
+- **Commands.** A command without `/` or `\` is looked up on the `PATH`. A relative path runs a
+  program the extension ships, inside its folder. Absolute paths aren't allowed. A server that
+  isn't installed shows as failed in the status bar, with a hover explaining why.
+- **Names.** Extensions that declare a server with the same name and command share one
+  server for all their languages: the TypeScript and JavaScript examples both declare
+  `typescript-language-server`. With a different command, the first declaration wins. Users can
+  change an extension's server or turn it off by name, for example
+  `[lsp.servers.rust-analyzer]` with `enabled = false` or another `command`.
+
+### Trying it
+
+1. Run **Extensions: Load Development Extension…** and choose `extensions/html-css`. Nothing
+   needs building.
+2. Ferrite asks whether to allow the two language servers. Either answer is fine; to get them,
+   run `npm install -g vscode-langservers-extracted`.
+3. Open an `.html` file: tags, attributes, and comments are colored, and so is the CSS in
+   `<style>` and the JavaScript in `<script>`.
+
+After editing a query, click **Restart** in the Extensions view: languages whose files changed
+are loaded again, and open documents are highlighted with them. An invalid query is logged
+(`syntax highlighting is unavailable`, with the query's error) and leaves the file uncolored.
+
+### Language limits
+
+| Item                         | Limit                    |
+| ---------------------------- | ------------------------ |
+| Languages / language servers | 20 / 10 per extension    |
+| File extensions / names      | 50 / 50 per language     |
+| Grammar / query file         | 32 MiB / 1 MiB           |
+| Grammar memory               | 128 MiB per thread       |
+| Injections                   | 4 deep, 1,024 a document |
 
 ## Limits and failures
 

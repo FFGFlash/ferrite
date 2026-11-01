@@ -43,8 +43,8 @@ Tauri, and nothing in Rust depends on the frontend.
 | `ferrite-text`           | Rope-backed `TextBuffer`, validated `ChangeSet`s, versions, the line-splice log, UTF-16 conversion, grapheme/word boundaries, line endings, regex/literal search over the rope                                                   | `ropey`, `unicode-segmentation`, `regex-cursor`                                |
 | `ferrite-workspace`      | Reading and atomically writing files, directory listings with ignore rules, the Go to File index, find in files, file watching, backups of unsaved documents                                                                     | `ferrite-text`, `ignore`, `globset`, `nucleo-matcher`, `notify-debouncer-mini` |
 | `ferrite-core`           | `Editor` (open documents), `Document`, selections, `EditorOp`s (including find/replace), undo history, dirty state, reload from disk, incremental viewport updates. No I/O.                                                      | `ferrite-text`, `ferrite-workspace` (for `FileStamp`)                          |
-| `ferrite-syntax`         | Bundled Tree-sitter grammars and highlight queries (Rust, TypeScript/TSX, JavaScript, JSON, TOML, Python), language detection, incremental and interruptible parsing, per-line highlight spans                                   | `ferrite-text`, `tree-sitter`, grammar crates                                  |
-| `ferrite-lsp`            | Language server processes and JSON-RPC over stdio, UTF-8/UTF-16 position conversion, incremental document changes from the edit log, known servers and workspace roots, a scripted test server                                   | `ferrite-text`, `lsp-types`, `serde_json`                                      |
+| `ferrite-syntax`         | The language registry of extensions' WebAssembly Tree-sitter grammars (none built in); language detection, incremental and interruptible parsing with injected layers, per-line highlight spans                                  | `ferrite-text`, `tree-sitter` (with `wasm`), grammar crates                    |
+| `ferrite-lsp`            | Language server processes and JSON-RPC over stdio, UTF-8/UTF-16 position conversion, incremental document changes from the edit log, server configuration and workspace roots, a scripted test server                            | `ferrite-text`, `lsp-types`, `serde_json`                                      |
 | `ferrite-extension-api`  | The extension API: the WIT interface (`wit/extension.wit`) and the Rust bindings extensions build against (`Guest`, `export_extension!`). Standalone, so extensions outside the repository can use it                            | `wit-bindgen`                                                                  |
 | `ferrite-extension-host` | Extension discovery, manifest validation, permission decisions, a worker thread and bounded event queue per extension, Wasmtime with deadlines and memory limits, the host side of the API (validated reads, edits, diagnostics) | `ferrite-core`, `ferrite-text`, `wasmtime`, `wit-component`, `semver`, `toml`  |
 | `ferrite-tasks`          | Bounded background scheduler (priorities, keyed replacement, cancellation) and timing histograms                                                                                                                                 | `tracing`                                                                      |
@@ -411,8 +411,21 @@ The development CSP additionally allows Vite's HMR socket and inline scripts.
 
 ## Syntax highlighting
 
-`ferrite-syntax` bundles the grammars; the app keeps one Tree-sitter tree per document of a known
-language (`editor/syntax.rs`), detected from the file name and re-detected after Save As.
+`ferrite-syntax` holds the languages in a `Registry`. All of them are grammars that extensions
+contribute as WebAssembly ([ADR 0013](adr/0013-extension-languages.md),
+[ADR 0014](adr/0014-languages-only-from-extensions.md)); none is built in. The app
+rebuilds the registry when extensions change (`languages.rs`) and keeps one `SyntaxTree` per
+document of a known language (`editor/syntax.rs`), detected from the file name and re-detected
+after Save As or when the languages change.
+
+- **Injections are layers.** A language's injection query marks text in other languages (CSS
+  in an HTML `<style>`). After parsing a document, each injection is parsed as a layer over its
+  ranges, with Tree-sitter's included ranges, and layers' own injections after them. Edits are
+  applied to every layer, and an old layer overlapping a new injection of the same language is
+  reused for an incremental parse. Layers share the parse's budget and cancellation, and are
+  painted over the document's own highlights, outermost first.
+- **WebAssembly grammars** run on Tree-sitter's own Wasmtime store. Each thread keeps one parser
+  with a store, so a grammar is instantiated once per thread instead of on every parse.
 
 - **Edits update the tree immediately.** On each view, the byte edits since the tree's version
   (from the buffer's edit log, with row/column points) are applied with `Tree::edit`, so the old
@@ -446,8 +459,8 @@ server (`lsp/`).
   server opens it on the server for its root (the workspace folder if it contains the file, else
   the nearest ancestor with a root marker such as `Cargo.toml`, else its directory). The server
   is started on its own thread; until it is up, the status bar shows "starting", and when it is
-  up every waiting document is opened. Known servers are rust-analyzer, typescript-language-server,
-  and pyright; settings (`[lsp]`) can change or add servers or turn them off. A server that isn't
+  up every waiting document is opened. Servers come from language extensions (none is built in);
+  settings (`[lsp]`) can change or add servers or turn them off. A server that isn't
   installed is reported once in the status bar, not retried.
 - **One connection, three threads.** A writer thread drains a queue to the server's stdin, so
   sending never blocks the caller (or the editor lock); a reader thread parses
@@ -808,8 +821,9 @@ These are tracked for later milestones:
   implemented, nor are completion's additional edits (such as auto-imports) or snippets
   (completion asks servers for plain text). There's no problems panel; diagnostics for files that
   aren't open aren't shown.
-- Highlighting uses each grammar's bundled query; there's no injection support (e.g. code in
-  Markdown or doc comments) and no language detection beyond file names.
+- Highlighting uses each grammar's own query. Of the example languages only HTML has an
+  injection query, and there's no language detection beyond file names. A
+  WebAssembly grammar's external scanner can't be interrupted mid-call.
 - Extensions have no storage API and can't depend on other extensions. Components that import
   WASI are rejected. There's no installer; extensions are installed by copying their folder.
 - Contributed views are trees of text items; there are no rich custom views, inline text

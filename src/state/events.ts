@@ -37,6 +37,7 @@ export function handleEvent(event: AppEvent): void {
       notify('info', 'Settings applied.')
       break
     case 'languageServerChanged':
+    case 'languagesChanged':
       for (const editor of mountedEditors()) {
         editor.refresh()
       }

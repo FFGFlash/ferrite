@@ -107,6 +107,7 @@ that exits is restarted on demand up to three times.
   90 MB for Ferrite itself. CPU contention while a server indexes can delay
   frames; the benchmark measures typing once the server is idle.
 - Each grammar adds to binary size; adding languages is a code change until
-  extensions can contribute grammars (M6).
+  extensions can contribute grammars (M6). They can since
+  [ADR 0013](0013-extension-languages.md).
 - Find references, rename, code actions, formatting, and snippets are left for
   later; the client and sync layers don't need to change for them.

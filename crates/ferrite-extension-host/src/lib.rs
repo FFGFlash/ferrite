@@ -257,7 +257,7 @@ pub enum ExtensionState {
   Disabled,
   /// The manifest or folder is invalid (see `error`).
   Invalid,
-  /// Contributes only themes; there is no code to run.
+  /// Contributes only data (themes, languages); there is no code to run.
   Ready,
 }
 
@@ -265,7 +265,7 @@ pub enum ExtensionState {
 #[serde(rename_all = "camelCase")]
 pub struct PermissionStatus {
   pub permission: Permission,
-  pub description: &'static str,
+  pub description: String,
   pub granted: bool,
   /// Whether the user has decided (granted or denied).
   pub decided: bool,

@@ -15,6 +15,9 @@ use serde::{Deserialize, Serialize};
 pub enum Permission {
   DocumentsRead,
   DocumentsWrite,
+  /// Start the language servers the manifest declares. Not checked by the
+  /// extension API: the editor starts the servers, not the extension.
+  LanguageServers,
 }
 
 impl Permission {
@@ -22,6 +25,7 @@ impl Permission {
     match self {
       Self::DocumentsRead => "Read open documents and their changes, and show problems in them",
       Self::DocumentsWrite => "Edit open documents",
+      Self::LanguageServers => "Run language servers, which are programs on this computer",
     }
   }
 }

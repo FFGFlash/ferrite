@@ -163,7 +163,7 @@ fn build_view(
     |lines, chunks| state.syntax.highlights(app, document, lines, known, chunks),
   );
   let lines = view.start_line..view.end_line;
-  (view.diagnostics, view.language) = lsp.view(document, lines.clone());
+  (view.diagnostics, view.language) = lsp.view(app, document, lines.clone());
   view.decorations = extensions.add_to_view(
     document,
     lines,

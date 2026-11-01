@@ -117,12 +117,13 @@ impl ApiContext {
     }
   }
 
-  fn require(&self, permission: Permission) -> Result<Arc<Shared>, ApiError> {
-    if !self.granted.contains(&permission) {
-      return Err(ApiError::PermissionDenied(match permission {
-        Permission::DocumentsRead => WitPermission::DocumentsRead,
-        Permission::DocumentsWrite => WitPermission::DocumentsWrite,
-      }));
+  fn require(&self, permission: WitPermission) -> Result<Arc<Shared>, ApiError> {
+    let needed = match permission {
+      WitPermission::DocumentsRead => Permission::DocumentsRead,
+      WitPermission::DocumentsWrite => Permission::DocumentsWrite,
+    };
+    if !self.granted.contains(&needed) {
+      return Err(ApiError::PermissionDenied(permission));
     }
     self.shared()
   }
@@ -302,7 +303,7 @@ impl Host for StoreState {
   }
 
   fn documents(&mut self) -> Result<Vec<DocumentInfo>, ApiError> {
-    let shared = self.api.require(Permission::DocumentsRead)?;
+    let shared = self.api.require(WitPermission::DocumentsRead)?;
     with_editor(&shared, |editor| {
       editor
         .documents()
@@ -313,7 +314,7 @@ impl Host for StoreState {
   }
 
   fn document(&mut self, id: u64) -> Result<DocumentInfo, ApiError> {
-    let shared = self.api.require(Permission::DocumentsRead)?;
+    let shared = self.api.require(WitPermission::DocumentsRead)?;
     with_editor(&shared, |editor| {
       find(editor, id).map(|document| document_info(&shared, document))
     })
@@ -321,7 +322,7 @@ impl Host for StoreState {
   }
 
   fn read_lines(&mut self, id: u64, start: u32, end: u32) -> Result<LineSlice, ApiError> {
-    let shared = self.api.require(Permission::DocumentsRead)?;
+    let shared = self.api.require(WitPermission::DocumentsRead)?;
     with_editor(&shared, |editor| {
       let document = find(editor, id)?;
       let buffer = document.buffer();
@@ -351,7 +352,7 @@ impl Host for StoreState {
   }
 
   fn read_range(&mut self, id: u64, range: Range) -> Result<TextSlice, ApiError> {
-    let shared = self.api.require(Permission::DocumentsRead)?;
+    let shared = self.api.require(WitPermission::DocumentsRead)?;
     with_editor(&shared, |editor| {
       let document = find(editor, id)?;
       let span = to_span(document.buffer(), range)?;
@@ -370,7 +371,7 @@ impl Host for StoreState {
   }
 
   fn apply_edits(&mut self, id: u64, version: u64, edits: Vec<TextEdit>) -> Result<u64, ApiError> {
-    let shared = self.api.require(Permission::DocumentsWrite)?;
+    let shared = self.api.require(WitPermission::DocumentsWrite)?;
     if edits.len() > MAX_EDITS {
       return Err(ApiError::TooLarge(format!(
         "at most {MAX_EDITS} edits can be applied at once"
@@ -426,7 +427,7 @@ impl Host for StoreState {
     version: u64,
     diagnostics: Vec<Diagnostic>,
   ) -> Result<(), ApiError> {
-    let shared = self.api.require(Permission::DocumentsRead)?;
+    let shared = self.api.require(WitPermission::DocumentsRead)?;
     if diagnostics.len() > MAX_DIAGNOSTICS {
       return Err(ApiError::TooLarge(format!(
         "at most {MAX_DIAGNOSTICS} diagnostics can be published for a document"
@@ -584,7 +585,7 @@ impl WorkbenchHost for StoreState {
     decoration: String,
     ranges: Vec<Range>,
   ) -> Result<(), ApiError> {
-    let shared = self.api.require(Permission::DocumentsRead)?;
+    let shared = self.api.require(WitPermission::DocumentsRead)?;
     if self
       .api
       .manifest
@@ -616,7 +617,7 @@ impl WorkbenchHost for StoreState {
   }
 
   fn reveal(&mut self, id: u64, range: Range) -> Result<(), ApiError> {
-    let shared = self.api.require(Permission::DocumentsRead)?;
+    let shared = self.api.require(WitPermission::DocumentsRead)?;
     let (start, end) = with_editor(&shared, |editor| {
       let document = find(editor, id)?;
       let buffer = document.buffer();

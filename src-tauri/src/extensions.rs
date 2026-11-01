@@ -15,13 +15,13 @@ use ferrite_extension_host::{
   Embedder, ExtensionHost, ExtensionStatus, HostOptions, Limits, MANIFEST_FILE, Notification,
   Permission, StatusItem, ViewContent,
 };
-use ferrite_syntax::LanguageId;
 use tauri::{AppHandle, Manager, State, WebviewWindow};
 
 use crate::editor::EditorState;
 use crate::editor::protocol::DecorationDto;
 use crate::error::CommandError;
 use crate::events::{self, AppEvent};
+use crate::languages::{self, LanguagesState};
 use crate::lsp::{DiagnosticDto, DiagnosticMessageDto, LanguageStatusDto};
 use crate::settings::{self, Settings, SettingsState};
 
@@ -121,7 +121,11 @@ impl Embedder for AppEmbedder {
   }
 
   fn language_of(&self, path: &Path) -> Option<String> {
-    LanguageId::from_path(path).map(|language| language.id().to_owned())
+    self
+      .app
+      .state::<LanguagesState>()
+      .for_path(path)
+      .map(|language| language.id().to_owned())
   }
 
   // Called with the editor lock possibly held, so this only emits events.
@@ -145,7 +149,11 @@ impl Embedder for AppEmbedder {
       Notification::DiagnosticsChanged(id) => AppEvent::DiagnosticsChanged {
         document_id: id.get(),
       },
-      Notification::ExtensionsChanged => AppEvent::ExtensionsChanged,
+      Notification::ExtensionsChanged => {
+        // Their languages and language servers may have changed.
+        languages::refresh(&self.app);
+        AppEvent::ExtensionsChanged
+      }
       Notification::ExtensionFailed { id, name, reason } => {
         AppEvent::ExtensionFailed { id, name, reason }
       }
@@ -203,9 +211,18 @@ fn options(app: &AppHandle, settings: &Settings) -> HostOptions {
 /// Creates the host and loads extensions in the background.
 pub fn init(app: &AppHandle, load: bool) {
   let settings = app.state::<SettingsState>().get();
+  let mut options = options(app, &settings);
+  let bench = app.state::<crate::bench::BenchState>();
+  if bench.active() && !bench.with_extensions() {
+    // Only the language extensions the benchmark asks for.
+    options.extensions_dir = None;
+    options.permissions_file = None;
+    options.development = bench.languages().to_vec();
+    options.settings.clear();
+  }
   let host = ExtensionHost::new(
     std::sync::Arc::new(AppEmbedder { app: app.clone() }),
-    options(app, &settings),
+    options,
   );
   let state = app.state::<ExtensionsState>();
   if state.0.set(host).is_err() || !load {

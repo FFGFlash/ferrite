@@ -1,6 +1,6 @@
 //! Workbench contributions declared in a manifest: themes, file icon themes,
-//! keybindings, menu items, status bar items, side bar views, and decoration
-//! types.
+//! keybindings, menu items, status bar items, side bar views, decoration
+//! types, languages, and language servers.
 //!
 //! Contributions are data: the workbench renders them, and extensions only
 //! fill in content (status text, view items, decorated ranges) through the
@@ -163,6 +163,62 @@ pub struct DecorationType {
   pub italic: bool,
 }
 
+/// A language: which files it is for, and a Tree-sitter grammar compiled to
+/// WebAssembly with its queries. Paths are relative to the extension's
+/// folder.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LanguageContribution {
+  /// The language id, e.g. `html`. Not prefixed with the extension's id:
+  /// language servers, settings, and other languages' injections use it.
+  pub id: String,
+  pub name: String,
+  /// Lowercase, without the leading dot.
+  pub file_extensions: Vec<String>,
+  pub file_names: Vec<String>,
+  #[serde(skip)]
+  pub grammar: PathBuf,
+  /// The WebAssembly module exports `tree_sitter_<grammar_name>`.
+  #[serde(skip)]
+  pub grammar_name: String,
+  #[serde(skip)]
+  pub highlights: PathBuf,
+  #[serde(skip)]
+  pub injections: Option<PathBuf>,
+}
+
+/// A language server the editor starts for documents of some languages,
+/// once the user grants `language-servers`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LanguageServerContribution {
+  pub name: String,
+  /// A program on the `PATH`, or a path inside the extension's folder
+  /// (made absolute by `ExtensionHost::language_servers`).
+  pub command: String,
+  pub args: Vec<String>,
+  /// Language ids, e.g. `html`.
+  pub languages: Vec<String>,
+  pub root_markers: Vec<String>,
+}
+
+impl LanguageServerContribution {
+  /// The command line, as shown when asking for permission.
+  pub fn command_line(&self) -> String {
+    std::iter::once(&self.command)
+      .chain(&self.args)
+      .map(|part| {
+        if part.is_empty() || part.contains(char::is_whitespace) {
+          format!("{part:?}")
+        } else {
+          part.clone()
+        }
+      })
+      .collect::<Vec<_>>()
+      .join(" ")
+  }
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Contributions {
@@ -173,6 +229,8 @@ pub struct Contributions {
   pub status_items: Vec<StatusItemContribution>,
   pub views: Vec<ViewContribution>,
   pub decorations: Vec<DecorationType>,
+  pub languages: Vec<LanguageContribution>,
+  pub language_servers: Vec<LanguageServerContribution>,
 }
 
 impl Contributions {
@@ -278,6 +336,33 @@ pub struct RawDecoration {
   light: Option<RawDecorationColors>,
 }
 
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RawLanguage {
+  id: String,
+  name: String,
+  #[serde(default)]
+  file_extensions: Vec<String>,
+  #[serde(default)]
+  file_names: Vec<String>,
+  grammar: String,
+  grammar_name: Option<String>,
+  highlights: String,
+  injections: Option<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RawLanguageServer {
+  name: String,
+  command: String,
+  #[serde(default)]
+  args: Vec<String>,
+  languages: Vec<String>,
+  #[serde(default)]
+  root_markers: Vec<String>,
+}
+
 /// The contribution sections of a manifest, as written.
 #[derive(Default)]
 pub struct RawContributions {
@@ -288,6 +373,8 @@ pub struct RawContributions {
   pub status_items: Vec<RawStatusItem>,
   pub views: Vec<RawView>,
   pub decorations: BTreeMap<String, RawDecoration>,
+  pub languages: Vec<RawLanguage>,
+  pub language_servers: Vec<RawLanguageServer>,
 }
 
 /// Validates contributions. Theme colors and icons are read later, by
@@ -320,6 +407,8 @@ pub fn parse(
   limit("status_items", raw.status_items.len(), 20)?;
   limit("views", raw.views.len(), 10)?;
   limit("decorations", raw.decorations.len(), 20)?;
+  limit("languages", raw.languages.len(), 20)?;
+  limit("language_servers", raw.language_servers.len(), 10)?;
 
   let mut contributions = Contributions::default();
   for theme in raw.themes {
@@ -507,7 +596,190 @@ pub fn parse(
       italic: decoration.italic,
     });
   }
+
+  for language in raw.languages {
+    local_id("languages", &language.id)?;
+    unique(
+      "languages",
+      contributions.languages.iter().map(|l| &l.id),
+      &language.id,
+    )?;
+    let section = format!("languages.{}", language.id);
+    limit(
+      &format!("{section}: file_extensions"),
+      language.file_extensions.len(),
+      50,
+    )?;
+    limit(
+      &format!("{section}: file_names"),
+      language.file_names.len(),
+      50,
+    )?;
+    let file_extensions = language
+      .file_extensions
+      .iter()
+      .map(|extension| file_extension(&section, extension))
+      .collect::<Result<_, _>>()?;
+    let file_names = language
+      .file_names
+      .iter()
+      .map(|name| file_name(&section, name))
+      .collect::<Result<_, _>>()?;
+    let grammar = inside(&section, &language.grammar)?;
+    if grammar
+      .extension()
+      .is_none_or(|extension| extension != "wasm")
+    {
+      return Err(invalid(format!(
+        "{section}: grammar {:?} must be a .wasm file built with `tree-sitter build --wasm`",
+        language.grammar
+      )));
+    }
+    let grammar_name = language
+      .grammar_name
+      .unwrap_or_else(|| language.id.replace('-', "_"));
+    let valid_name = (1..=64).contains(&grammar_name.len())
+      && grammar_name
+        .chars()
+        .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_');
+    if !valid_name {
+      return Err(invalid(format!(
+        "{section}: grammar_name {grammar_name:?} must be lowercase letters, digits, and '_'"
+      )));
+    }
+    contributions.languages.push(LanguageContribution {
+      name: text(&section, "name", &language.name, 64)?,
+      file_extensions,
+      file_names,
+      grammar,
+      grammar_name,
+      highlights: inside(&section, &language.highlights)?,
+      injections: language
+        .injections
+        .as_deref()
+        .map(|path| inside(&section, path))
+        .transpose()?,
+      id: language.id,
+    });
+  }
+
+  for server in raw.language_servers {
+    let valid_name = (1..=64).contains(&server.name.len())
+      && server
+        .name
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'));
+    if !valid_name {
+      return Err(invalid(format!(
+        "language_servers: name {:?} must be 1 to 64 letters, digits, '-', '_', or '.'",
+        server.name
+      )));
+    }
+    unique(
+      "language_servers",
+      contributions.language_servers.iter().map(|s| &s.name),
+      &server.name,
+    )?;
+    let section = format!("language_servers.{}", server.name);
+    // A program to find on the PATH, or one the extension ships.
+    if server.command.contains(['/', '\\']) {
+      inside(&section, &server.command)?;
+    } else {
+      file_name(&section, &server.command)?;
+    }
+    limit(&format!("{section}: args"), server.args.len(), 32)?;
+    if server
+      .args
+      .iter()
+      .any(|arg| arg.chars().count() > 1000 || arg.contains('\0'))
+    {
+      return Err(invalid(format!(
+        "{section}: arguments must be at most 1000 characters"
+      )));
+    }
+    if server.languages.is_empty() {
+      return Err(invalid(format!("{section}: languages must not be empty")));
+    }
+    limit(&format!("{section}: languages"), server.languages.len(), 20)?;
+    for language in &server.languages {
+      local_id(&section, language)?;
+    }
+    limit(
+      &format!("{section}: root_markers"),
+      server.root_markers.len(),
+      20,
+    )?;
+    for marker in &server.root_markers {
+      file_name(&section, marker)?;
+    }
+    contributions
+      .language_servers
+      .push(LanguageServerContribution {
+        name: server.name,
+        command: server.command,
+        args: server.args,
+        languages: server.languages,
+        root_markers: server.root_markers,
+      });
+  }
   Ok(contributions)
+}
+
+/// Checks that a language's grammar and query files exist. They are read
+/// when a file of the language is first opened.
+pub fn check_language_files(
+  dir: &Path,
+  language: &LanguageContribution,
+) -> Result<(), ManifestError> {
+  let paths = [&language.grammar, &language.highlights]
+    .into_iter()
+    .chain(&language.injections);
+  for path in paths {
+    let full = dir.join(path);
+    let metadata = std::fs::metadata(&full).map_err(|source| ManifestError::Read {
+      path: full.clone(),
+      source,
+    })?;
+    if !metadata.is_file() {
+      return Err(invalid(format!(
+        "languages.{}: {} is not a file",
+        language.id,
+        path.display()
+      )));
+    }
+  }
+  Ok(())
+}
+
+/// A file extension without the leading dot, lowercased.
+fn file_extension(section: &str, extension: &str) -> Result<String, ManifestError> {
+  let valid = (1..=32).contains(&extension.len())
+    && !extension.starts_with('.')
+    && !extension.ends_with('.')
+    && extension
+      .chars()
+      .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_' | '+'));
+  if valid {
+    Ok(extension.to_ascii_lowercase())
+  } else {
+    Err(invalid(format!(
+      "{section}: file extension {extension:?} must be letters, digits, '.', '-', '_', or '+', without the leading dot"
+    )))
+  }
+}
+
+/// A file name without a folder: 1 to 128 characters.
+fn file_name(section: &str, name: &str) -> Result<String, ManifestError> {
+  let valid = (1..=128).contains(&name.len())
+    && !matches!(name, "." | "..")
+    && !name.contains(['/', '\\', '\0']);
+  if valid {
+    Ok(name.to_owned())
+  } else {
+    Err(invalid(format!(
+      "{section}: {name:?} must be a file name without a folder"
+    )))
+  }
 }
 
 /// Reads and checks a theme's colors from its file:

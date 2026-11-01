@@ -6,13 +6,16 @@
  *   node scripts/bench.mjs startup        # launch time and idle memory (5 runs)
  *   node scripts/bench.mjs typing         # keystroke-to-paint latency
  *                                         (--file F also types into F, e.g.
- *                                         a source file with highlighting)
+ *                                         a source file; add --language
+ *                                         extensions/rust to highlight it)
  *   node scripts/bench.mjs scroll         # page-jump scrolling, 200k lines
  *   node scripts/bench.mjs open --file F  # open a file until first paint
  *   node scripts/bench.mjs all            # startup, typing, and scroll
  *
  * Options: --runs N and --pause MS between runs (startup), --binary PATH,
  * --extensions (load extensions, which runs skip by default),
+ * --language DIR (load only this extension folder, for its languages;
+ * repeatable),
  * --json PATH (default
  * target/bench/results.json). The app runs with `--bench <name>`, writes its
  * report to the file in FERRITE_BENCH_OUT, and stays up briefly so this
@@ -46,6 +49,10 @@ const pauseMs = Number(option('pause', '3000'))
 const file = option('file', null)
 /** `--extensions`: load installed and development extensions too. */
 const withExtensions = args.includes('--extensions')
+/** `--language DIR`: language extensions to load on their own. */
+const languages = args.flatMap((arg, index) =>
+  arg === '--language' && args[index + 1] ? ['--bench-language', path.resolve(args[index + 1])] : [],
+)
 
 if (!fs.existsSync(binary)) {
   console.error(`No release build at ${binary}. Run: pnpm tauri build --no-bundle`)
@@ -110,7 +117,7 @@ function processTreeMemory(pid) {
 async function runOnce(name, extra = []) {
   const out = path.join(os.tmpdir(), `ferrite-bench-${process.pid}-${Date.now()}.json`)
   const started = performance.now()
-  const flags = withExtensions ? ['--bench-extensions'] : []
+  const flags = [...(withExtensions ? ['--bench-extensions'] : []), ...languages]
   const child = spawn(binary, ['--bench', name, ...extra, ...flags], {
     env: { ...process.env, FERRITE_BENCH_OUT: out },
     stdio: 'ignore',

@@ -61,9 +61,20 @@ To start over, delete `settings.toml`. **Preferences: Open Settings (TOML)** cre
 - **Turning it off.** **Disable** turns an extension off until you enable it again. To remove
   it, delete its folder from the `extensions` folder next to your settings.
 
+## No syntax colors
+
+Ferrite has no languages built in. Load the extension for the language (for example
+`extensions/rust`, with **Extensions: Load Development Extension…**), and check in the
+Extensions view that it isn't invalid or turned off. The status bar names the active file's
+language once one claims it. If the language is there but the file stays uncolored, the log
+says why under `syntax highlighting is unavailable` (a grammar that didn't load, or a query
+error).
+
 ## Language features don't work
 
-The status bar shows the language server's state for the active file.
+The status bar shows the language server's state for the active file. Servers come from
+language extensions, which ask before running one: if you chose **Don't Allow**, turn
+**Run language servers** on in the Extensions view.
 
 - **Not found.** Install the server (for example `rustup component add rust-analyzer`), or point
   Ferrite at it: `[lsp.servers.rust-analyzer] command = "..."`.

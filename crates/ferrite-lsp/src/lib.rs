@@ -19,6 +19,6 @@ pub use client::{
   CONTENT_MODIFIED, EventHandler, LanguageServer, LspError, REQUEST_CANCELLED, ServerCommand,
   ServerEvent,
 };
-pub use config::{ServerConfig, default_servers, find_root};
+pub use config::{ServerConfig, find_root};
 pub use convert::PositionEncoding;
 pub use lsp_types;

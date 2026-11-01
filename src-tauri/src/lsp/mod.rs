@@ -35,7 +35,7 @@ use ferrite_lsp::lsp_types::{
   VersionedTextDocumentIdentifier,
 };
 use ferrite_lsp::{LanguageServer, ServerConfig, ServerEvent, find_root};
-use ferrite_syntax::LanguageId;
+use ferrite_syntax::Language;
 use ferrite_text::{TextBuffer, TextSnapshot, Version, map_offset_through};
 use serde::Serialize;
 use tauri::{AppHandle, Manager};
@@ -45,6 +45,7 @@ pub use commands::*;
 use crate::editor::EditorState;
 use crate::editor::protocol::Position;
 use crate::events::{self, AppEvent};
+use crate::languages::LanguagesState;
 use crate::settings::SettingsState;
 use crate::workspace::WorkspaceState;
 
@@ -215,7 +216,7 @@ pub struct ServerStatusDto {
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct LanguageStatusDto {
-  pub language: &'static str,
+  pub language: String,
   pub server: Option<ServerStatusDto>,
   pub errors: usize,
   pub warnings: usize,
@@ -239,10 +240,14 @@ impl LspState {
   }
 
   fn wanted(&self, app: &AppHandle, inner: &mut Inner, path: &Path) -> Option<Wanted> {
-    let language = LanguageId::from_path(path)?;
-    let configs = inner
-      .configs
-      .get_or_insert_with(|| app.state::<SettingsState>().get().language_servers());
+    let languages = app.state::<LanguagesState>();
+    let language = languages.for_path(path)?;
+    let configs = inner.configs.get_or_insert_with(|| {
+      app
+        .state::<SettingsState>()
+        .get()
+        .language_servers_with(languages.servers())
+    });
     let config = configs
       .iter()
       .find(|config| config.languages.iter().any(|id| id == language.id()))?
@@ -318,7 +323,8 @@ impl LspState {
       return;
     };
     let server = server.clone();
-    let language = LanguageId::from_path(path).map_or("plaintext", LanguageId::id);
+    let language = app.state::<LanguagesState>().for_path(path);
+    let language = language.as_ref().map_or("plaintext", Language::id);
     server.notify::<DidOpenTextDocument>(DidOpenTextDocumentParams {
       text_document: TextDocumentItem::new(uri.clone(), language.into(), 1, buffer.contents()),
     });
@@ -369,16 +375,18 @@ impl LspState {
   /// the editor locked, after [`Self::sync`].
   pub fn view(
     &self,
+    app: &AppHandle,
     document: &Document,
     lines: Range<usize>,
   ) -> (Vec<DiagnosticDto>, Option<LanguageStatusDto>) {
-    let Some(language) = document.path().and_then(LanguageId::from_path) else {
+    let languages = app.state::<LanguagesState>();
+    let Some(language) = document.path().and_then(|path| languages.for_path(path)) else {
       return (Vec::new(), None);
     };
     let buffer = document.buffer();
     let mut inner = self.lock();
     let mut status = LanguageStatusDto {
-      language: language.display_name(),
+      language: language.name().to_owned(),
       server: None,
       errors: 0,
       warnings: 0,

@@ -4,7 +4,8 @@ use ferrite_text::TextBuffer;
 use streaming_iterator::StreamingIterator;
 use tree_sitter::{QueryCursor, Tree};
 
-use crate::languages::LanguageId;
+use crate::languages::Grammar;
+use crate::parse::SyntaxTree;
 
 /// Highlight categories. The names (in this order) are part of the editor
 /// protocol; the frontend maps them to theme colors.
@@ -93,16 +94,16 @@ pub struct Span {
 }
 
 /// Highlights `lines` (each limited to its first `max_line_bytes`) using
-/// `tree`, which must match `buffer` (edited and, ideally, reparsed). Returns
-/// one list of spans per line.
+/// `syntax`, which must match `buffer` (edited and, ideally, reparsed).
+/// Injected languages are painted over the document's own. Returns one list
+/// of spans per line.
 pub fn highlight_lines(
-  language: LanguageId,
-  tree: &Tree,
+  syntax: &SyntaxTree,
   buffer: &TextBuffer,
   lines: Range<usize>,
   max_line_bytes: usize,
 ) -> Vec<Vec<Span>> {
-  let Ok(grammar) = language.grammar() else {
+  let Ok(grammar) = syntax.language().grammar() else {
     return lines.map(|_| Vec::new()).collect();
   };
   let bounds: Vec<Range<usize>> = lines
@@ -127,12 +128,28 @@ pub fn highlight_lines(
     let range = bounds[run_start].start..bounds[run_end - 1].end;
     paint_range(
       grammar,
-      tree,
+      syntax.tree(),
       buffer,
-      range,
+      range.clone(),
       &bounds[run_start..run_end],
       &mut paints[run_start..run_end],
     );
+    // Layers come outermost first, so nested injections paint last.
+    for layer in &syntax.layers {
+      if layer.span.start < range.end
+        && range.start < layer.span.end
+        && let Ok(grammar) = layer.language.grammar()
+      {
+        paint_range(
+          grammar,
+          &layer.tree,
+          buffer,
+          range.clone(),
+          &bounds[run_start..run_end],
+          &mut paints[run_start..run_end],
+        );
+      }
+    }
     run_start = run_end;
   }
 
@@ -140,7 +157,7 @@ pub fn highlight_lines(
 }
 
 fn paint_range(
-  grammar: &crate::languages::Grammar,
+  grammar: &Grammar,
   tree: &Tree,
   buffer: &TextBuffer,
   range: Range<usize>,
@@ -203,13 +220,20 @@ fn kind_from_u8(value: u8) -> Option<TokenKind> {
 mod tests {
   use super::*;
   use crate::parse::parse;
+  use crate::testing;
 
-  fn highlight(language: LanguageId, text: &str) -> Vec<Vec<(String, &'static str)>> {
-    let buffer = TextBuffer::from_text(text);
-    let tree = parse(language, &buffer, None, || false)
+  fn parsed(language: &str, buffer: &TextBuffer) -> SyntaxTree {
+    let registry = testing::registry();
+    let language = registry.get(language).expect("an example");
+    parse(language, &registry, buffer, None, || false)
       .expect("grammar")
-      .expect("parses");
-    highlight_lines(language, &tree, &buffer, 0..buffer.line_count(), 1 << 20)
+      .expect("parses")
+  }
+
+  fn highlight(language: &str, text: &str) -> Vec<Vec<(String, &'static str)>> {
+    let buffer = TextBuffer::from_text(text);
+    let tree = parsed(language, &buffer);
+    highlight_lines(&tree, &buffer, 0..buffer.line_count(), 1 << 20)
       .into_iter()
       .enumerate()
       .map(|(line, spans)| {
@@ -229,7 +253,7 @@ mod tests {
   #[test]
   fn highlights_rust_tokens() {
     let lines = highlight(
-      LanguageId::Rust,
+      "rust",
       "// greet\nfn main() {\n    let name = \"Ferrite\\n\";\n    println!(\"{}\", 42);\n}\n",
     );
     assert!(has(&lines[0], "// greet", "comment"));
@@ -251,7 +275,7 @@ mod tests {
 
   #[test]
   fn multi_line_tokens_are_split_per_line() {
-    let lines = highlight(LanguageId::Rust, "/* one\ntwo */ fn x() {}\n");
+    let lines = highlight("rust", "/* one\ntwo */ fn x() {}\n");
     assert!(has(&lines[0], "/* one", "comment"));
     assert!(has(&lines[1], "two */", "comment"));
     assert!(has(&lines[1], "fn", "keyword"));
@@ -259,17 +283,14 @@ mod tests {
 
   #[test]
   fn highlights_other_languages() {
-    let ts = highlight(
-      LanguageId::TypeScript,
-      "interface A { b: number }\nconst c = `t`;\n",
-    );
+    let ts = highlight("typescript", "interface A { b: number }\nconst c = `t`;\n");
     assert!(has(&ts[0], "interface", "keyword"));
     assert!(has(&ts[1], "const", "keyword"));
-    let json = highlight(LanguageId::Json, "{\"key\": true}");
+    let json = highlight("json", "{\"key\": true}");
     assert!(json[0].iter().any(|(t, _)| t.contains("key")));
-    let toml = highlight(LanguageId::Toml, "[package]\nname = \"x\"\n");
+    let toml = highlight("toml", "[package]\nname = \"x\"\n");
     assert!(toml[1].iter().any(|(_, k)| *k == "string"));
-    let python = highlight(LanguageId::Python, "def f(x):\n    return x\n");
+    let python = highlight("python", "def f(x):\n    return x\n");
     assert!(has(&python[0], "def", "keyword"));
   }
 
@@ -277,10 +298,8 @@ mod tests {
   fn long_lines_are_highlighted_only_up_to_the_limit() {
     let line = format!("let s = \"{}\";", "x".repeat(100_000));
     let buffer = TextBuffer::from_text(&line);
-    let tree = parse(LanguageId::Rust, &buffer, None, || false)
-      .expect("grammar")
-      .expect("parses");
-    let spans = highlight_lines(LanguageId::Rust, &tree, &buffer, 0..1, 1000);
+    let tree = parsed("rust", &buffer);
+    let spans = highlight_lines(&tree, &buffer, 0..1, 1000);
     assert!(spans[0].iter().all(|span| span.end <= 1000));
     assert!(spans[0].iter().any(|span| span.kind == TokenKind::String));
   }

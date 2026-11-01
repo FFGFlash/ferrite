@@ -17,7 +17,7 @@ compare against, not claims about other machines or other editors.
 | Compare with a saved baseline                  | `cargo bench -p ferrite-benches -- --save-baseline m4`, later `-- --baseline m4` |
 | End-to-end: startup and idle memory            | `pnpm tauri build --no-bundle`, then `pnpm bench:app startup`                    |
 | End-to-end: typing latency                     | `pnpm bench:app typing`                                                          |
-| End-to-end: typing in a source file            | `pnpm bench:app typing --file path/to/file.rs`                                   |
+| End-to-end: typing in a source file            | `pnpm bench:app typing --file path/to/file.rs --language extensions/rust`        |
 | End-to-end, with your extensions loaded        | add `--extensions` (runs skip extensions otherwise)                              |
 | End-to-end: large-document scrolling           | `pnpm bench:app scroll`                                                          |
 | End-to-end: opening a file                     | `pnpm bench:app open --file path/to/file`                                        |
@@ -343,6 +343,26 @@ because `perf_stats` can't be reset.
 - **Under the lock first.** The first version built the minimap under the editor lock, at
   13.6 ms p50 and 60 ms p95 per request in a debug build. That held up edits, which is why it
   now snapshots instead.
+
+## Languages from extensions
+
+Since [ADR 0014](adr/0014-languages-only-from-extensions.md), every grammar is a
+WebAssembly module run by Tree-sitter's Wasmtime store instead of native code.
+Before removing the native grammars, both were compared on the same text in one
+release build (best of 15 runs, on the 1,370-line
+`crates/ferrite-extension-host/src/host.rs`):
+
+| Measurement                             | Native | WebAssembly |
+| --------------------------------------- | ------ | ----------- |
+| Full parse                              | 5.2 ms | 7.7 ms      |
+| Incremental reparse after one keystroke | 144 µs | 164 µs      |
+| Highlighting 60 lines (query, no parse) | 229 µs | 225 µs      |
+
+Highlighting doesn't change, as queries run natively either way, and a
+keystroke's reparse stays far inside the 3 ms inline budget. First parses of
+large files took longer and go to the background as before. Highlight output
+was identical for every former built-in language on real files from this
+repository.
 
 ## Optimizations made from these measurements
 

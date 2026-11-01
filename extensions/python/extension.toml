@@ -1,0 +1,28 @@
+# Python: highlighting from a Tree-sitter grammar compiled to WebAssembly, and
+# Pyright. No code. See docs/extensions.md#languages.
+id = "example.python"
+name = "Python"
+version = "0.1.0"
+description = "Python highlighting, and Pyright for diagnostics, hover, definitions, and completion."
+api_version = "1"
+
+[engines]
+ferrite = ">=0.1.0"
+
+[permissions]
+language_servers = true
+
+[[languages]]
+id = "python"
+name = "Python"
+file_extensions = ["py", "pyi"]
+grammar = "grammars/tree-sitter-python.wasm"
+highlights = "queries/highlights.scm"
+
+# `npm install -g pyright`
+[[language_servers]]
+name = "pyright"
+command = "pyright-langserver"
+args = ["--stdio"]
+languages = ["python"]
+root_markers = ["pyproject.toml", "setup.py", "pyrightconfig.json"]

@@ -54,19 +54,17 @@ tauri-plugin-dialog = "2.8.3"
 tempfile = "3.27.0"
 thiserror = "2.0.21"
 tracing = "0.1.44"
-tree-sitter = "0.27.1"
-tree-sitter-javascript = "0.25.0"
-tree-sitter-json = "0.24.8"
-tree-sitter-python = "0.25.0"
-tree-sitter-rust = "0.24.2"
-tree-sitter-toml-ng = "0.7.0"
-tree-sitter-typescript = "0.23.2"
+# `wasm` loads grammars that extensions contribute as WebAssembly. It runs
+# them on the wasmtime below, so the two versions must match.
+tree-sitter = { version = "0.27.1", features = ["wasm"] }
 tracing-appender = "0.2.5"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter", "fmt"] }
 unicode-segmentation = "1.13.3"
 # Only what extensions need: compiling and running components. No WASI,
-# GC, threads, or async.
-wasmtime = { version = "50.0.1", default-features = false, features = [
+# GC, threads, or async. Pinned to the major version tree-sitter's `wasm`
+# feature uses (see above), so there is one wasmtime; 48.0.8 has the same
+# security fixes as 50.0.1.
+wasmtime = { version = "48.0.8", default-features = false, features = [
   "anyhow",
   "component-model",
   "cranelift",

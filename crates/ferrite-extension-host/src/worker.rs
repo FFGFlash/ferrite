@@ -318,10 +318,13 @@ pub struct Budgets {
   pub memory: usize,
 }
 
-fn wit_permission(permission: Permission) -> WitPermission {
+/// The permission as the extension sees it; `None` for permissions that
+/// concern the editor, not the extension's code.
+fn wit_permission(permission: Permission) -> Option<WitPermission> {
   match permission {
-    Permission::DocumentsRead => WitPermission::DocumentsRead,
-    Permission::DocumentsWrite => WitPermission::DocumentsWrite,
+    Permission::DocumentsRead => Some(WitPermission::DocumentsRead),
+    Permission::DocumentsWrite => Some(WitPermission::DocumentsWrite),
+    Permission::LanguageServers => None,
   }
 }
 
@@ -368,7 +371,12 @@ fn run(shared: &Weak<Shared>, setup: &Setup) -> Result<(), Failure> {
   })?;
 
   let activation = Activation {
-    granted: setup.granted.iter().copied().map(wit_permission).collect(),
+    granted: setup
+      .granted
+      .iter()
+      .copied()
+      .filter_map(wit_permission)
+      .collect(),
   };
   guarded(&mut store, budgets.activation, "Activation", |store| {
     extension.call_activate(&mut *store, &activation)

@@ -1,6 +1,8 @@
 //! End-to-end benchmark support, active only when Ferrite is started with
 //! `--bench <name> [file]` (see `scripts/bench.mjs`). Extensions are not
-//! loaded unless `--bench-extensions` is given too.
+//! loaded unless `--bench-extensions` is given too. `--bench-language <dir>`
+//! (repeatable) loads only that extension folder, for its languages, so a
+//! file can be highlighted without the user's extensions.
 //!
 //! The frontend reads the requested benchmark at startup, runs it against the
 //! real editor (IPC, rendering, and all), and reports its measurements. The
@@ -27,6 +29,8 @@ pub struct BenchState {
   file: Option<PathBuf>,
   /// `--bench-extensions`: load extensions, which benchmarks skip otherwise.
   extensions: bool,
+  /// `--bench-language <dir>`: extension folders to load on their own.
+  languages: Vec<PathBuf>,
   launched_at: Instant,
 }
 
@@ -43,6 +47,11 @@ impl BenchState {
       name,
       file,
       extensions: args.iter().any(|arg| arg == "--bench-extensions"),
+      languages: args
+        .windows(2)
+        .filter(|pair| pair[0] == "--bench-language")
+        .map(|pair| PathBuf::from(&pair[1]))
+        .collect(),
       launched_at,
     }
   }
@@ -53,6 +62,11 @@ impl BenchState {
 
   pub fn with_extensions(&self) -> bool {
     self.extensions
+  }
+
+  /// Extension folders to load instead of the user's extensions.
+  pub fn languages(&self) -> &[PathBuf] {
+    &self.languages
   }
 
   /// Arguments consumed by `--bench`, so they are not opened as files.

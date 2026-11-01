@@ -1,0 +1,27 @@
+# Rust: highlighting from a Tree-sitter grammar compiled to WebAssembly, and
+# rust-analyzer. No code. See docs/extensions.md#languages.
+id = "example.rust"
+name = "Rust"
+version = "0.1.0"
+description = "Rust highlighting, and rust-analyzer for diagnostics, hover, definitions, and completion."
+api_version = "1"
+
+[engines]
+ferrite = ">=0.1.0"
+
+[permissions]
+language_servers = true
+
+[[languages]]
+id = "rust"
+name = "Rust"
+file_extensions = ["rs"]
+grammar = "grammars/tree-sitter-rust.wasm"
+highlights = "queries/highlights.scm"
+
+# `rustup component add rust-analyzer`
+[[language_servers]]
+name = "rust-analyzer"
+command = "rust-analyzer"
+languages = ["rust"]
+root_markers = ["Cargo.toml"]

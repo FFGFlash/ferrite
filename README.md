@@ -89,23 +89,33 @@ overwriting when you save.
 
 ## Languages
 
-Rust, TypeScript (and TSX), JavaScript, JSON, TOML, and Python files are highlighted with
-Tree-sitter grammars built into Ferrite.
+Ferrite has no languages built in: each comes from an extension, so you add exactly the ones you
+edit. Without any, files are plain text. A language extension brings a Tree-sitter grammar
+compiled to WebAssembly for highlighting, and usually declares a language server. These are
+included, with no code to build:
 
-With a language server installed, Ferrite also shows errors and warnings as you type (squiggles,
-plus counts in the status bar), shows type information and documentation when the pointer rests
-on a symbol, goes to definitions (F12 or Ctrl/⌘+click; holding Ctrl/⌘ underlines the symbol under
-the pointer when it has one), and offers completions (as you type, after `.` and similar
-characters, or with Ctrl+Space). Servers start when you open a file that needs one:
+| Extension                            | Languages                | Language server                   | Install the server with                                |
+| ------------------------------------ | ------------------------ | --------------------------------- | ------------------------------------------------------ |
+| [Rust](extensions/rust/)             | Rust                     | `rust-analyzer`                   | `rustup component add rust-analyzer`                   |
+| [TypeScript](extensions/typescript/) | TypeScript, TSX          | `typescript-language-server`      | `npm install -g typescript-language-server typescript` |
+| [JavaScript](extensions/javascript/) | JavaScript, JSX          | `typescript-language-server`      | as above                                               |
+| [JSON](extensions/json/)             | JSON                     | —                                 |                                                        |
+| [TOML](extensions/toml/)             | TOML, `Cargo.lock`       | —                                 |                                                        |
+| [Python](extensions/python/)         | Python                   | `pyright-langserver`              | `npm install -g pyright`                               |
+| [HTML & CSS](extensions/html-css/)   | HTML (with CSS, JS), CSS | `vscode-html/css-language-server` | `npm install -g vscode-langservers-extracted`          |
 
-| Language                | Server                       | Install                                                |
-| ----------------------- | ---------------------------- | ------------------------------------------------------ |
-| Rust                    | `rust-analyzer`              | `rustup component add rust-analyzer`                   |
-| TypeScript / JavaScript | `typescript-language-server` | `npm install -g typescript-language-server typescript` |
-| Python                  | `pyright-langserver`         | `npm install -g pyright`                               |
+Load one with **Extensions: Load Development Extension…** (choose its folder, such as
+`extensions/rust`), or install it by copying its folder into the `extensions` folder next to
+`settings.toml`. Ferrite asks before running an extension's language server; highlighting
+works either way.
 
-The status bar shows the server's state; hover it for details if a server is missing or failed.
-Servers can be changed, added, or turned off in the `[lsp]` section of the settings.
+With a language server, Ferrite also shows errors and warnings as you type (squiggles, plus
+counts in the status bar), shows type information and documentation when the pointer rests on a
+symbol, goes to definitions (F12 or Ctrl/⌘+click; holding Ctrl/⌘ underlines the symbol under the
+pointer when it has one), and offers completions (as you type, after `.` and similar
+characters, or with Ctrl+Space). Servers start when you open a file that needs one. The status
+bar shows the server's state; hover it for details if a server is missing or failed. Servers can
+be changed, added, or turned off in the `[lsp]` section of the settings.
 
 ## Extensions
 
@@ -113,14 +123,15 @@ Extensions are WebAssembly modules that run in a sandbox: they can only use Ferr
 [extension API](crates/ferrite-extension-api/wit/extension.wit). With it they add commands to
 the palette, read open documents, edit them, and show problems as squiggles. They can also
 customize the workbench: color themes, file icon themes, keybindings, context menu items, status
-bar items, side bar views, and highlights in the text. They have no access to files, the network, or anything
-else on your computer. Before an extension starts, Ferrite
-asks you to allow the permissions it requests (reading or editing open documents). The
+bar items, side bar views, and highlights in the text, and add languages. They have no access to
+files, the network, or anything else on your computer. Before an extension starts, Ferrite asks
+you to allow the permissions it requests (reading or editing open documents, or running the
+language servers it declares). The
 Extensions view (`Ctrl+Shift+X`) shows each extension's state and permissions, and lets you
 change them, restart an extension, or turn it off. An extension that crashes, loops, or uses too
 much memory is stopped without affecting the editor.
 
-Four example extensions are included:
+Besides the [language extensions](#languages), five example extensions are included:
 
 - [Tidy](extensions/tidy/) flags trailing whitespace and long lines, and can trim them.
 - [TODOs](extensions/todos/) highlights TODO and FIXME comments and lists them in a side bar
@@ -128,6 +139,8 @@ Four example extensions are included:
   **Insert TODO Comment** to the editor's context menu.
 - [Example Themes](extensions/themes/) adds the Midnight and Paper color themes, with no code.
 - [Example File Icons](extensions/icons/) adds the Colorful file icon theme, with no code.
+- [HTML & CSS](extensions/html-css/) adds HTML and CSS highlighting and their language servers,
+  with no code.
 
 To try them:
 

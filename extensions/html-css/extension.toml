@@ -1,0 +1,51 @@
+# A language-only extension: HTML and CSS highlighting from Tree-sitter
+# grammars compiled to WebAssembly, and the language servers from
+# vscode-langservers-extracted. No code, so no entrypoint. See
+# docs/extensions.md#languages.
+id = "example.html-css"
+name = "HTML & CSS"
+version = "0.1.0"
+description = "HTML and CSS: highlighting (with CSS and JavaScript inside HTML) and language servers."
+api_version = "1"
+
+[engines]
+ferrite = ">=0.1.0"
+
+# Ferrite starts the servers below only once you allow this.
+[permissions]
+language_servers = true
+
+[[languages]]
+# The id language servers, settings, and injections use.
+id = "html"
+name = "HTML"
+file_extensions = ["html", "htm", "xhtml"]
+# Built with `tree-sitter build --wasm`; exports `tree_sitter_html`.
+grammar = "grammars/tree-sitter-html.wasm"
+highlights = "queries/html/highlights.scm"
+# Highlights <style> as CSS and <script> as JavaScript.
+injections = "queries/html/injections.scm"
+
+[[languages]]
+id = "css"
+name = "CSS"
+file_extensions = ["css"]
+grammar = "grammars/tree-sitter-css.wasm"
+highlights = "queries/css/highlights.scm"
+
+# `npm install -g vscode-langservers-extracted` provides both servers. Ferrite
+# looks for them on the PATH and shows "not installed" in the status bar if
+# they're missing; highlighting works either way.
+[[language_servers]]
+name = "vscode-html-language-server"
+command = "vscode-html-language-server"
+args = ["--stdio"]
+languages = ["html"]
+root_markers = ["package.json"]
+
+[[language_servers]]
+name = "vscode-css-language-server"
+command = "vscode-css-language-server"
+args = ["--stdio"]
+languages = ["css"]
+root_markers = ["package.json"]

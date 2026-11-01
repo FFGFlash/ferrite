@@ -3,7 +3,7 @@
  */
 import { call } from './index'
 
-export type Permission = 'documents-read' | 'documents-write'
+export type Permission = 'documents-read' | 'documents-write' | 'language-servers'
 
 export type ExtensionState =
   | 'inactive'
@@ -107,6 +107,24 @@ export interface DecorationType {
   italic: boolean
 }
 
+/** A language an extension adds, highlighted by its own grammar. */
+export interface LanguageContribution {
+  /** The language id, e.g. `html`. */
+  id: string
+  name: string
+  fileExtensions: string[]
+  fileNames: string[]
+}
+
+/** A language server an extension declares; run once allowed. */
+export interface LanguageServerContribution {
+  name: string
+  command: string
+  args: string[]
+  languages: string[]
+  rootMarkers: string[]
+}
+
 export interface Contributions {
   themes: ThemeContribution[]
   iconThemes: IconThemeContribution[]
@@ -114,6 +132,8 @@ export interface Contributions {
   menus: MenuContribution[]
   views: ViewContribution[]
   decorations: DecorationType[]
+  languages: LanguageContribution[]
+  languageServers: LanguageServerContribution[]
 }
 
 export interface StatusItem {

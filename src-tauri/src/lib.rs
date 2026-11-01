@@ -13,6 +13,7 @@ mod editor;
 mod error;
 mod events;
 mod extensions;
+mod languages;
 mod logging;
 mod lsp;
 mod paths;
@@ -40,6 +41,7 @@ pub fn run() {
     .manage(perf::Perf::default())
     .manage(lsp::LspState::default())
     .manage(extensions::ExtensionsState::default())
+    .manage(languages::LanguagesState::default())
     .manage(terminal::TerminalState::default())
     .setup(move |app| {
       let log_dir = match app.path().app_log_dir() {
@@ -74,7 +76,8 @@ pub fn run() {
       let args: Vec<String> = std::env::args().skip(1).collect();
       let bench = bench::BenchState::from_args(&args, launched_at);
       let benchmarking = bench.active();
-      let load_extensions = !benchmarking || bench.with_extensions();
+      let load_extensions =
+        !benchmarking || bench.with_extensions() || !bench.languages().is_empty();
       app.manage(bench);
       if benchmarking {
         app.state::<ui_state::UiStateStore>().make_ephemeral();

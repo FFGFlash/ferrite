@@ -1,0 +1,39 @@
+# TypeScript and TSX: highlighting from Tree-sitter grammars compiled to
+# WebAssembly, and typescript-language-server. No code. See
+# docs/extensions.md#languages.
+id = "example.typescript"
+name = "TypeScript"
+version = "0.1.0"
+description = "TypeScript and TSX highlighting, and typescript-language-server."
+api_version = "1"
+
+[engines]
+ferrite = ">=0.1.0"
+
+[permissions]
+language_servers = true
+
+[[languages]]
+id = "typescript"
+name = "TypeScript"
+file_extensions = ["ts", "mts", "cts"]
+grammar = "grammars/tree-sitter-typescript.wasm"
+highlights = "queries/typescript/highlights.scm"
+
+[[languages]]
+# The LSP id for TSX.
+id = "typescriptreact"
+name = "TypeScript JSX"
+file_extensions = ["tsx"]
+grammar = "grammars/tree-sitter-tsx.wasm"
+grammar_name = "tsx"
+highlights = "queries/tsx/highlights.scm"
+
+# `npm install -g typescript-language-server typescript`. The JavaScript
+# extension declares the same server for JavaScript; one runs for both.
+[[language_servers]]
+name = "typescript-language-server"
+command = "typescript-language-server"
+args = ["--stdio"]
+languages = ["typescript", "typescriptreact"]
+root_markers = ["tsconfig.json", "jsconfig.json", "package.json"]

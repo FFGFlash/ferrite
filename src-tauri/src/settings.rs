@@ -9,7 +9,7 @@ use std::sync::{PoisonError, RwLock};
 use ferrite_core::EditorConfig;
 use ferrite_extension_host::contributions::check_theme_colors;
 use ferrite_extension_host::keys::normalize as normalize_key;
-use ferrite_lsp::{ServerCommand, ServerConfig, default_servers};
+use ferrite_lsp::{ServerCommand, ServerConfig};
 use ferrite_terminal::Shell;
 use ferrite_terminal::profiles::{self, Profile};
 use ferrite_workspace::ExcludeFilter;
@@ -50,12 +50,13 @@ const TEMPLATE: &str = r##"# Ferrite settings. Uncomment a line to change it; sa
 
 [lsp]
 # Language servers provide diagnostics, hover, go to definition, and
-# completion. Known servers start when a file needs one, if installed:
-# rust-analyzer, typescript-language-server, and pyright-langserver.
+# completion. Language extensions declare them (the Rust extension declares
+# rust-analyzer, for example), and they start when a file needs one, if
+# installed and allowed.
 # enabled = true
 #
-# Change a server, or add one (languages: rust, typescript, typescriptreact,
-# javascript, python, json, toml):
+# Change an extension's server by its name, or add one for any language an
+# extension adds (its id, such as rust or python):
 # [lsp.servers.rust-analyzer]
 # command = "rust-analyzer"
 # args = []
@@ -350,18 +351,8 @@ impl Settings {
       }
     }
     ExcludeFilter::new(&self.files.exclude).map_err(|error| format!("files.exclude: {error}"))?;
-    let known: Vec<String> = default_servers()
-      .into_iter()
-      .map(|server| server.name)
-      .collect();
-    for (name, server) in &self.lsp.servers {
-      if !known.contains(name) && (server.command.is_none() || server.languages.is_none()) {
-        return Err(format!(
-          "lsp.servers.{name} needs a command and languages (known servers: {})",
-          known.join(", ")
-        ));
-      }
-    }
+    // Entries for servers that aren't known may change an extension's
+    // server, so they need not be complete (see `language_servers_with`).
     if self
       .extensions
       .development
@@ -393,16 +384,45 @@ impl Settings {
     Ok(())
   }
 
-  /// The language servers to use: the known ones with any changes from
-  /// settings, plus added ones, minus disabled ones.
-  pub fn language_servers(&self) -> Vec<ServerConfig> {
+  /// The language servers to use: those extensions declare (`contributed`)
+  /// with any changes from settings, plus ones added in settings, minus
+  /// disabled ones. Extensions that declare a server with the same name
+  /// and command share it, serving all their languages; with another
+  /// command, the first declaration wins. A settings entry for a server
+  /// that doesn't exist is ignored unless it has a command and languages.
+  pub fn language_servers_with(&self, contributed: Vec<ServerConfig>) -> Vec<ServerConfig> {
     if !self.lsp.enabled {
       return Vec::new();
     }
-    let mut servers = default_servers();
+    let mut servers: Vec<ServerConfig> = Vec::new();
+    for server in contributed {
+      match servers.iter_mut().find(|known| known.name == server.name) {
+        None => servers.push(server),
+        Some(known) if known.command == server.command => {
+          for language in server.languages {
+            if !known.languages.contains(&language) {
+              known.languages.push(language);
+            }
+          }
+        }
+        Some(_) => tracing::warn!(
+          server = %server.name,
+          "two extensions declare this language server with different commands; using the first"
+        ),
+      }
+    }
     for (name, settings) in &self.lsp.servers {
       let index = match servers.iter().position(|server| server.name == *name) {
         Some(index) => index,
+        None if settings.command.is_none() || settings.languages.is_none() => {
+          if settings.enabled != Some(false) {
+            tracing::warn!(
+              server = %name,
+              "lsp.servers.{name} names no extension's server, and has no command and languages"
+            );
+          }
+          continue;
+        }
         None => {
           servers.push(ServerConfig {
             name: name.clone(),
@@ -754,9 +774,14 @@ mod tests {
     assert!(key.contains("file.save"), "{key}");
     let glob = Settings::parse("[files]\nexclude = [\"[x\"]\n").expect_err("bad glob");
     assert!(glob.contains("files.exclude"));
-    let server =
-      Settings::parse("[lsp.servers.mine]\ncommand = \"x\"\n").expect_err("no languages");
-    assert!(server.contains("lsp.servers.mine"), "{server}");
+    // May change an extension's server; ignored if there isn't one.
+    let partial = Settings::parse("[lsp.servers.mine]\ncommand = \"x\"\n").expect("valid");
+    assert!(
+      partial
+        .language_servers_with(Vec::new())
+        .iter()
+        .all(|server| server.name != "mine")
+    );
     let scrollback =
       Settings::parse("[terminal]\nscrollback = 1000000\n").expect_err("too much scrollback");
     assert!(scrollback.contains("terminal.scrollback"), "{scrollback}");
@@ -871,7 +896,40 @@ max_line_length = 80
   }
 
   #[test]
-  fn language_servers_merge_settings_over_the_known_ones() {
+  fn language_servers_come_from_extensions_with_settings_over_them() {
+    let server = |name: &str, program: &str, languages: &[&str]| ServerConfig {
+      name: name.into(),
+      command: ServerCommand {
+        program: program.into(),
+        args: vec!["--stdio".into()],
+      },
+      languages: languages.iter().map(|&l| l.into()).collect(),
+      root_markers: Vec::new(),
+    };
+    let contributed = vec![
+      server("rust-analyzer", "rust-analyzer", &["rust"]),
+      server("pyright", "pyright-langserver", &["python"]),
+      // The TypeScript and JavaScript extensions share one server.
+      server("tsls", "typescript-language-server", &["typescript"]),
+      server(
+        "tsls",
+        "typescript-language-server",
+        &["javascript", "typescript"],
+      ),
+      server("tsls", "something-else", &["css"]),
+    ];
+
+    let plain = Settings::parse("").expect("valid");
+    assert!(
+      plain.language_servers_with(Vec::new()).is_empty(),
+      "none built in"
+    );
+    let servers = plain.language_servers_with(contributed.clone());
+    assert_eq!(servers.len(), 3);
+    let tsls = servers.iter().find(|s| s.name == "tsls").expect("shared");
+    assert_eq!(tsls.languages, ["typescript", "javascript"]);
+    assert_eq!(tsls.command.program, "typescript-language-server");
+
     let settings = Settings::parse(
       r#"
 [lsp.servers.rust-analyzer]
@@ -882,20 +940,34 @@ enabled = false
 command = "mine"
 args = ["--stdio"]
 languages = ["toml"]
+[lsp.servers.typo]
+command = "x"
 "#,
     )
     .expect("valid");
-    let servers = settings.language_servers();
+    let servers = settings.language_servers_with(contributed);
     let rust = servers
       .iter()
       .find(|s| s.name == "rust-analyzer")
       .expect("rust");
-    assert_eq!(rust.command.program, "/opt/ra");
+    assert_eq!(rust.command.program, "/opt/ra", "settings change a server");
     assert_eq!(rust.languages, ["rust"]);
-    assert!(servers.iter().all(|s| s.name != "pyright"));
+    assert!(
+      servers.iter().all(|s| s.name != "pyright"),
+      "or turn it off"
+    );
     let mine = servers.iter().find(|s| s.name == "mine").expect("added");
     assert_eq!(mine.command.args, ["--stdio"]);
+    assert!(
+      servers.iter().all(|s| s.name != "typo"),
+      "incomplete entries for no server are ignored"
+    );
+
     let disabled = Settings::parse("[lsp]\nenabled = false\n").expect("valid");
-    assert!(disabled.language_servers().is_empty());
+    assert!(
+      disabled
+        .language_servers_with(vec![server("a", "a", &["rust"])])
+        .is_empty()
+    );
   }
 }

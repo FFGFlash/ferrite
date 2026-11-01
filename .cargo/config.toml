@@ -1,0 +1,6 @@
+# Tree-sitter's `wasm` feature compiles C against wasmtime's headers, which
+# assume wasmtime is a DLL on Windows unless told it is linked statically
+# (otherwise every link warns with LNK4217).
+[env]
+CFLAGS_x86_64_pc_windows_msvc = "-DLIBWASM_STATIC"
+CFLAGS_aarch64_pc_windows_msvc = "-DLIBWASM_STATIC"
