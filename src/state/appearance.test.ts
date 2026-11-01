@@ -14,6 +14,8 @@ const settings = (theme: string, colors: Record<string, string> = {}): FrontendS
   tabSize: 4,
   terminalScrollback: 1000,
   terminalScreenReader: false,
+  minimapRegionHeaders: true,
+  minimapMarkHeaders: true,
 })
 
 const themes = {

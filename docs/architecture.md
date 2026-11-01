@@ -137,6 +137,10 @@ See [ADR 0002](adr/0002-text-model-and-editor-protocol.md) for the reasoning.
   rows, other movement steps over hidden lines, and any other operation that leaves a selection
   in hidden lines unfolds their region. Line operations take a folded region with its first
   line.
+- **Region comments** (`regions.rs`): `RegionMarkers` finds `#region`/`#endregion` and `MARK:`
+  comments, written with the language's `CommentTokens`. After an edit it reads only the changed
+  lines, mapping the other markers through the line splices. Marked regions join the foldable
+  regions, and named regions and `MARK:` comments are the minimap's section headers.
 - **Find** compiles a `SearchQuery` (literal or regex; case-sensitive; whole word) with
   `regex-cursor`, which searches the rope's chunks directly without copying the text. `^`/`$`
   match per line, including before CRLF. Counts stop at 20,000 matches and are reported as
@@ -472,7 +476,9 @@ after Save As or when the languages change.
 - **The minimap highlights from a snapshot.** It covers many more lines than the viewport, so
   `editor_minimap` copies the rope and the edited tree under the editor lock and runs the query
   after releasing it ([ADR 0010](adr/0010-minimap.md)). It doesn't touch the highlights mirror
-  that keeps the editor's views incremental.
+  that keeps the editor's views incremental. The snapshot also carries the section headers on
+  its rows (`headers`), which the minimap draws as labels. They stack when they would overlap,
+  and the frontend leaves out the kinds the `editor.minimap_*_headers` settings turn off.
 - Grammars and queries are compiled once, on first use of each language. Documents over 16 MiB
   aren't highlighted.
 

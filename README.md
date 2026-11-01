@@ -76,6 +76,7 @@ preserved exactly, and new lines use the file's existing line ending.
 | Toggle fold                         | Ctrl+K Ctrl+L                    | ⌘K ⌘L                    |
 | Fold / unfold recursively           | Ctrl+K Ctrl+[ / Ctrl+K Ctrl+]    | ⌘K ⌘[ / ⌘K ⌘]            |
 | Fold all / unfold all               | Ctrl+K Ctrl+0 / Ctrl+K Ctrl+J    | ⌘K ⌘0 / ⌘K ⌘J            |
+| Fold all / unfold all regions       | Ctrl+K Ctrl+8 / Ctrl+K Ctrl+9    | ⌘K ⌘8 / ⌘K ⌘9            |
 | Fold level 1 to 7                   | Ctrl+K Ctrl+1 … Ctrl+K Ctrl+7    | ⌘K ⌘1 … ⌘K ⌘7            |
 | Add cursor above / below / at click | Ctrl+Alt+↑ / ↓, Alt+click        | ⌘⌥↑ / ↓, ⌥click          |
 | Select word / one cursor            | Double-click / Escape            | Double-click / Escape    |
@@ -95,6 +96,19 @@ or by indentation for languages without one. Fold markers appear in the gutter w
 is over it; click one to fold, or click the ⋯ after a folded line to unfold. A folded region
 moves, copies, and deletes with its first line, and searching or undoing into it unfolds it.
 Ferrite remembers what was folded in each file.
+
+Region comments mark foldable regions of your own, written with the language's comment syntax:
+
+```rust
+// #region Helpers
+fn a() {}
+// #endregion
+```
+
+(`# region` in Python and TOML, `/* #region */` in CSS, `<!-- #region -->` in HTML.) Folding one
+hides it through its `#endregion` line. The minimap labels named regions, and `// MARK: Name`
+comments too (`// MARK: - Name` adds a separator line). `editor.minimap_region_headers` and
+`editor.minimap_mark_headers` turn the labels off.
 
 A minimap beside the scrollbar shows the whole document small, in its syntax colors. Click it to
 jump to that part of the file, or drag its slider to scroll. **View: Toggle Minimap** hides or

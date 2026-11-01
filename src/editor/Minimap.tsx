@@ -26,6 +26,8 @@ import './Minimap.css'
 const OVERSCAN = 100
 /** Least time between requests while the document changes (typing). */
 const CHANGE_THROTTLE_MS = 100
+/** Font size of section header labels, in CSS pixels (as in VS Code). */
+const HEADER_FONT_SIZE = 9
 
 interface MinimapProps {
   documentId: number
@@ -69,7 +71,7 @@ export function Minimap({
   const [fetched, setFetched] = useState<Fetched | null>(null)
   const [dragging, setDragging] = useState(false)
   const kind = useStore(themeKind)
-  const { fontSize } = useStore(appearance)
+  const { fontSize, minimapRegionHeaders, minimapMarkHeaders } = useStore(appearance)
 
   const height = measured?.clientHeight ?? 0
   const layout = measured ? minimapLayout(measured, lineHeight, height) : null
@@ -128,7 +130,55 @@ export function Minimap({
         context.fillRect(x, y, Math.round(end * MINIMAP_CHAR_WIDTH * ratio) - x, blockHeight)
       }
     }
-  }, [fetched, layout?.offset, layout?.firstLine, height, kind, fontSize, documentId])
+    // Section headers: a label over the lines, and a separator above for `MARK: -`.
+    context.globalAlpha = 1
+    const headers = view.headers.filter(header =>
+      header.region ? minimapRegionHeaders : minimapMarkHeaders,
+    )
+    if (headers.length > 0) {
+      const style = getComputedStyle(canvas)
+      const background = style.getPropertyValue('--color-editor-background').trim()
+      const labelHeight = Math.round((HEADER_FONT_SIZE + 2) * ratio)
+      const pad = Math.round(2 * ratio)
+      context.font = `600 ${Math.round(HEADER_FONT_SIZE * ratio)}px ${style.fontFamily || 'sans-serif'}`
+      context.textBaseline = 'top'
+      // Labels are taller than a row, so close headers stack instead of overlapping.
+      let free = -Infinity
+      for (const header of headers) {
+        const y = Math.max(
+          free,
+          Math.round((header.row * MINIMAP_LINE_HEIGHT - layout.offset) * ratio),
+        )
+        free = y + (header.name ? labelHeight : 0) + (header.separator ? pad : 0)
+        if (y > pixelHeight || y + labelHeight < 0) {
+          continue
+        }
+        if (header.separator) {
+          context.fillStyle = colors[0] ?? ''
+          context.globalAlpha = 0.6
+          context.fillRect(0, y, width, Math.max(1, Math.round(ratio)))
+          context.globalAlpha = 1
+        }
+        if (header.name) {
+          const top = header.separator ? y + pad : y
+          context.fillStyle = background
+          context.fillRect(0, top, width, labelHeight)
+          context.fillStyle = colors[0] ?? ''
+          context.fillText(header.name, pad, top + Math.round(ratio), width - 2 * pad)
+        }
+      }
+    }
+  }, [
+    fetched,
+    layout?.offset,
+    layout?.firstLine,
+    height,
+    kind,
+    fontSize,
+    documentId,
+    minimapRegionHeaders,
+    minimapMarkHeaders,
+  ])
 
   const onMouseDown = (event: ReactMouseEvent<HTMLDivElement>) => {
     const editor = scroller.current

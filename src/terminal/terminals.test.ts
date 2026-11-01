@@ -169,6 +169,8 @@ describe('terminals', () => {
       tabSize: 4,
       terminalScrollback: 5000,
       terminalScreenReader: true,
+      minimapRegionHeaders: true,
+      minimapMarkHeaders: true,
     })
     const { options } = xtermOf(id)
     expect(options.fontSize).toBe(18)

@@ -455,6 +455,12 @@ export const builtinCommands: Command[] = [
   }),
   editorOp('editor.foldAll', 'View', 'Fold All', 'mod+k mod+0', { type: 'foldAll' }),
   editorOp('editor.unfoldAll', 'View', 'Unfold All', 'mod+k mod+j', { type: 'unfoldAll' }),
+  editorOp('editor.foldAllRegions', 'View', 'Fold All Regions', 'mod+k mod+8', {
+    type: 'foldAllRegions',
+  }),
+  editorOp('editor.unfoldAllRegions', 'View', 'Unfold All Regions', 'mod+k mod+9', {
+    type: 'unfoldAllRegions',
+  }),
   ...[1, 2, 3, 4, 5, 6, 7].map(level =>
     editorOp(`editor.foldLevel${level}`, 'View', `Fold Level ${level}`, `mod+k mod+${level}`, {
       type: 'foldLevel',

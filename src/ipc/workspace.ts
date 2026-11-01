@@ -77,6 +77,10 @@ export interface FrontendSettings {
   terminalScrollback: number
   /** Whether terminals announce output to screen readers. */
   terminalScreenReader: boolean
+  /** Whether the minimap labels named `#region` comments. */
+  minimapRegionHeaders: boolean
+  /** Whether the minimap labels `MARK:` comments. */
+  minimapMarkHeaders: boolean
 }
 
 export interface SavedUi {

@@ -21,6 +21,7 @@ function lines(version: number, startRow: number, endRow: number): MinimapView {
     rowCount: 100,
     startRow,
     lines: Array.from({ length: Math.min(endRow, 100) - startRow }, () => [0, 4, 0]),
+    headers: [],
   }
 }
 

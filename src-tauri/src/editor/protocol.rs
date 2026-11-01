@@ -224,6 +224,9 @@ pub enum OpDto {
   },
   FoldAll,
   UnfoldAll,
+  /// Fold or unfold every region marked by region comments.
+  FoldAllRegions,
+  UnfoldAllRegions,
   FoldRecursively,
   UnfoldRecursively,
   FoldLevel {
@@ -255,6 +258,8 @@ impl OpDto {
         | Self::ToggleFoldAt { .. }
         | Self::FoldAll
         | Self::UnfoldAll
+        | Self::FoldAllRegions
+        | Self::UnfoldAllRegions
         | Self::FoldRecursively
         | Self::UnfoldRecursively
         | Self::FoldLevel { .. }
@@ -360,6 +365,8 @@ impl OpDto {
       },
       Self::FoldAll => EditorOp::FoldAll(context.folds.clone()),
       Self::UnfoldAll => EditorOp::UnfoldAll,
+      Self::FoldAllRegions => EditorOp::FoldAll(context.folds.clone()),
+      Self::UnfoldAllRegions => EditorOp::UnfoldRegions(context.folds.clone()),
       Self::FoldRecursively => EditorOp::FoldRecursively(context.folds.clone()),
       Self::UnfoldRecursively => EditorOp::UnfoldRecursively(context.folds.clone()),
       Self::FoldLevel { level } => EditorOp::FoldLevel {

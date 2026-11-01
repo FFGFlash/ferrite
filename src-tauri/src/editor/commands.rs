@@ -127,6 +127,7 @@ pub async fn document_close(window: WebviewWindow, id: u64) -> Result<bool, Comm
   window.state::<BackupState>().forget(id);
   state.counts.forget(id);
   state.syntax.forget(id);
+  state.regions.forget(id);
   window.state::<LspState>().close(id);
   window.state::<ExtensionsState>().closed(id);
   tracing::info!(document = %id, "closed document");
@@ -230,6 +231,7 @@ pub async fn editor_minimap(
         document,
         state.syntax.tree(&app, document),
         start_row..end_row,
+        |lines| folding::section_headers(&app, document, lines),
       )
     };
     let perf = app.state::<Perf>();

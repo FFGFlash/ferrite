@@ -31,6 +31,8 @@ const TEMPLATE: &str = r##"# Ferrite settings. Uncomment a line to change it; sa
 # insert_spaces = true
 # font_size = 14
 # font_family = ""          # empty: the default monospace font
+# minimap_region_headers = true  # label named #region comments in the minimap
+# minimap_mark_headers = true    # label MARK: comments in the minimap
 
 [workbench]
 # theme = "system"          # "system", "dark", "light", or an extension's theme id
@@ -171,6 +173,8 @@ pub struct EditorSettings {
   pub insert_spaces: bool,
   pub font_size: u32,
   pub font_family: String,
+  pub minimap_region_headers: bool,
+  pub minimap_mark_headers: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize)]
@@ -279,6 +283,8 @@ impl Default for EditorSettings {
       insert_spaces: true,
       font_size: 14,
       font_family: String::new(),
+      minimap_region_headers: true,
+      minimap_mark_headers: true,
     }
   }
 }
@@ -313,6 +319,8 @@ pub struct FrontendSettings {
   pub tab_size: usize,
   pub terminal_scrollback: u32,
   pub terminal_screen_reader: bool,
+  pub minimap_region_headers: bool,
+  pub minimap_mark_headers: bool,
 }
 
 impl Settings {
@@ -539,6 +547,8 @@ impl Settings {
       tab_size: self.editor.tab_size,
       terminal_scrollback: self.terminal.scrollback,
       terminal_screen_reader: self.terminal.screen_reader,
+      minimap_region_headers: self.editor.minimap_region_headers,
+      minimap_mark_headers: self.editor.minimap_mark_headers,
     }
   }
 }

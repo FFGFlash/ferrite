@@ -20,6 +20,9 @@ export interface Appearance {
   lineHeight: number
   terminalScrollback: number
   terminalScreenReader: boolean
+  /** Which section headers the minimap labels. */
+  minimapRegionHeaders: boolean
+  minimapMarkHeaders: boolean
 }
 
 const lineHeightFor = (fontSize: number) => Math.round(fontSize * 1.45)
@@ -32,6 +35,8 @@ export const appearance = createStore<Appearance>({
   lineHeight: lineHeightFor(14),
   terminalScrollback: 1000,
   terminalScreenReader: false,
+  minimapRegionHeaders: true,
+  minimapMarkHeaders: true,
 })
 
 let stopFollowingSystem: (() => void) | null = null
@@ -74,6 +79,8 @@ export function applySettings(settings: FrontendSettings): void {
     lineHeight: lineHeightFor(settings.fontSize),
     terminalScrollback: settings.terminalScrollback,
     terminalScreenReader: settings.terminalScreenReader,
+    minimapRegionHeaders: settings.minimapRegionHeaders,
+    minimapMarkHeaders: settings.minimapMarkHeaders,
   })
   applyColors(settings)
   setActiveIconTheme(settings.iconTheme)

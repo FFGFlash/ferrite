@@ -430,6 +430,12 @@ impl Document {
     self.folds.remove(&self.buffer, |_| true);
   }
 
+  pub(crate) fn unfold_regions(&mut self, regions: &[Range<usize>]) {
+    self
+      .folds
+      .remove(&self.buffer, |region| regions.contains(region));
+  }
+
   /// Folds the innermost region around each cursor and every region in it.
   pub(crate) fn fold_recursively(&mut self, regions: &[Range<usize>]) {
     let outer: Vec<Range<usize>> = self
@@ -778,6 +784,10 @@ mod tests {
       .expect("applies");
     assert_eq!(document.folded(), regions());
     assert_eq!(document.row_count(), 5);
+    document
+      .apply(EditorOp::UnfoldRegions(vec![4..8, 5..7]))
+      .expect("applies");
+    assert_eq!(document.folded(), [0..3], "only those regions");
     document.apply(EditorOp::UnfoldAll).expect("applies");
     assert!(document.folded().is_empty());
 

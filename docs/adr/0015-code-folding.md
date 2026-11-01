@@ -91,6 +91,26 @@ count is unchanged, but only the regions that are still foldable regions. The re
 the first view after the regions are known, which for a query language means after its first
 parse.
 
+### Region comments
+
+Region comments mark regions of the user's own: `// #region Name` … `// #endregion`, written with
+the language's comment syntax (the `line_comment` and `block_comment` its manifest declares), as
+in VS Code. `// MARK: Name` comments only label a place. `// MARK: - Name` adds a separator.
+
+- A marked region folds through its `#endregion` line. Marked regions join the regions from the
+  query or indentation, and Fold All Regions (Ctrl+K Ctrl+8) and Unfold All Regions (Ctrl+K Ctrl+9)
+  act on them alone.
+- The markers (`RegionMarkers` in `ferrite-core`) are kept per document and updated from the line
+  splices, so a keystroke rereads only the lines it changed. Documents over 16 MiB, like for
+  highlighting, have none.
+- The minimap labels named regions and `MARK:` comments. The labels are 9 px, as in VS Code, and
+  stack rather than overlap. The backend sends all headers with their kind, and the frontend
+  leaves out the kinds the `editor.minimap_region_headers` and `editor.minimap_mark_headers`
+  settings turn off, so changing a setting needs no refetch.
+
+Deriving the markers from the comment tokens means no new manifest field. A language with
+different region syntax (C#'s `#region` directive, say) would need one.
+
 ### Commands and chords
 
 Fold and Unfold are Ctrl+Shift+[ and Ctrl+Shift+] (⌥⌘[ and ⌥⌘] on macOS). The rest use VS Code's

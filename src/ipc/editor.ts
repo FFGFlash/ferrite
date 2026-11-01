@@ -77,6 +77,9 @@ export type EditorOp =
   | { type: 'toggleFoldAt'; line: number }
   | { type: 'foldAll' }
   | { type: 'unfoldAll' }
+  /** Every region marked by `#region` comments. */
+  | { type: 'foldAllRegions' }
+  | { type: 'unfoldAllRegions' }
   | { type: 'foldRecursively' }
   | { type: 'unfoldRecursively' }
   /** Folds the regions nested `level` deep (1 is outermost), except around the cursors. */
@@ -282,6 +285,19 @@ export interface MinimapView {
   rowCount: number
   startRow: number
   lines: number[][]
+  /** Section headers on these rows, to label. */
+  headers: MinimapHeader[]
+}
+
+/**
+ * A labelled minimap row: a named `#region` comment (`region`), or a
+ * `MARK:` comment, which may draw a separator above it (`MARK: -`).
+ */
+export interface MinimapHeader {
+  row: number
+  name: string
+  separator: boolean
+  region: boolean
 }
 
 export const listDocuments = () => call<DocumentSummary[]>('document_list')

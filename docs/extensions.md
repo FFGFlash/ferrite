@@ -536,7 +536,10 @@ letters, digits, `-`, and `_`.
 
 **Comments.** **Toggle Line Comment** (Ctrl+/) uses `line_comment`, or wraps the lines in
 `block_comment` for languages without line comments. Each delimiter is 1 to 8 characters without
-spaces. Without either, the command does nothing for the language.
+spaces. Without either, the command does nothing for the language. The same tokens find region
+comments (`// #region Name` … `// #endregion`, or `/* #region Name */` with a block comment)
+and `MARK:` comments, so a language gets foldable regions and minimap labels by declaring its
+comment syntax.
 
 **Which language a file gets.** A whole file name beats an extension, and a longer extension
 beats a shorter one (`d.ts` beats `ts`). When two languages claim a file equally, the one

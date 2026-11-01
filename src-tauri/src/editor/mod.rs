@@ -39,6 +39,8 @@ pub struct EditorState {
   pub(crate) syntax: syntax::SyntaxStates,
   /// Folded regions remembered for documents, until they are restored.
   pub(crate) pending_folds: fold_memory::PendingFolds,
+  /// Region comments of documents.
+  pub(crate) regions: folding::RegionStates,
   /// The text last copied as whole lines (copy with nothing selected), so
   /// pasting it can insert whole lines too.
   copied_lines: Mutex<Option<String>>,

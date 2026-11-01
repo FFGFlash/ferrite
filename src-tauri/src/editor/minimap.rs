@@ -9,11 +9,12 @@
 //! A minimap covers many more lines than the editor shows, so it is built
 //! from a [`Snapshot`] taken under the editor lock, and the lock is released
 //! while lines are highlighted. Like the editor, it shows display rows: the
-//! hidden lines of folded regions are left out.
+//! hidden lines of folded regions are left out. Named regions and `MARK:`
+//! comments come with the lines as section headers, which the minimap labels.
 
 use std::ops::Range;
 
-use ferrite_core::Document;
+use ferrite_core::{Document, SectionHeader};
 use ferrite_syntax::{Span, SyntaxTree, highlight_lines};
 use ferrite_text::TextBuffer;
 use serde::Serialize;
@@ -36,6 +37,19 @@ pub struct MinimapDto {
   pub row_count: usize,
   pub start_row: usize,
   pub lines: Vec<Vec<u32>>,
+  /// Section headers on these rows.
+  pub headers: Vec<MinimapHeaderDto>,
+}
+
+/// A labelled row: a named region (`region`) or a `MARK:` comment, which may
+/// draw a separator above it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MinimapHeaderDto {
+  pub row: usize,
+  pub name: String,
+  pub separator: bool,
+  pub region: bool,
 }
 
 /// What a minimap needs from a document. Cheap to take: the text is a rope
@@ -51,12 +65,19 @@ pub struct Snapshot {
   start_row: usize,
   /// The visible lines of the rows to draw, as sorted ranges.
   lines: Vec<Range<usize>>,
+  headers: Vec<MinimapHeaderDto>,
 }
 
 impl Snapshot {
   /// What a minimap of display rows `rows` needs, clamped to the document
-  /// and to [`MAX_MINIMAP_LINES`].
-  pub fn of(document: &Document, syntax: Option<SyntaxTree>, rows: Range<usize>) -> Self {
+  /// and to [`MAX_MINIMAP_LINES`]. `headers` gives the section headers on a
+  /// range of lines.
+  pub fn of(
+    document: &Document,
+    syntax: Option<SyntaxTree>,
+    rows: Range<usize>,
+    headers: impl FnOnce(Range<usize>) -> Vec<SectionHeader>,
+  ) -> Self {
     let row_count = document.row_count();
     let start = rows.start.min(row_count);
     let end = rows
@@ -68,6 +89,19 @@ impl Snapshot {
     } else {
       Vec::new()
     };
+    let headers = match (lines.first(), lines.last()) {
+      (Some(first), Some(last)) => headers(first.start..last.end)
+        .into_iter()
+        .filter(|header| lines.iter().any(|range| range.contains(&header.line)))
+        .map(|header| MinimapHeaderDto {
+          row: document.row_of(header.line),
+          name: header.name,
+          separator: header.separator,
+          region: header.region,
+        })
+        .collect(),
+      _ => Vec::new(),
+    };
     Self {
       document_id: document.id().get(),
       version: document.version().get(),
@@ -77,6 +111,7 @@ impl Snapshot {
       row_count,
       start_row: start,
       lines,
+      headers,
     }
   }
 
@@ -105,6 +140,7 @@ impl Snapshot {
       row_count: self.row_count,
       start_row: self.start_row,
       lines,
+      headers: self.headers.clone(),
     }
   }
 }
@@ -205,7 +241,7 @@ mod tests {
       .apply(EditorOp::Insert("a\n\tb\n\nc".into()))
       .expect("applies");
 
-    let snapshot = Snapshot::of(document, None, 1..99);
+    let snapshot = Snapshot::of(document, None, 1..99, |_| Vec::new());
     let mut asked = None;
     let minimap = snapshot.build_with(|lines| {
       asked = Some(lines.clone());
@@ -216,7 +252,7 @@ mod tests {
     assert_eq!(minimap.row_count, 4);
     assert_eq!(minimap.lines, vec![vec![2, 3, 0], vec![], vec![0, 1, 0]]);
 
-    let past_the_end = Snapshot::of(document, None, 10..20).build();
+    let past_the_end = Snapshot::of(document, None, 10..20, |_| Vec::new()).build();
     assert_eq!(past_the_end.start_row, 4);
     assert!(past_the_end.lines.is_empty());
   }
@@ -236,9 +272,20 @@ d"
       ))
       .expect("applies");
     document.set_folded([0..3]);
-    let minimap = Snapshot::of(document, None, 0..10).build();
+    let header = |line| SectionHeader {
+      line,
+      name: "d".into(),
+      separator: false,
+      region: false,
+    };
+    let minimap = Snapshot::of(document, None, 0..10, |_| vec![header(1), header(3)]).build();
     assert_eq!(minimap.row_count, 2);
     assert_eq!(minimap.lines, vec![vec![0, 1, 0], vec![0, 1, 0]], "a and d");
+    assert_eq!(
+      minimap.headers.iter().map(|h| h.row).collect::<Vec<_>>(),
+      [1],
+      "headers on hidden lines are left out; d is on row 1"
+    );
   }
 
   #[test]
@@ -249,7 +296,7 @@ d"
     document
       .apply(EditorOp::Insert("x\n".repeat(MAX_MINIMAP_LINES * 2)))
       .expect("applies");
-    let minimap = Snapshot::of(document, None, 0..usize::MAX).build();
+    let minimap = Snapshot::of(document, None, 0..usize::MAX, |_| Vec::new()).build();
     assert_eq!(minimap.lines.len(), MAX_MINIMAP_LINES);
   }
 }

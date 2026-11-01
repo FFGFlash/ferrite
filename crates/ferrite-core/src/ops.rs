@@ -162,6 +162,8 @@ pub enum EditorOp {
   },
   FoldAll(Vec<Range<usize>>),
   UnfoldAll,
+  /// Unfolds the folded regions among these.
+  UnfoldRegions(Vec<Range<usize>>),
   /// Folds the innermost region around each cursor and the regions in it.
   FoldRecursively(Vec<Range<usize>>),
   /// Unfolds the region around each cursor and the regions in it.
@@ -295,6 +297,10 @@ impl Document {
       }
       EditorOp::UnfoldAll => {
         self.unfold_all();
+        Ok(false)
+      }
+      EditorOp::UnfoldRegions(regions) => {
+        self.unfold_regions(&regions);
         Ok(false)
       }
       EditorOp::FoldRecursively(regions) => {
