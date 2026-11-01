@@ -3,6 +3,8 @@ const paths = {
     'M14 3H7a2 2 0 0 0-2 2v12M9 7h6l4 4v8a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2V9a2 2 0 0 1 2-2ZM15 7v4h4',
   search: 'M10.5 17a6.5 6.5 0 1 0 0-13 6.5 6.5 0 0 0 0 13ZM15.5 15.5 20 20',
   extensions: 'M4 4h6v6H4ZM14 4h6v6h-6ZM4 14h6v6H4ZM17 14v6M14 17h6',
+  problems: 'M12 4 3 20h18L12 4ZM12 10v4M12 17h.01',
+  output: 'M4 5h16v14H4ZM7 9h10M7 12h7M7 15h9',
   // Icons extension views can use (see VIEW_ICONS in the extension host).
   list: 'M9 6h11M9 12h11M9 18h11M4.5 6h.01M4.5 12h.01M4.5 18h.01',
   check: 'M5 12.5l4.5 4.5L19 7',

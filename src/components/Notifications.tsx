@@ -3,7 +3,8 @@ import { dismiss, notifications, reportError, type Notification } from '../state
 import { useStore } from '../state/store'
 import './Notifications.css'
 
-const AUTO_DISMISS_MS = 10_000
+/** How long a notification shows; warnings and errors take longer to read. */
+const AUTO_DISMISS_MS = { info: 10_000, warning: 20_000, error: 20_000 } as const
 
 export function Notifications() {
   const items = useStore(notifications)
@@ -17,12 +18,12 @@ export function Notifications() {
 }
 
 /**
- * Information disappears after a while, but not while the pointer or focus
- * is on it. Warnings, errors, and notifications with buttons stay until
- * dismissed.
+ * Notifications disappear after a while, but not while the pointer or focus
+ * is on them; the Problems view keeps warnings and errors. Sticky ones (a
+ * question only they ask) stay until answered or dismissed.
  */
 function NotificationItem({ item }: { item: Notification }) {
-  const sticky = item.kind !== 'info' || (item.actions?.length ?? 0) > 0
+  const sticky = item.sticky ?? false
   const [hovered, setHovered] = useState(false)
   const [focused, setFocused] = useState(false)
   const paused = hovered || focused
@@ -30,9 +31,9 @@ function NotificationItem({ item }: { item: Notification }) {
     if (sticky || paused) {
       return
     }
-    const timer = setTimeout(() => dismiss(item.id), AUTO_DISMISS_MS)
+    const timer = setTimeout(() => dismiss(item.id), AUTO_DISMISS_MS[item.kind])
     return () => clearTimeout(timer)
-  }, [item.id, sticky, paused])
+  }, [item.id, item.kind, sticky, paused])
 
   return (
     <div
@@ -50,7 +51,7 @@ function NotificationItem({ item }: { item: Notification }) {
     >
       <div className="notification__body">
         <p className="notification__message">{item.message}</p>
-        {sticky && (
+        {(item.actions?.length ?? 0) > 0 && (
           <div className="notification__actions">
             {item.actions?.map(action => (
               <button

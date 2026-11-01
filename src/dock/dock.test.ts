@@ -379,4 +379,29 @@ describe('dock', () => {
     expect(groupItems('main')).toEqual(['document:1'])
     expect(groupHolding(dock.terminalItem(terminals.terminalsStore.get().activeId!))).toBeDefined()
   })
+
+  it('opens Problems and Output along the bottom, with the terminals', async () => {
+    dock.showView('problems')
+    const bottom = groupHolding('view:problems')!.id
+    expect(sidebarGroups(layout()).some(group => group.id === bottom)).toBe(false)
+    expect(bottom).not.toBe('main')
+
+    await dock.openTerminal()
+    dock.showView('output')
+    expect(groupItems(bottom)).toEqual([
+      'view:problems',
+      'terminal:' + (nextTerminal - 1),
+      'view:output',
+    ])
+    // Only in the activity bar when docked in the side bar.
+    expect(dock.activityBarItems(layout(), ['explorer', 'problems', 'output'])).not.toContain(
+      'view:problems',
+    )
+
+    // They show and hide with the terminals.
+    await dock.toggleTerminals()
+    expect(findGroup(layout(), bottom)!.hidden).toBe(true)
+    await dock.toggleTerminals()
+    expect(findGroup(layout(), bottom)!.hidden).toBeFalsy()
+  })
 })

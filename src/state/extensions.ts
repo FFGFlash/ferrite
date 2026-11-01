@@ -21,6 +21,8 @@ import {
   type StatusItem,
 } from '../ipc/extensions'
 import { setIconTheme, setTheme } from '../ipc/workspace'
+import { extensionChannel, showOutput } from './output'
+import { recordProblem } from './problems'
 import { showView } from './viewRequests'
 import { notify, reportError } from './notifications'
 import { createStore } from './store'
@@ -202,25 +204,42 @@ function promptForPermissions(statuses: readonly ExtensionStatus[]): void {
     prompted.add(extension.id)
     const requested = extension.permissions.map(p => p.permission)
     const wants = extension.permissions.map(p => p.description.toLowerCase()).join('; ')
-    notify('info', `The extension ${extension.name} wants to: ${wants}.`, [
-      { label: 'Allow', run: () => setExtensionPermissions(extension.id, requested) },
-      { label: "Don't Allow", run: () => setExtensionPermissions(extension.id, []) },
-      { label: 'Details', run: showExtensionsView },
-    ])
+    // Only this asks, so it stays until answered.
+    notify(
+      'info',
+      `The extension ${extension.name} wants to: ${wants}.`,
+      [
+        { label: 'Allow', run: () => setExtensionPermissions(extension.id, requested) },
+        { label: "Don't Allow", run: () => setExtensionPermissions(extension.id, []) },
+        { label: 'Details', run: showExtensionsView },
+      ],
+      { sticky: true },
+    )
   }
 }
 
+/** A message an extension (`id`, named `name`) showed; warnings and errors are kept in Problems. */
 export function showExtensionMessage(
-  extension: string,
+  id: string,
+  name: string,
   level: MessageLevel,
   message: string,
 ): void {
-  notify(level, `${extension}: ${message}`)
+  notify(level, `${name}: ${message}`, undefined, { record: false })
+  if (level !== 'info') {
+    recordProblem(level, message, name, id)
+  }
 }
 
 export function showExtensionFailure(id: string, name: string, reason: string): void {
-  notify('error', `The extension ${name} stopped: ${reason}`, [
-    { label: 'Restart', run: () => restartExtension(id) },
-    { label: 'Details', run: showExtensionsView },
-  ])
+  // Problems lists it while it's stopped, from its status.
+  notify(
+    'error',
+    `The extension ${name} stopped: ${reason}`,
+    [
+      { label: 'Restart', run: () => restartExtension(id) },
+      { label: 'Show Log', run: () => showOutput(extensionChannel(id)) },
+    ],
+    { record: false },
+  )
 }

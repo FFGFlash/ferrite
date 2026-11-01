@@ -81,6 +81,9 @@ pub enum MessageLevel {
 pub enum Notification {
   /// An extension asked to show a message.
   Message {
+    /// The extension's id.
+    id: String,
+    /// The extension's name.
     extension: String,
     level: MessageLevel,
     message: String,

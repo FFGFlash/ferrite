@@ -14,7 +14,9 @@ const workspaceIpc = await import('../ipc/workspace')
 const { getCommand, executeCommand } = await import('../commands/registry')
 const { activeEditor } = await import('../editor/activeEditor')
 const { notifications } = await import('./notifications')
-const { applyStatuses, extensionsStore, showExtensionFailure } = await import('./extensions')
+const { applyStatuses, extensionsStore, showExtensionFailure, showExtensionMessage } =
+  await import('./extensions')
+const { reportedProblems } = await import('./problems')
 
 function extension(overrides: Partial<ExtensionStatus> = {}): ExtensionStatus {
   return {
@@ -65,6 +67,7 @@ describe('extensions state', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     notifications.set([])
+    reportedProblems.set([])
     applyStatuses([])
   })
 
@@ -115,6 +118,7 @@ describe('extensions state', () => {
     const prompts = notifications.get()
     expect(prompts).toHaveLength(1)
     expect(prompts[0]?.message).toContain('Tidy wants to: edit open documents')
+    expect(prompts[0]?.sticky).toBe(true)
     const allow = prompts[0]?.actions?.find(action => action.label === 'Allow')
     await allow?.run()
     expect(ipc.setExtensionPermissions).toHaveBeenCalledWith('example.waiting', ['documents-write'])
@@ -127,5 +131,16 @@ describe('extensions state', () => {
     expect(failure?.message).toBe('The extension Tidy stopped: crashed')
     await failure?.actions?.find(action => action.label === 'Restart')?.run()
     expect(ipc.restartExtension).toHaveBeenCalledWith('example.tidy')
+    // Problems lists it from its status instead.
+    expect(reportedProblems.get()).toEqual([])
+  })
+
+  it('keeps warnings extensions show in Problems, under the extension', () => {
+    showExtensionMessage('example.tidy', 'Tidy', 'warning', 'Line 3 is long')
+    showExtensionMessage('example.tidy', 'Tidy', 'info', 'Done')
+    expect(notifications.get().map(n => n.message)).toEqual(['Tidy: Line 3 is long', 'Tidy: Done'])
+    expect(reportedProblems.get().map(p => [p.source, p.extension, p.message])).toEqual([
+      ['Tidy', 'example.tidy', 'Line 3 is long'],
+    ])
   })
 })

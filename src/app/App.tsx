@@ -12,6 +12,7 @@ import { listenToBackend } from '../state/events'
 import { refreshExtensions } from '../state/extensions'
 import { restoreLayout } from '../state/layout'
 import { reportError } from '../state/notifications'
+import { refreshSettingsProblem } from '../state/problems'
 import { refreshPreviews } from '../state/previews'
 import { loadWorkspace } from '../state/workspace'
 import { restoreTerminals } from '../terminal/terminals'
@@ -45,6 +46,8 @@ async function restoreSession(): Promise<void> {
   } catch (error) {
     reportError('Loading settings', error)
   }
+  // An invalid settings.toml at startup is only logged by the backend.
+  void refreshSettingsProblem()
   let activeFile: string | null = null
   try {
     activeFile = await restoreLayout()

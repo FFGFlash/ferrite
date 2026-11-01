@@ -676,6 +676,17 @@ pub fn settings_get(state: State<'_, SettingsState>) -> FrontendSettings {
   state.get().frontend()
 }
 
+/// Why the settings file isn't in effect, if it isn't: it can't be read, or
+/// it's invalid. `None` when it's fine or doesn't exist yet.
+#[tauri::command]
+pub fn settings_problem(state: State<'_, SettingsState>) -> Option<String> {
+  match std::fs::read_to_string(state.path()?) {
+    Ok(text) => Settings::parse(&text).err(),
+    Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+    Err(error) => Some(format!("Could not read settings: {error}")),
+  }
+}
+
 /// The settings file's path, creating it from the template if needed.
 #[tauri::command]
 pub fn settings_file(state: State<'_, SettingsState>) -> Result<String, CommandError> {

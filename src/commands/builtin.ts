@@ -6,6 +6,7 @@ import { activeEditor } from '../editor/activeEditor'
 import { close, documentsStore, newFile, openFile, openPath, save } from '../state/documents'
 import { addDevelopmentExtension, reloadExtensions } from '../ipc/extensions'
 import { setIconTheme, setTheme, settingsFilePath } from '../ipc/workspace'
+import { showOutput, showProblems } from '../state/output'
 import { openSettings } from '../state/settings'
 import { DEFAULT_ICON_THEME } from '../state/iconTheme'
 import { layoutStore, updateLayout } from '../state/layout'
@@ -146,7 +147,7 @@ export const builtinCommands: Command[] = [
   {
     id: 'workbench.togglePanel',
     category: 'View',
-    title: 'Toggle Terminals',
+    title: 'Toggle Panel',
     keybinding: 'mod+j',
     terminal: true,
     run: toggleTerminals,
@@ -280,6 +281,22 @@ export const builtinCommands: Command[] = [
     keybinding: 'mod+shift+x',
     terminal: true,
     run: () => showView('extensions'),
+  },
+  {
+    id: 'workbench.showProblems',
+    category: 'View',
+    title: 'Problems',
+    keybinding: 'mod+shift+m',
+    terminal: true,
+    run: showProblems,
+  },
+  {
+    id: 'workbench.showOutput',
+    category: 'View',
+    title: 'Output',
+    keybinding: 'mod+shift+u',
+    terminal: true,
+    run: () => showOutput(),
   },
   {
     id: 'extensions.reload',

@@ -54,8 +54,9 @@ preserved exactly, and new lines use the file's existing line ending.
 | Add next occurrence                 | Ctrl+D                           | ⌘D                       |
 | Find in files                       | Ctrl+Shift+F                     | ⇧⌘F                      |
 | Extensions view                     | Ctrl+Shift+X                     | ⇧⌘X                      |
+| Problems / Output                   | Ctrl+Shift+M / Ctrl+Shift+U      | ⇧⌘M / ⇧⌘U                |
 | Explorer / Toggle side bar          | Ctrl+Shift+E / Ctrl+B            | ⇧⌘E / ⌘B                 |
-| Terminal / New / Toggle terminals   | Ctrl+\` / Ctrl+Shift+\` / Ctrl+J | ⌃\` / ⌃⇧\` / ⌘J          |
+| Terminal / New / Toggle panel       | Ctrl+\` / Ctrl+Shift+\` / Ctrl+J | ⌃\` / ⌃⇧\` / ⌘J          |
 | Next / previous tab (in its group)  | Ctrl+Tab, Ctrl+PageDown / PageUp | ⌃Tab, ⌃PageDown / PageUp |
 | Next / previous group               | F6 / Shift+F6                    | F6 / ⇧F6                 |
 | Settings                            | Ctrl+,                           | ⌘,                       |
@@ -283,7 +284,15 @@ Tabs sit in groups, and any tab can go in any group, beside any other.
   it into the side bar.
 - **Hiding.** An activity bar button shows its tab, or hides its group when it's already
   showing. **View: Toggle Side Bar** (`Ctrl+B`) hides or shows the side bar, and **View: Toggle
-  Terminals** (`Ctrl+J`) every group of terminals, keeping their places.
+  Panel** (`Ctrl+J`) the groups along the bottom (terminals, Problems, Output), keeping their
+  places.
+- **Problems and Output** open along the bottom, with the terminals. **Problems**
+  (`Ctrl+Shift+M`, or the counts in the status bar) lists what's wrong with Ferrite and its
+  extensions: an extension that stopped, settings that were ignored, and the warnings and errors
+  notifications showed. Notifications disappear after a while, so this is where to find them
+  again. **Output** (`Ctrl+Shift+U`) shows recent log messages from Ferrite, from each extension,
+  and from each language server (including what the server prints), with **Open Log File** for
+  the full log. Each extension in the Extensions view has a **Log** button.
 - **Documents** open in the group last used for documents. The main group (on the right at
   first) stays when empty and shows the welcome page.
 
@@ -411,6 +420,11 @@ The default is `info`. Frontend messages are logged under the `frontend` target:
 ```sh
 FERRITE_LOG=debug,frontend=trace pnpm tauri dev
 ```
+
+**View: Output** (`Ctrl+Shift+U`) shows recent messages without opening the file: Ferrite's,
+each extension's, and each language server's, in separate logs. Those keep every level from
+extensions and servers, including their debug messages and a server's stderr, whatever the
+filter.
 
 Startup timing is logged as `backend initialized` and `frontend ready`, each with `elapsed_ms`
 measured from the start of `ferrite_app::run`.

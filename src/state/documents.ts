@@ -7,6 +7,7 @@ import { CommandError } from '../ipc'
 import * as ipc from '../ipc/editor'
 import type { DocumentSummary, Position } from '../ipc/editor'
 import { reportError } from './notifications'
+import { refreshSettingsProblem } from './problems'
 import { refreshSettingsIfLoaded } from './settings'
 import { createStore } from './store'
 
@@ -165,6 +166,7 @@ export async function save(id = activeId(), as = false): Promise<void> {
     if (error instanceof CommandError && error.code === 'invalidSettings') {
       // settings.toml was saved with a mistake; the settings editor shows it.
       refreshSettingsIfLoaded()
+      void refreshSettingsProblem()
     }
   }
 }

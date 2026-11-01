@@ -277,15 +277,23 @@ impl Host for StoreState {
       tracing::debug!(extension = %api.id, "message dropped: too many messages");
       return;
     }
+    let message = cut(&message, MAX_MESSAGE_CHARS);
+    // Kept in its log too, where the user can find it after it's gone.
+    match level {
+      MessageLevel::Info => tracing::info!(extension = %api.id, "showed: {message}"),
+      MessageLevel::Warning => tracing::warn!(extension = %api.id, "showed: {message}"),
+      MessageLevel::Error => tracing::error!(extension = %api.id, "showed: {message}"),
+    }
     if let Ok(shared) = api.shared() {
       shared.embedder.notify(Notification::Message {
+        id: api.id.clone(),
         extension: api.name.clone(),
         level: match level {
           MessageLevel::Info => crate::MessageLevel::Info,
           MessageLevel::Warning => crate::MessageLevel::Warning,
           MessageLevel::Error => crate::MessageLevel::Error,
         },
-        message: cut(&message, MAX_MESSAGE_CHARS),
+        message,
       });
     }
   }

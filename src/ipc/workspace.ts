@@ -147,7 +147,14 @@ export type AppEvent =
   | { type: 'documentOpened'; document: DocumentSummary; active: boolean }
   | { type: 'indexStatus'; indexing: boolean; files: number; truncated: boolean }
   | { type: 'extensionsChanged' }
-  | { type: 'extensionMessage'; extension: string; level: MessageLevel; message: string }
+  /** `id` is the extension's id, `extension` its name. */
+  | {
+      type: 'extensionMessage'
+      id: string
+      extension: string
+      level: MessageLevel
+      message: string
+    }
   | { type: 'extensionFailed'; id: string; name: string; reason: string }
   | { type: 'documentEdited'; documentId: number }
   | { type: 'extensionStatusItemsChanged' }
@@ -187,6 +194,8 @@ export const setTheme = (theme: Theme) => call<void>('settings_set_theme', { the
 export const setIconTheme = (iconTheme: string) =>
   call<void>('settings_set_icon_theme', { iconTheme })
 export const getSettingsSchema = () => call<SettingsSchema>('settings_schema')
+/** Why `settings.toml` isn't in effect (unreadable or invalid); `null` if it's fine. */
+export const getSettingsProblem = () => call<string | null>('settings_problem')
 /** Sets one setting in `settings.toml`; `null` removes it, so its default applies. */
 export const setSetting = (path: string[], value: SettingValue | null) =>
   call<void>('settings_set', { path, value })

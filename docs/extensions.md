@@ -269,9 +269,13 @@ next read.
 **Logging and messages:**
 
 - `log(level, message)` writes to Ferrite's log, tagged with the extension's id. Messages are cut
-  at 4,000 characters, and at most 50 per second are kept, after a burst of 200.
-- `show-message(level, message)` shows a notification. Messages are cut at 1,000 characters, and
-  at most 1 per second is shown, after a burst of 10.
+  at 4,000 characters, and at most 50 per second are kept, after a burst of 200. The extension's
+  log in **View: Output** (or its **Log** button in the Extensions view) shows every level,
+  including `debug` and `trace`, while the log file follows `FERRITE_LOG` (`info` by default).
+- `show-message(level, message)` shows a notification and logs it. Messages are cut at 1,000
+  characters, and at most 1 per second is shown, after a burst of 10. Notifications disappear
+  after a while; warnings and errors stay in **View: Problems**, under the extension's name,
+  until the user clears them.
 
 ## Workbench contributions
 

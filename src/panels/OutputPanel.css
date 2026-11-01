@@ -1,0 +1,87 @@
+.output {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.output__toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  padding: var(--space-1) var(--space-2) var(--space-1) var(--space-4);
+}
+
+.output__control {
+  min-width: 0;
+  padding: 1px var(--space-1);
+  border: 1px solid var(--color-input-border);
+  border-radius: var(--radius-control);
+  background: var(--color-input-background);
+  color: var(--color-text);
+  font: inherit;
+}
+
+.output__control:focus {
+  border-color: var(--color-focus-ring);
+  outline: none;
+}
+
+.output__filter {
+  flex: 1;
+  max-width: 280px;
+  padding-inline: var(--space-2);
+}
+
+.output__log {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 0 var(--space-2) var(--space-2) var(--space-4);
+  font-family: var(--font-mono);
+  font-size: var(--font-size-ui-small);
+  line-height: 1.5;
+  user-select: text;
+}
+
+.output__log:focus-visible {
+  outline: 1px solid var(--color-focus-ring);
+  outline-offset: -1px;
+}
+
+.output__line {
+  /* Wrapped lines are indented, so each record starts at the margin. */
+  padding-left: 2ch;
+  text-indent: -2ch;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.output__time,
+.output__target,
+.output__fields {
+  color: var(--color-text-muted);
+}
+
+.output__line[data-level='error'] .output__level {
+  color: var(--color-diagnostic-error);
+}
+
+.output__line[data-level='warn'] .output__level {
+  color: var(--color-diagnostic-warning);
+}
+
+.output__line[data-level='info'] .output__level {
+  color: var(--color-diagnostic-info);
+}
+
+.output__line[data-level='debug'] .output__level,
+.output__line[data-level='trace'] .output__level {
+  color: var(--color-text-muted);
+}
+
+.output__empty {
+  margin: 0;
+  color: var(--color-text-muted);
+  font-family: var(--font-ui);
+  font-size: var(--font-size-ui);
+}

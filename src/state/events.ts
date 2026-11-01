@@ -12,6 +12,7 @@ import {
 } from './extensions'
 import { notify } from './notifications'
 import { previewChanged, refreshPreviews, showPreviewRequested } from './previews'
+import { refreshSettingsProblem } from './problems'
 import { refreshSettingsIfLoaded } from './settings'
 import { showView } from './viewRequests'
 import { refreshDirectories, setIndexing, setWorkspace } from './workspace'
@@ -37,6 +38,7 @@ export function handleEvent(event: AppEvent): void {
     case 'settingsChanged':
       applySettings(event.settings)
       refreshSettingsIfLoaded()
+      void refreshSettingsProblem()
       if (event.announce) {
         notify('info', 'Settings applied.')
       }
@@ -70,7 +72,7 @@ export function handleEvent(event: AppEvent): void {
       refreshSettingsIfLoaded()
       break
     case 'extensionMessage':
-      showExtensionMessage(event.extension, event.level, event.message)
+      showExtensionMessage(event.id, event.extension, event.level, event.message)
       break
     case 'extensionFailed':
       showExtensionFailure(event.id, event.name, event.reason)

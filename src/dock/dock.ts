@@ -78,6 +78,11 @@ export function itemId(item: ItemId): string {
 }
 
 const BUILTIN_VIEWS = ['explorer', 'search', 'extensions'].map(viewItem)
+/**
+ * Views that open along the bottom with the terminals, rather than in the
+ * side bar, and aren't in the activity bar unless docked in the side bar.
+ */
+const PANEL_VIEWS: readonly ItemId[] = ['problems', 'output'].map(viewItem)
 
 /** Views on the left, the main group filling the rest. */
 export function defaultDock(
@@ -126,6 +131,10 @@ function placementFor(layout: DockLayout, item: ItemId): { target: DropTarget; s
   const all = groups(layout)
   const holding = (kind: 'view' | 'terminal') =>
     all.filter(group => group.items.some(other => itemKind(other) === kind))
+  /** Groups along the bottom: those with terminals or panel views. */
+  const panels = all.filter(group =>
+    group.items.some(other => itemKind(other) === 'terminal' || PANEL_VIEWS.includes(other)),
+  )
   const appendTo = (group: DockGroup, afterActive = false): DropTarget => ({
     kind: 'tabs',
     group: group.id,
@@ -139,7 +148,7 @@ function placementFor(layout: DockLayout, item: ItemId): { target: DropTarget; s
     }
     case 'terminal': {
       const terminals = holding('terminal')
-      const group = terminals.find(g => g.id === currentGroup.get()) ?? terminals[0]
+      const group = terminals.find(g => g.id === currentGroup.get()) ?? terminals[0] ?? panels[0]
       return {
         target: group ? appendTo(group) : { kind: 'root', edge: 'bottom' },
         size: 0.3,
@@ -153,6 +162,13 @@ function placementFor(layout: DockLayout, item: ItemId): { target: DropTarget; s
         return {
           target: { kind: 'tabs', group: remembered.group, index: remembered.index },
           size: 0.2,
+        }
+      }
+      if (PANEL_VIEWS.includes(item)) {
+        const group = panels.find(g => g.id === currentGroup.get()) ?? panels[0]
+        return {
+          target: group ? appendTo(group) : { kind: 'root', edge: 'bottom' },
+          size: 0.3,
         }
       }
       return { target: sidebarTarget(layout, 'view'), size: 0.2 }
@@ -214,13 +230,13 @@ function inSidebar(layout: DockLayout, item: ItemId): boolean {
 /**
  * What the activity bar shows: everything in the side bar (views, terminals,
  * documents), in tab order, then the views not docked anywhere (which open
- * in the side bar). `views` are the known view ids.
+ * in the side bar), except panel views. `views` are the known view ids.
  */
 export function activityBarItems(layout: DockLayout, views: readonly string[]): ItemId[] {
   const docked = new Set(allItems(layout))
   return [
     ...sidebarGroups(layout).flatMap(group => group.items),
-    ...views.map(viewItem).filter(item => !docked.has(item)),
+    ...views.map(viewItem).filter(item => !docked.has(item) && !PANEL_VIEWS.includes(item)),
   ]
 }
 
@@ -590,14 +606,17 @@ function showGroups(ids: readonly string[]): void {
   setLayout(ids.reduce((layout, id) => setHidden(layout, id, false), dockStore.get()))
 }
 
-/** Groups holding only items of `kind` (never the main group). */
-function groupsOfKind(kind: 'terminal'): DockGroup[] {
+/**
+ * The bottom panel: groups holding only terminals and panel views such as
+ * Problems (never the main group). They show and hide together.
+ */
+function panelGroups(): DockGroup[] {
   const layout = dockStore.get()
   return groups(layout).filter(
     group =>
       group.id !== layout.main &&
       group.items.length > 0 &&
-      group.items.every(item => itemKind(item) === kind),
+      group.items.every(item => itemKind(item) === 'terminal' || PANEL_VIEWS.includes(item)),
   )
 }
 
@@ -638,7 +657,7 @@ export async function openTerminal(profile: string | null = null): Promise<void>
 export async function focusActiveTerminal(): Promise<void> {
   const item = preferredTerminal()
   if (item) {
-    showGroups(groupsOfKind('terminal').map(group => group.id))
+    showGroups(panelGroups().map(group => group.id))
     showItem(item)
   } else {
     await openTerminal()
@@ -646,12 +665,12 @@ export async function focusActiveTerminal(): Promise<void> {
 }
 
 /**
- * Shows and focuses the terminal; from a terminal, hides the terminals and
- * returns to the editor.
+ * Shows and focuses the terminal; from a terminal, hides the bottom panel
+ * (terminals, Problems, Output) and returns to the editor.
  */
 export async function toggleTerminal(): Promise<void> {
   if (terminalHasFocus()) {
-    const groupsToHide = groupsOfKind('terminal').map(group => group.id)
+    const groupsToHide = panelGroups().map(group => group.id)
     if (groupsToHide.length > 0) {
       hideGroups(groupsToHide)
     } else {
@@ -662,9 +681,9 @@ export async function toggleTerminal(): Promise<void> {
   }
 }
 
-/** Hides every group of terminals, or shows them (starting a terminal if there's none). */
+/** Hides the bottom panel, or shows it (starting a terminal if there's none). */
 export async function toggleTerminals(): Promise<void> {
-  const terminalGroups = groupsOfKind('terminal')
+  const terminalGroups = panelGroups()
   if (terminalGroups.some(group => !group.hidden)) {
     hideGroups(terminalGroups.map(group => group.id))
   } else {

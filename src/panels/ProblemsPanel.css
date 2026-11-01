@@ -1,0 +1,124 @@
+.problems,
+.problems__list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.problems {
+  padding: var(--space-1) 0 var(--space-2);
+}
+
+.problems__source {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: 24px;
+  padding: 0 var(--space-2) 0 var(--space-4);
+}
+
+.problems__name {
+  overflow: hidden;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.problems__count {
+  min-width: 16px;
+  padding: 0 5px;
+  border-radius: 8px;
+  background: var(--color-control-hover-background);
+  color: var(--color-text-muted);
+  font-size: var(--font-size-ui-small);
+  text-align: center;
+}
+
+.problems__actions {
+  display: flex;
+  gap: var(--space-1);
+  margin-left: auto;
+}
+
+.problems__button {
+  padding: 0 var(--space-2);
+  border: 1px solid transparent;
+  border-radius: var(--radius-control);
+  background: none;
+  color: var(--color-link);
+  font: inherit;
+  font-size: var(--font-size-ui-small);
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.problems__button:hover {
+  background: var(--color-control-hover-background);
+}
+
+.problem {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  padding: 2px var(--space-2) 2px calc(var(--space-4) + var(--space-3));
+  line-height: 1.4;
+}
+
+.problem:hover {
+  background: var(--color-list-hover-background);
+}
+
+.problem__icon {
+  flex: none;
+  margin-top: 2px;
+}
+
+.problem[data-severity='error'] .problem__icon {
+  color: var(--color-diagnostic-error);
+}
+
+.problem[data-severity='warning'] .problem__icon {
+  color: var(--color-diagnostic-warning);
+}
+
+.problem__message {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  user-select: text;
+}
+
+.problem__repeats,
+.problem__time {
+  flex: none;
+  color: var(--color-text-muted);
+  font-size: var(--font-size-ui-small);
+  font-variant-numeric: tabular-nums;
+}
+
+.problem__clear {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-control);
+  background: none;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  /* Shown on hover; still reachable with the keyboard. */
+  opacity: 0;
+}
+
+.problem:hover .problem__clear,
+.problem__clear:focus-visible {
+  opacity: 1;
+}
+
+.problem__clear:hover {
+  background: var(--color-control-hover-background);
+  color: var(--color-text);
+}

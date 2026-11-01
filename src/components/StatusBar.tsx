@@ -1,3 +1,4 @@
+import { CircleX, TriangleAlert } from 'lucide-react'
 import { memo } from 'react'
 import { executeCommand, pendingChord } from '../commands/registry'
 import type { AppInfo } from '../ipc'
@@ -6,6 +7,8 @@ import type { StatusItem } from '../ipc/extensions'
 import { documentsStore } from '../state/documents'
 import { editorStatus } from '../state/editorStatus'
 import { statusItemsStore } from '../state/extensions'
+import { showProblems } from '../state/output'
+import { countProblems, useProblems } from '../state/problems'
 import { useStore } from '../state/store'
 import './StatusBar.css'
 
@@ -28,6 +31,7 @@ export const StatusBar = memo(function StatusBar({ appInfo }: StatusBarProps) {
   return (
     <footer className="statusbar">
       <div className="statusbar__group">
+        <ProblemsItem />
         {status && (
           <span className="statusbar__item">
             Ln {status.line}, Col {status.column}
@@ -63,6 +67,35 @@ export const StatusBar = memo(function StatusBar({ appInfo }: StatusBarProps) {
     </footer>
   )
 })
+
+/** Problems with Ferrite and extensions, when there are any; opens the Problems view. */
+function ProblemsItem() {
+  const { errors, warnings } = countProblems(useProblems())
+  if (errors + warnings === 0) {
+    return null
+  }
+  const label = `Problems with Ferrite or extensions: ${errors} ${errors === 1 ? 'error' : 'errors'}, ${warnings} ${warnings === 1 ? 'warning' : 'warnings'}`
+  return (
+    <button
+      type="button"
+      className="statusbar__item statusbar__button statusbar__problems"
+      title={label}
+      aria-label={label}
+      onClick={showProblems}
+    >
+      {errors > 0 && (
+        <>
+          <CircleX size={14} strokeWidth={1.75} aria-hidden="true" /> {errors}
+        </>
+      )}
+      {warnings > 0 && (
+        <>
+          <TriangleAlert size={14} strokeWidth={1.75} aria-hidden="true" /> {warnings}
+        </>
+      )}
+    </button>
+  )
+}
 
 /** A status bar item contributed by an extension; plain text, never markup. */
 function ExtensionItem({ item }: { item: StatusItem }) {

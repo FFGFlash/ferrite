@@ -12,6 +12,16 @@
 with `FERRITE_LOG=debug`. To include messages from the user interface too, use
 `FERRITE_LOG=debug,frontend=trace`.
 
+**View: Output** (`Ctrl+Shift+U`) shows recent log messages inside Ferrite, one log at a time:
+Ferrite's, an extension's (its **Log** button in the Extensions view opens it), or a language
+server's, including everything the server prints. Extensions' and servers' debug messages show
+there without changing `FERRITE_LOG`. **Open Log File** (beside the Output tab) opens the full
+log.
+
+**View: Problems** (`Ctrl+Shift+M`) lists what's wrong with Ferrite and extensions, including
+the warnings and errors notifications showed before they disappeared. The status bar shows how
+many there are.
+
 ## Ferrite crashed or was closed unexpectedly
 
 Your unsaved changes are backed up as you type. The next start restores them as unsaved tabs
@@ -41,8 +51,8 @@ Please report it with the log file's last lines: the error and where it happened
 ## Settings don't take effect
 
 Ferrite applies `settings.toml` when you save it in Ferrite. If the file has a mistake (an
-unknown key, a value out of range, invalid TOML), a notification names it and the previous
-settings stay in effect. **Preferences: Open Settings** shows the mistake too, and can't change
+unknown key, a value out of range, invalid TOML), a notification names it, Problems lists it
+until it's fixed, and the previous settings stay in effect. **Preferences: Open Settings** shows the mistake too, and can't change
 settings until it's fixed. It lists every available setting with the value in effect.
 
 To start over, delete `settings.toml`. **Preferences: Open Settings (TOML)** creates a fresh one.

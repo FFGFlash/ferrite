@@ -298,8 +298,16 @@ changes, so a crash, a forced shutdown, or a power cut loses at most the last se
   by a message with **Try Again** and **Reload Window**, and the rest stays usable. Documents,
   unsaved changes, and extensions live in the backend, so **Developer: Reload Window** loses
   nothing. Uncaught errors and unhandled rejections are forwarded to the backend log.
-- **Notifications.** Information notifications disappear after 10 s, but not while hovered or
-  focused. Warnings, errors, and notifications with buttons stay until dismissed.
+- **Notifications** disappear after a while (information after 10 s, warnings and errors after
+  20 s), but not while hovered or focused. Only sticky ones, such as the permission prompt,
+  stay until answered.
+- **Problems** ([ADR 0018](adr/0018-output-and-problems.md), `panels/ProblemsPanel`,
+  `state/problems.ts`) lists what's wrong with Ferrite and extensions, grouped by source. Current
+  problems come from state (an extension that stopped or couldn't be loaded, ignored extension
+  settings, a `settings.toml` that isn't in effect) and go away when fixed. Reported problems
+  are the warnings and errors notifications showed, counted when repeated, kept until cleared
+  (at most 200). The status bar shows the counts when there are any. Problems in files aren't
+  listed; they're in the editor.
 
 ## Commands and keybindings
 
@@ -406,6 +414,7 @@ EditorView = { version, lineCount, rowCount, startRow, startLine, endLine,
 | Command                                                       | Purpose                                                |
 | ------------------------------------------------------------- | ------------------------------------------------------ |
 | `app_info`, `frontend_log`, `frontend_ready`                  | Process metadata, logging, startup timing              |
+| `logs_read`, `logs_file`                                      | Recent log records by channel; today's log file        |
 | `document_list`                                               | Open documents (restores tabs after a webview reload)  |
 | `document_new`                                                | New untitled document                                  |
 | `document_open`, `document_open_dialog`                       | Open a path, or show the native open dialog            |
@@ -423,6 +432,7 @@ EditorView = { version, lineCount, rowCount, startRow, startLine, endLine,
 | `settings_get`, `settings_file`, `settings_set_theme`         | Frontend settings, the settings file path, theme       |
 | `settings_set_icon_theme`                                     | File icon theme                                        |
 | `settings_schema`, `settings_set`                             | Every setting for the settings editor; set one         |
+| `settings_problem`                                            | Why `settings.toml` isn't in effect, for Problems      |
 | `ui_state_get`, `ui_state_save`                               | Saved layout and active file                           |
 | `events_subscribe`                                            | Register the backend event channel                     |
 | `perf_stats`                                                  | Backend timings, scheduler statistics, memory          |
@@ -682,7 +692,8 @@ them. Extensions fill in content through the `workbench` interface (API 1.1; pre
   (tab summaries, order, the active id, and actions), `workspace` (folder and loaded listings),
   `search` (find-in-files results), `layout` (persisted), `appearance` (theme and font),
   `editorStatus`, `extensions` (statuses, the commands they contribute, permission prompts), and
-  `notifications` (which can carry action buttons and then stay until acted on). Each component subscribes only to what it reads, so a
+  `notifications` (which can carry action buttons, and record warnings and errors in
+  `problems`), and `output` (the log channel shown). Each component subscribes only to what it reads, so a
   keystroke re-renders the editor view and status bar, not the workbench.
 - **`dock/`**: where everything shows ([ADR 0012](adr/0012-docking.md)).
   - `model.ts`: the tree of splits and tab groups, as pure functions.
@@ -734,9 +745,10 @@ them. Extensions fill in content through the `workbench` interface (API 1.1; pre
 - **Extensions view** (`panels/ExtensionsPanel`, `Ctrl+Shift+X`): each extension's state,
   permissions (checkboxes that grant or deny), what it contributes, commands, errors, and
   Restart and Disable buttons. The views are the built-in ones followed by those of enabled
-  extensions (`app/views.ts`). The activity bar lists everything in the side bar (the groups
-  along the dock's left edge: views, terminals, documents), then the views not docked anywhere
-  (`activityBarItems`). Its buttons show an item, hide the group of an item already showing,
+  extensions (`app/views.ts`). Problems and Output are panel views: they open along the bottom
+  with the terminals, and show and hide with them (**View: Toggle Panel**). The activity bar
+  lists everything in the side bar (the groups along the dock's left edge: views, terminals,
+  documents), then the views not docked anywhere except panel views (`activityBarItems`). Its buttons show an item, hide the group of an item already showing,
   and can be dragged into the dock; a tab dropped on it joins the side bar.
 - **Context menus** (`components/ContextMenu`) are a generic keyboard-navigable menu, opened by
   the editor (clipboard, Go to Definition, extension items, Command Palette) and by explorer
@@ -782,6 +794,13 @@ directory is known:
   prevent startup.
 - Panics are logged through `tracing` before the default hook runs.
 - The file writer is flushed on `RunEvent::Exit`.
+- **The Output view's records** ([ADR 0018](adr/0018-output-and-problems.md)) are kept by
+  another layer, in memory, in channels: `ferrite`, `extension:<id>` (records with an
+  `extension` field), and `server:<name>` (a `server` field). Each keeps its newest 2,000
+  records. Its per-layer filter keeps `info` and above from Ferrite and every level from
+  extensions and servers. It looks only at call-site metadata, so Ferrite's own debug call sites
+  stay disabled. The frontend polls `logs_read(channel, after)` once a second while the view is
+  shown, and `logs_file` names today's file for **Open Log File**.
 - Document lifecycle events (open, save, close) are logged at `info`, file errors at `warn`, and
   frontend errors are forwarded to the backend log.
 

@@ -6,6 +6,8 @@ import { extensionsStore, usableExtensions } from '../state/extensions'
 import { useStore } from '../state/store'
 import { ExplorerActions, ExplorerPanel } from '../panels/ExplorerPanel'
 import { ExtensionsActions, ExtensionsPanel } from '../panels/ExtensionsPanel'
+import { OutputActions, OutputPanel } from '../panels/OutputPanel'
+import { ProblemsActions, ProblemsPanel } from '../panels/ProblemsPanel'
 import { SearchPanel } from '../panels/SearchPanel'
 
 /**
@@ -47,6 +49,23 @@ export const builtinViews: readonly ViewDescriptor[] = [
     component: ExtensionsPanel,
     actions: ExtensionsActions,
     command: 'workbench.showExtensions',
+  },
+  // Panel views: they open along the bottom (see PANEL_VIEWS in the dock).
+  {
+    id: 'problems',
+    title: 'Problems',
+    icon: 'problems',
+    component: ProblemsPanel,
+    actions: ProblemsActions,
+    command: 'workbench.showProblems',
+  },
+  {
+    id: 'output',
+    title: 'Output',
+    icon: 'output',
+    component: OutputPanel,
+    actions: OutputActions,
+    command: 'workbench.showOutput',
   },
 ]
 

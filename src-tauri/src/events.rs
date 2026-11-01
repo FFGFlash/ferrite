@@ -65,6 +65,9 @@ pub enum AppEvent {
   LanguagesChanged,
   /// An extension asked to show a message.
   ExtensionMessage {
+    /// The extension's id.
+    id: String,
+    /// Its name.
     extension: String,
     level: MessageLevel,
     message: String,

@@ -142,10 +142,12 @@ impl Embedder for AppEmbedder {
   fn notify(&self, notification: Notification) {
     let event = match notification {
       Notification::Message {
+        id,
         extension,
         level,
         message,
       } => AppEvent::ExtensionMessage {
+        id,
         extension,
         level,
         message,
