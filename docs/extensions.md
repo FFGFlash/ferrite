@@ -8,7 +8,8 @@ do only what the [extension API](../crates/ferrite-extension-api/wit/extension.w
 - edit documents through validated, versioned edits;
 - publish diagnostics (squiggles and hover messages);
 - customize the workbench: color themes, keybindings, context menu items, status bar items,
-  side bar views, and editor decorations;
+  side bar views, editor decorations, and previews (formatted pages, such as rendered
+  Markdown);
 - add languages: syntax highlighting from Tree-sitter grammars, and language servers;
 - read their own settings;
 - log, and show messages.
@@ -31,6 +32,8 @@ This guide uses these examples:
   own: [Rust](../extensions/rust/), [TypeScript](../extensions/typescript/),
   [JavaScript](../extensions/javascript/), [JSON](../extensions/json/),
   [TOML](../extensions/toml/), and [Python](../extensions/python/) are extensions like it.
+- [Markdown](../extensions/markdown/) is a language too, and has code: a preview that renders
+  the document as you type.
 
 ## Quick start
 
@@ -145,8 +148,8 @@ extension invalid in the Extensions view, with a message:
 
 Every extension also starts when one of its commands runs, so `on-command` is only
 documentation. Language ids are those extensions add (see [Languages](#languages)), such as
-`rust`, `typescript`, `typescriptreact`, `javascript`, `json`, `toml`, `python`, `html`, and
-`css` in the examples.
+`rust`, `typescript`, `typescriptreact`, `javascript`, `json`, `toml`, `python`, `html`, `css`,
+and `markdown` in the examples.
 
 **Entry point.** An installed extension's entry point must be inside its folder. A development
 extension may point elsewhere, such as Tidy's
@@ -473,6 +476,59 @@ with that type in a document (at most 10,000). It works like `publish-diagnostic
 `workbench::reveal(document, range)` selects a range and scrolls it into view, making that
 document active. TODOs uses it when a view item is chosen. It also needs `documents_read`.
 
+### Previews
+
+A preview is a tab of formatted text that the extension fills in, such as a rendered Markdown
+file. [Markdown](../extensions/markdown/) is the example.
+
+```toml
+[[previews]]
+id = "preview"
+icon = "book"                     # list, check, bolt, book, bug, tag, star, flag, bell
+```
+
+A preview type can have many open previews, told apart by a key the extension chooses (Markdown
+uses the document's id).
+
+- **`show-preview(preview, key, options)`** opens a preview, or shows it if it's open. The
+  options are its title (at most 100 characters), the document it shows, if any, and whether to
+  open it beside that document (or the active editor) rather than in the same group. Showing a
+  document's preview needs the `documents_read` permission.
+- **`set-preview-content(preview, key, nodes)`** replaces what it shows. It returns `false`
+  without changing anything when the preview isn't open, because the user closed its tab, so
+  the extension can stop updating it.
+- **`close-preview(preview, key)`** closes it.
+
+Content is a list of nodes, each naming the index of the node it's inside, which must come
+before it (WIT has no recursive types). The workbench draws them itself, so an extension can't
+supply HTML, scripts, or styles:
+
+| Kind   | Nodes                                                                                | May contain                         |
+| ------ | ------------------------------------------------------------------------------------ | ----------------------------------- |
+| Blocks | `paragraph`, `heading(level)`, `code-block`, `rule`                                  | inline nodes (paragraph, heading)   |
+|        | `quote`                                                                              | blocks and inline nodes             |
+|        | `bulleted-list`, `numbered-list(start)`                                              | `list-item(task)`, which holds both |
+|        | `table(alignments)`                                                                  | `table-head` and `table-row`        |
+|        | `table-head`, `table-row`                                                            | `table-cell`, which is inline       |
+| Inline | `text`, `code`, `image`, `line-break`; `emphasis`, `strong`, `strikethrough`, `link` | inline nodes (the last four)        |
+
+The top level holds blocks and inline nodes. Anything out of place is rejected with
+`invalid-argument`, naming the node.
+
+- **Links** go to a web address (`https:`, `http:`, or `mailto:`), which opens with the system;
+  to a heading in the preview (`#name`, matched like GitHub's anchors); or to a file relative to
+  the preview's document (`setup.md#install`), which opens in the editor. Other schemes and
+  absolute paths are shown as text and can't be followed.
+- **Pictures** are PNG, JPEG, GIF, WebP, or SVG files relative to the preview's document, up to
+  16 MiB, and the workbench can read only the files the content names. Web pictures aren't
+  loaded, so opening a preview sends no requests; their description is shown instead.
+- **Code blocks** name their language by id or file extension (`rust` or `rs`). Code in a
+  language Ferrite has is highlighted with the editor's colors.
+- **Lifetime.** A preview closes with its document, and when its extension stops. Previews
+  aren't restored when Ferrite restarts: their extension opens them again.
+- **Updates.** Unchanged content sends no event, and the tab loads at most one update at a time,
+  so an extension can render on every change. Markdown does.
+
 ### Limits
 
 | Item                               | Limit                                   |
@@ -482,6 +538,8 @@ document active. TODOs uses it when a view item is chosen. It also needs `docume
 | Icons                              | 2,000 per theme, 64 KiB each, 8 MiB all |
 | Icon associations                  | 10,000 per theme                        |
 | Status items / views / decorations | 20 / 10 / 20 types per extension        |
+| Previews                           | 10 types per extension                  |
+| Preview content                    | 100,000 nodes, 8 MiB of text            |
 | Status text / tooltip              | 100 / 500 characters (cut, not refused) |
 | View items                         | 5,000 per view                          |
 | Decorated ranges                   | 10,000 per type and document            |
@@ -498,6 +556,8 @@ extension has no entrypoint. [HTML & CSS](../extensions/html-css/) is the exampl
 the [Rust](../extensions/rust/), [TypeScript](../extensions/typescript/) (two languages, TS and
 TSX), [JavaScript](../extensions/javascript/), [JSON](../extensions/json/),
 [TOML](../extensions/toml/), and [Python](../extensions/python/) extensions are simpler ones.
+[Markdown](../extensions/markdown/) uses two grammars, one for blocks and one for the inline text
+it injects into them, with a language for each; the inline one has no files of its own.
 
 ```text
 html-css/
@@ -628,7 +688,8 @@ grammar and highlights over the outer language:
 - **`@injection.content`** is the embedded text. The whole node is used, children included.
 - **The language** is a language id, set with `#set! injection.language`, or taken from the
   text of a node captured as `@injection.language` (for example a Markdown code fence's info
-  string). It may be the extension's own language or another extension's; an id no language
+  string). A name that isn't a language id is tried as a file extension, so a fence can say
+  `rs` or `rust`. It may be the extension's own language or another extension's; an id no language
   has is ignored (HTML's scripts are highlighted only if the JavaScript extension is loaded).
 - **`#set! injection.combined`** parses all of a pattern's matches together, as one document.
 - **Limits.** Injections are followed 4 levels deep (CSS in HTML in Markdown, say), and a
@@ -773,8 +834,9 @@ message saying so. Rust on `wasm32-unknown-unknown` is the supported path for no
 The WIT package is versioned: `ferrite:extension@1.1.0`, `api_version = "1"`.
 
 - **Additions.** New host functions arrive as minor versions of the package. Version 1.1 added the
-  `workbench` interface. Wasmtime links components built against an older minor version: the
-  host's tests load a Tidy build made against 1.0.
+  `workbench` interface, and 1.2 added previews to it. Wasmtime links components built against an
+  older minor version: the host's tests load a Tidy build made against 1.0 and a TODOs build made
+  against 1.1.
 - **Breaking changes.** Changes that break existing extensions get a new major version and a new
   `api_version`.
 - **Rejection.** Manifests for unsupported versions are rejected before loading.

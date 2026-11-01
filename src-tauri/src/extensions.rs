@@ -6,19 +6,24 @@
 //! `extensions.development` in the settings. The user's permission
 //! decisions are kept in `<config dir>/extension-permissions.json`.
 
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
-use std::sync::OnceLock;
+use std::sync::{Arc, OnceLock};
+use std::time::{Duration, Instant};
 
 use ferrite_core::{Document, DocumentId, Editor};
 use ferrite_extension_host::icons::IconTheme;
+use ferrite_extension_host::preview::PreviewElement;
 use ferrite_extension_host::{
   Embedder, ExtensionHost, ExtensionStatus, HostOptions, Limits, MANIFEST_FILE, Notification,
-  Permission, StatusItem, ViewContent,
+  Permission, PreviewContent, PreviewInfo, StatusItem, ViewContent,
 };
+use serde::{Serialize, Serializer};
 use tauri::{AppHandle, Manager, State, WebviewWindow};
 
 use crate::editor::EditorState;
 use crate::editor::protocol::DecorationDto;
+use crate::editor::syntax::highlight_snippet;
 use crate::error::CommandError;
 use crate::events::{self, AppEvent};
 use crate::languages::{self, LanguagesState};
@@ -27,6 +32,11 @@ use crate::settings::{self, Settings, SettingsState};
 
 const EXTENSIONS_DIR: &str = "extensions";
 const PERMISSIONS_FILE: &str = "extension-permissions.json";
+/// Largest code block highlighted in a preview.
+const MAX_HIGHLIGHTED_CODE_BYTES: usize = 64 * 1024;
+/// Time spent parsing a preview's code blocks to highlight them, each time
+/// its content is fetched.
+const PREVIEW_HIGHLIGHT_BUDGET: Duration = Duration::from_millis(200);
 
 /// The extension host, once the app is set up.
 #[derive(Default)]
@@ -171,6 +181,12 @@ impl Embedder for AppEmbedder {
         document_id: document.get(),
         start: start.into(),
         end: end.into(),
+      },
+      Notification::PreviewsChanged => AppEvent::ExtensionPreviewsChanged,
+      Notification::PreviewChanged(preview) => AppEvent::ExtensionPreviewChanged { preview },
+      Notification::ShowPreview { id, beside } => AppEvent::ExtensionShowPreview {
+        preview: id,
+        beside,
       },
     };
     events::emit(&self.app, event);
@@ -327,6 +343,102 @@ pub fn extension_view_opened(state: State<'_, ExtensionsState>, view: String) {
   if let Some(host) = state.host() {
     host.view_opened(&view);
   }
+}
+
+#[tauri::command]
+pub fn extension_previews(state: State<'_, ExtensionsState>) -> Vec<PreviewInfo> {
+  state.host().map_or_else(Vec::new, ExtensionHost::previews)
+}
+
+/// A preview's content, with its code blocks highlighted.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PreviewContentDto {
+  #[serde(serialize_with = "preview_nodes")]
+  nodes: Arc<PreviewContent>,
+  /// Each code block in a known language, by node index: its lines'
+  /// highlights as flat UTF-16 `[start, end, kind]` triples, as in views.
+  highlights: BTreeMap<u32, Vec<Vec<u32>>>,
+  /// Whether code blocks in known languages were left plain because time
+  /// ran out (e.g. compiling a grammar); fetching again highlights them.
+  highlights_pending: bool,
+}
+
+fn preview_nodes<S: Serializer>(content: &Arc<PreviewContent>, s: S) -> Result<S::Ok, S::Error> {
+  content.nodes.serialize(s)
+}
+
+/// A preview's content, or `None` if it isn't open. Code blocks in known
+/// languages are highlighted, within a time budget; the rest show plain.
+#[tauri::command]
+pub async fn extension_preview_content(
+  app: AppHandle,
+  preview: String,
+) -> Result<Option<PreviewContentDto>, CommandError> {
+  tauri::async_runtime::spawn_blocking(move || {
+    let content = app
+      .state::<ExtensionsState>()
+      .host()?
+      .preview_content(&preview)?;
+    let registry = app.state::<LanguagesState>().registry();
+    let known = |language: &str| registry.for_name(&language.to_ascii_lowercase()).is_some();
+    let started = Instant::now();
+    let mut highlights = BTreeMap::new();
+    let mut highlights_pending = false;
+    for (index, node) in content.nodes.iter().enumerate() {
+      let PreviewElement::CodeBlock {
+        language: Some(language),
+        text,
+      } = &node.element
+      else {
+        continue;
+      };
+      if text.len() > MAX_HIGHLIGHTED_CODE_BYTES {
+        continue;
+      }
+      let lines = PREVIEW_HIGHLIGHT_BUDGET
+        .checked_sub(started.elapsed())
+        .and_then(|budget| highlight_snippet(&registry, language, text, budget));
+      match lines {
+        Some(lines) => {
+          highlights.insert(u32::try_from(index).unwrap_or(u32::MAX), lines);
+        }
+        None => highlights_pending |= known(language),
+      }
+    }
+    Some(PreviewContentDto {
+      nodes: content,
+      highlights,
+      highlights_pending,
+    })
+  })
+  .await
+  .map_err(CommandError::internal)
+}
+
+/// The user closed a preview's tab.
+#[tauri::command]
+pub fn extension_preview_closed(state: State<'_, ExtensionsState>, preview: String) {
+  if let Some(host) = state.host() {
+    host.preview_closed(&preview);
+  }
+}
+
+/// A picture a preview shows, as a `data:` URL.
+#[tauri::command]
+pub async fn extension_preview_image(
+  app: AppHandle,
+  preview: String,
+  path: String,
+) -> Result<String, CommandError> {
+  tauri::async_runtime::spawn_blocking(move || {
+    let state = app.state::<ExtensionsState>();
+    host(&state)?
+      .preview_image(&preview, Path::new(&path))
+      .map_err(|message| CommandError::new("previewImage", message))
+  })
+  .await
+  .map_err(CommandError::internal)?
 }
 
 #[tauri::command]

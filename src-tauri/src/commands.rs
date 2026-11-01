@@ -8,8 +8,11 @@
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
+use ferrite_extension_host::preview::{LinkTarget, link_target};
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, State};
+
+use crate::error::CommandError;
 
 /// Largest frontend log message accepted, in bytes. Longer messages are
 /// truncated at a character boundary.
@@ -23,6 +26,20 @@ pub struct AppInfo {
   pub os: &'static str,
   pub arch: &'static str,
   pub tauri_version: &'static str,
+}
+
+/// Opens a web address with the system: `http:`, `https:`, and `mailto:`
+/// addresses only. Links in previews use it.
+#[tauri::command]
+pub fn open_external(url: String) -> Result<(), CommandError> {
+  if !matches!(link_target(&url, None), LinkTarget::Web { .. }) {
+    return Err(CommandError::new(
+      "unsupportedLink",
+      "Only web and mail links can be opened.",
+    ));
+  }
+  tracing::info!("opening a link with the system");
+  open::that_detached(&url).map_err(|error| CommandError::new("openLink", error.to_string()))
 }
 
 #[tauri::command]

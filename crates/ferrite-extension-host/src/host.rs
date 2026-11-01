@@ -1,6 +1,6 @@
 //! The extension host: discovery, lifecycle, permission decisions, document
 //! notifications, extension diagnostics and decorations, and the content of
-//! extension status bar items and views.
+//! extension status bar items, views, and previews.
 //!
 //! Lock order: the editor lock (held by the embedder around `sync` and the
 //! diagnostics queries, and taken by host functions through
@@ -8,7 +8,7 @@
 //! an extension while holding either; notifications to the embedder are
 //! sent after the state lock is released.
 
-use std::collections::{BTreeMap, HashMap, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, HashMap, VecDeque};
 use std::ops::Range;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicBool;
@@ -28,6 +28,7 @@ use crate::contributions::{LanguageContribution, LanguageServerContribution};
 use crate::icons::IconTheme;
 use crate::manifest::{self, MANIFEST_FILE, Manifest};
 use crate::permissions::{Decision, Decisions, Permission};
+use crate::preview::{PreviewContent, PreviewInfo};
 use crate::runtime::{MemoryPool, Runtime};
 use crate::usage::{ResourceUsage, Usage};
 use crate::worker::{
@@ -159,6 +160,16 @@ struct Invalid {
   error: String,
 }
 
+/// An open preview.
+struct PreviewRecord {
+  /// The extension's id.
+  extension: String,
+  info: PreviewInfo,
+  content: Arc<PreviewContent>,
+  /// The picture files its content shows.
+  images: BTreeSet<PathBuf>,
+}
+
 struct State {
   options: HostOptions,
   decisions: Decisions,
@@ -170,6 +181,8 @@ struct State {
   status: BTreeMap<(String, String), Option<StatusContent>>,
   /// View content set by extensions, by full view id.
   views: BTreeMap<String, ViewContent>,
+  /// Open previews, by preview id.
+  previews: BTreeMap<String, PreviewRecord>,
   next_generation: u64,
   shutting_down: bool,
 }
@@ -286,7 +299,7 @@ impl Shared {
   }
 
   /// Removes what a stopped extension showed: diagnostics, decorations,
-  /// status bar content, and view content.
+  /// status bar content, view content, and previews.
   fn forget_output(state: &mut State, id: &str, outbox: &mut Outbox) {
     for (&document, record) in &mut state.documents {
       if record.diagnostics.remove(id).is_some() {
@@ -315,6 +328,11 @@ impl Shared {
     for view in views {
       state.views.remove(&view);
       outbox.push(Notification::ViewChanged(view));
+    }
+    let before = state.previews.len();
+    state.previews.retain(|_, preview| preview.extension != id);
+    if state.previews.len() != before {
+      outbox.push(Notification::PreviewsChanged);
     }
   }
 
@@ -348,6 +366,84 @@ impl Shared {
       self
         .embedder
         .notify(Notification::ViewChanged(full_id.to_owned()));
+    }
+  }
+
+  /// Opens a preview, or updates its title, and asks to show it.
+  pub fn show_preview(&self, extension: &str, info: PreviewInfo, beside: bool) {
+    let id = info.id.clone();
+    let changed = {
+      let mut state = self.lock();
+      match state.previews.get_mut(&id) {
+        Some(record) if record.info == info => false,
+        Some(record) => {
+          record.info = info;
+          true
+        }
+        None => {
+          state.previews.insert(
+            id.clone(),
+            PreviewRecord {
+              extension: extension.to_owned(),
+              info,
+              content: Arc::default(),
+              images: BTreeSet::new(),
+            },
+          );
+          true
+        }
+      }
+    };
+    if changed {
+      self.embedder.notify(Notification::PreviewsChanged);
+    }
+    self
+      .embedder
+      .notify(Notification::ShowPreview { id, beside });
+  }
+
+  /// The document an open preview shows: `None` if it isn't open.
+  pub fn preview_document(&self, id: &str) -> Option<Option<DocumentId>> {
+    self
+      .lock()
+      .previews
+      .get(id)
+      .map(|record| record.info.document.map(DocumentId::from_raw))
+  }
+
+  /// Replaces an open preview's content; false if it isn't open.
+  pub fn set_preview_content(
+    &self,
+    id: &str,
+    content: PreviewContent,
+    images: BTreeSet<PathBuf>,
+  ) -> bool {
+    let changed = {
+      let mut state = self.lock();
+      let Some(record) = state.previews.get_mut(id) else {
+        return false;
+      };
+      if *record.content == content {
+        false
+      } else {
+        record.content = Arc::new(content);
+        record.images = images;
+        true
+      }
+    };
+    if changed {
+      self
+        .embedder
+        .notify(Notification::PreviewChanged(id.to_owned()));
+    }
+    true
+  }
+
+  /// Closes a preview, if it's open.
+  pub fn close_preview(&self, id: &str) {
+    let removed = self.lock().previews.remove(id).is_some();
+    if removed {
+      self.embedder.notify(Notification::PreviewsChanged);
     }
   }
 
@@ -671,6 +767,7 @@ impl ExtensionHost {
         documents: HashMap::new(),
         status: BTreeMap::new(),
         views: BTreeMap::new(),
+        previews: BTreeMap::new(),
         next_generation: 0,
         shutting_down: false,
       }),
@@ -1165,6 +1262,53 @@ impl ExtensionHost {
       .unwrap_or_default()
   }
 
+  /// The open previews, in the order of their ids.
+  pub fn previews(&self) -> Vec<PreviewInfo> {
+    self
+      .shared
+      .lock()
+      .previews
+      .values()
+      .map(|record| record.info.clone())
+      .collect()
+  }
+
+  /// A preview's content, as last set by its extension; `None` if it isn't
+  /// open.
+  pub fn preview_content(&self, id: &str) -> Option<Arc<PreviewContent>> {
+    self
+      .shared
+      .lock()
+      .previews
+      .get(id)
+      .map(|record| record.content.clone())
+  }
+
+  /// The user closed a preview's tab.
+  pub fn preview_closed(&self, id: &str) {
+    self.shared.close_preview(id);
+  }
+
+  /// Whether a preview's content shows the picture file `path`, which the
+  /// workbench may then load for it.
+  pub fn preview_shows_image(&self, id: &str, path: &Path) -> bool {
+    self
+      .shared
+      .lock()
+      .previews
+      .get(id)
+      .is_some_and(|record| record.images.contains(path))
+  }
+
+  /// A picture a preview shows, as a `data:` URL. Only the files its
+  /// content shows can be read. Reads the disk.
+  pub fn preview_image(&self, id: &str, path: &Path) -> Result<String, String> {
+    if !self.preview_shows_image(id, path) {
+      return Err("the preview doesn't show this picture".into());
+    }
+    crate::preview::load_image(path)
+  }
+
   /// Called when a view is shown: starts its extension if it activates for
   /// the view.
   pub fn view_opened(&self, full_id: &str) {
@@ -1238,18 +1382,28 @@ impl ExtensionHost {
     self.shared.sync(document);
   }
 
-  /// Forgets a closed document and tells extensions.
+  /// Forgets a closed document, closes its previews, and tells extensions.
   pub fn closed(&self, id: DocumentId) {
-    let mut state = self.shared.lock();
-    if state.documents.remove(&id).is_none() {
-      return;
-    }
-    for entry in &state.extensions {
-      if let Run::Running { worker, .. } = &entry.run
-        && worker.reads_documents()
-      {
-        worker.queue.push_document(Event::Closed(id.get()));
+    let previews_closed = {
+      let mut state = self.shared.lock();
+      let before = state.previews.len();
+      state
+        .previews
+        .retain(|_, preview| preview.info.document != Some(id.get()));
+      let previews_closed = state.previews.len() != before;
+      if state.documents.remove(&id).is_some() {
+        for entry in &state.extensions {
+          if let Run::Running { worker, .. } = &entry.run
+            && worker.reads_documents()
+          {
+            worker.queue.push_document(Event::Closed(id.get()));
+          }
+        }
       }
+      previews_closed
+    };
+    if previews_closed {
+      self.shared.embedder.notify(Notification::PreviewsChanged);
     }
   }
 

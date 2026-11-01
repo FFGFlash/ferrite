@@ -143,11 +143,13 @@ included, with no code to build:
 | [TOML](extensions/toml/)             | TOML, `Cargo.lock`       | —                                 |                                                        |
 | [Python](extensions/python/)         | Python                   | `pyright-langserver`              | `npm install -g pyright`                               |
 | [HTML & CSS](extensions/html-css/)   | HTML (with CSS, JS), CSS | `vscode-html/css-language-server` | `npm install -g vscode-langservers-extracted`          |
+| [Markdown](extensions/markdown/)     | Markdown                 | —                                 |                                                        |
 
 Load one with **Extensions: Load Development Extension…** (choose its folder, such as
 `extensions/rust`), or install it by copying its folder into the `extensions` folder next to
 `settings.toml`. Ferrite asks before running an extension's language server; highlighting
-works either way.
+works either way. Markdown's highlighting needs no build either; its preview does (see
+[Extensions](#extensions)).
 
 With a language server, Ferrite also shows errors and warnings as you type (squiggles, plus
 counts in the status bar), shows type information and documentation when the pointer rests on a
@@ -163,7 +165,8 @@ Extensions are WebAssembly modules that run in a sandbox: they can only use Ferr
 [extension API](crates/ferrite-extension-api/wit/extension.wit). With it they add commands to
 the palette, read open documents, edit them, and show problems as squiggles. They can also
 customize the workbench: color themes, file icon themes, keybindings, context menu items, status
-bar items, side bar views, and highlights in the text, and add languages. They have no access to
+bar items, side bar views, highlights in the text, and previews (formatted pages, such as rendered
+Markdown), and add languages. They have no access to
 files, the network, or anything else on your computer. Before an extension starts, Ferrite asks
 you to allow the permissions it requests (reading or editing open documents, or running the
 language servers it declares). The
@@ -171,7 +174,7 @@ Extensions view (`Ctrl+Shift+X`) shows each extension's state and permissions, a
 change them, restart an extension, or turn it off. An extension that crashes, loops, or uses too
 much memory is stopped without affecting the editor.
 
-Besides the [language extensions](#languages), five example extensions are included:
+Besides the [language extensions](#languages), six example extensions are included:
 
 - [Tidy](extensions/tidy/) flags trailing whitespace and long lines, and can trim them.
 - [TODOs](extensions/todos/) highlights TODO and FIXME comments and lists them in a side bar
@@ -181,6 +184,9 @@ Besides the [language extensions](#languages), five example extensions are inclu
 - [Example File Icons](extensions/icons/) adds the Colorful file icon theme, with no code.
 - [HTML & CSS](extensions/html-css/) adds HTML and CSS highlighting and their language servers,
   with no code.
+- [Markdown](extensions/markdown/) adds Markdown highlighting, and **Markdown: Open Preview**
+  (`Ctrl+Shift+V`) and **Open Preview to the Side** (`Ctrl+K V`), which show the page rendered and
+  update it as you type.
 
 To try them:
 
@@ -433,7 +439,7 @@ src/                  React + TypeScript workbench
   ipc/                Typed wrappers for Tauri commands (the only place that calls invoke)
   themes/             Theme selection
   styles/             Design tokens and base styles
-extensions/           Extensions built to WebAssembly: examples (tidy, todos, themes, icons) and test fixtures
+extensions/           Extensions built to WebAssembly: examples (tidy, todos, markdown, themes, icons) and test fixtures
 docs/                 Architecture notes, ADRs, extension guide, troubleshooting
 ```
 

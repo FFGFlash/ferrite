@@ -7,6 +7,7 @@
 
 use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::ops::Range as Span;
+use std::path::Path;
 use std::sync::{Arc, RwLock, Weak};
 use std::time::Instant;
 
@@ -16,14 +17,15 @@ use ferrite_text::{Edit, TextBuffer};
 use crate::bindings::ferrite::extension::host::Host;
 use crate::bindings::ferrite::extension::types::{
   self, ApiError, ConfigValue as WitConfigValue, Diagnostic, DocumentInfo, LineSlice, LogLevel,
-  MessageLevel, Permission as WitPermission, Position, Range, StatusItem, TextEdit, TextSlice,
-  ViewItem,
+  MessageLevel, Permission as WitPermission, Position, PreviewNode, PreviewOptions, Range,
+  StatusItem, TextEdit, TextSlice, ViewItem,
 };
 use crate::bindings::ferrite::extension::workbench::Host as WorkbenchHost;
 use crate::config::ConfigValue;
 use crate::host::{Shared, StoredDiagnostic};
 use crate::manifest::Manifest;
 use crate::permissions::Permission;
+use crate::preview::{self, MAX_KEY_BYTES, MAX_TITLE_CHARS, PreviewInfo};
 use crate::runtime::StoreState;
 use crate::worker::Setup;
 use crate::{Notification, Severity, StatusContent, ViewEntry};
@@ -477,6 +479,22 @@ impl ApiContext {
     }
   }
 
+  /// The id of an instance of one of the extension's previews, and the
+  /// preview's icon.
+  fn preview(&self, preview: &str, key: &str) -> Result<(String, String), ApiError> {
+    let declared = self
+      .manifest
+      .contributions
+      .preview(preview)
+      .ok_or_else(|| ApiError::InvalidArgument(format!("no preview {preview:?} is declared")))?;
+    if key.is_empty() || key.len() > MAX_KEY_BYTES || key.contains(char::is_control) {
+      return Err(ApiError::InvalidArgument(format!(
+        "preview keys must be 1 to {MAX_KEY_BYTES} bytes, without control characters"
+      )));
+    }
+    Ok((format!("{}/{key}", declared.full_id), declared.icon.clone()))
+  }
+
   fn view(&self, view: &str) -> Result<String, ApiError> {
     self
       .manifest
@@ -638,6 +656,69 @@ impl WorkbenchHost for StoreState {
 
   fn command_argument(&mut self) -> Option<String> {
     self.api.argument.clone()
+  }
+
+  fn show_preview(
+    &mut self,
+    preview: String,
+    key: String,
+    options: PreviewOptions,
+  ) -> Result<(), ApiError> {
+    let (id, icon) = self.api.preview(&preview, &key)?;
+    let title = options.title.trim();
+    if title.is_empty() {
+      return Err(ApiError::InvalidArgument("a preview needs a title".into()));
+    }
+    let shared = match options.document {
+      Some(document) => {
+        let shared = self.api.require(WitPermission::DocumentsRead)?;
+        with_editor(&shared, |editor| find(editor, document).map(|_| ()))
+          .ok_or_else(editor_unavailable)??;
+        shared
+      }
+      None => self.api.shared()?,
+    };
+    let info = PreviewInfo {
+      id,
+      extension: self.api.name.clone(),
+      title: cut(title, MAX_TITLE_CHARS),
+      icon,
+      document: options.document,
+    };
+    shared.show_preview(&self.api.id, info, options.beside);
+    Ok(())
+  }
+
+  fn set_preview_content(
+    &mut self,
+    preview: String,
+    key: String,
+    nodes: Vec<PreviewNode>,
+  ) -> Result<bool, ApiError> {
+    let (id, _) = self.api.preview(&preview, &key)?;
+    let shared = self.api.shared()?;
+    let Some(document) = shared.preview_document(&id) else {
+      return Ok(false);
+    };
+    // Relative links and pictures are found from the document's folder.
+    let base = document.and_then(|document| {
+      with_editor(&shared, |editor| {
+        let document = editor.document(document).ok()?;
+        document
+          .path()
+          .and_then(Path::parent)
+          .map(Path::to_path_buf)
+      })
+      .flatten()
+    });
+    let converted = preview::convert(nodes, base.as_deref())?;
+    Ok(shared.set_preview_content(&id, converted.content, converted.images))
+  }
+
+  fn close_preview(&mut self, preview: String, key: String) -> Result<(), ApiError> {
+    let (id, _) = self.api.preview(&preview, &key)?;
+    self.api.shared()?.close_preview(&id);
+    Ok(())
   }
 }
 

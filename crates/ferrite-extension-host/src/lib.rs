@@ -29,6 +29,7 @@ pub mod icons;
 pub mod keys;
 pub mod manifest;
 mod permissions;
+pub mod preview;
 mod runtime;
 mod usage;
 mod worker;
@@ -55,6 +56,7 @@ pub use contributions::Contributions;
 pub use host::{CommandTicket, ExtensionHost};
 pub use manifest::{MANIFEST_FILE, Manifest, ManifestError};
 pub use permissions::{Decision, Permission};
+pub use preview::{PreviewContent, PreviewInfo};
 pub use usage::ResourceUsage;
 
 /// What the host needs from the application.
@@ -109,6 +111,13 @@ pub enum Notification {
     start: ferrite_text::Utf16Position,
     end: ferrite_text::Utf16Position,
   },
+  /// Previews were opened or closed, or one's title changed.
+  PreviewsChanged,
+  /// The content of a preview changed (by preview id).
+  PreviewChanged(String),
+  /// An extension asked to show one of its previews, beside its document
+  /// or in the same group.
+  ShowPreview { id: String, beside: bool },
 }
 
 /// What a status bar item shows.

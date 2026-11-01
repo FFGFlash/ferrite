@@ -39,6 +39,7 @@ const themes = {
     menus: [],
     views: [],
     decorations: [],
+    previews: [],
     languages: [],
     languageServers: [],
   },

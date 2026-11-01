@@ -3,35 +3,40 @@
  * exited state), its content, and the buttons shown beside the tabs while
  * it's active.
  */
-import { ChevronDown, Plus, SquareTerminal, Trash2 } from 'lucide-react'
+import { ChevronDown, FileText, Plus, SquareTerminal, Trash2 } from 'lucide-react'
 import { useEffect, useRef, type ReactNode } from 'react'
 import { useViews, type ViewDescriptor } from '../app/views'
 import { executeCommand, getCommand, primaryKeybinding } from '../commands/registry'
 import { ErrorBoundary } from '../components/ErrorBoundary'
 import { FileIcon } from '../components/FileIcon'
-import { Icon } from '../components/Icon'
+import { Icon, type IconName } from '../components/Icon'
 import { entryIcon } from '../components/fileIcons'
 import { Breadcrumbs } from '../editor/Breadcrumbs'
 import { EditorView } from '../editor/EditorView'
 import type { DocumentSummary } from '../ipc/editor'
+import type { PreviewInfo } from '../ipc/extensions'
+import { PreviewPane } from '../panels/PreviewPane'
 import { documentsStore } from '../state/documents'
 import { iconThemeStore } from '../state/iconTheme'
+import { previewsStore } from '../state/previews'
 import { useStore } from '../state/store'
 import { openNewTerminalMenu } from '../terminal/profileMenu'
 import { closeTerminal, getSession, terminalsStore, type TerminalTab } from '../terminal/terminals'
 import { themeKind } from '../themes/theme'
-import { itemId } from './dock'
+import { documentItem, itemId, showItem } from './dock'
 import { itemKind, type ItemId } from './model'
 
 export type ResolvedItem =
   | { kind: 'document'; item: ItemId; document: DocumentSummary }
   | { kind: 'view'; item: ItemId; view: ViewDescriptor }
   | { kind: 'terminal'; item: ItemId; terminal: TerminalTab }
+  | { kind: 'preview'; item: ItemId; preview: PreviewInfo }
 
-/** The items that exist now (open documents, known views, running terminals). */
+/** The items that exist now (open documents, known views, running terminals, open previews). */
 export function useResolver(): (item: ItemId) => ResolvedItem | null {
   const { documents } = useStore(documentsStore)
   const { tabs } = useStore(terminalsStore)
+  const previews = useStore(previewsStore)
   const views = useViews()
   return (item: ItemId) => {
     const id = itemId(item)
@@ -48,6 +53,10 @@ export function useResolver(): (item: ItemId) => ResolvedItem | null {
         const terminal = tabs.find(candidate => candidate.id === Number(id))
         return terminal ? { kind: 'terminal', item, terminal } : null
       }
+      case 'preview': {
+        const preview = previews.find(candidate => candidate.id === id)
+        return preview ? { kind: 'preview', item, preview } : null
+      }
       default:
         return null
     }
@@ -62,6 +71,8 @@ export function itemTitle(resolved: ResolvedItem): string {
       return resolved.view.title
     case 'terminal':
       return resolved.terminal.title
+    case 'preview':
+      return resolved.preview.title
   }
 }
 
@@ -85,6 +96,11 @@ export function itemTooltip(resolved: ResolvedItem): string {
       return resolved.view.title
     case 'terminal':
       return resolved.terminal.description ?? resolved.terminal.title
+    case 'preview': {
+      const { document } = resolved.preview
+      const path = documentsStore.get().documents.find(d => d.id === document)?.path
+      return path ? `${resolved.preview.title} (${path})` : resolved.preview.title
+    }
   }
 }
 
@@ -117,6 +133,13 @@ export function ItemIcon({ resolved, className = 'dock-tab__icon', size = 16 }: 
       return (
         <SquareTerminal className={className} size={size} strokeWidth={1.5} aria-hidden="true" />
       )
+    case 'preview':
+      return (
+        <span className={className} aria-hidden="true">
+          {/* The backend allows only the view icons. */}
+          <Icon name={resolved.preview.icon as IconName} size={size} />
+        </span>
+      )
   }
 }
 
@@ -148,6 +171,14 @@ export function ItemContent({ resolved }: { resolved: ResolvedItem }): ReactNode
     }
     case 'terminal':
       return <TerminalPane id={resolved.terminal.id} />
+    case 'preview':
+      return (
+        <div className="dock-view">
+          <ErrorBoundary name={`The preview ${resolved.preview.title}`} resetKey={resolved.item}>
+            <PreviewPane key={resolved.preview.id} preview={resolved.preview} />
+          </ErrorBoundary>
+        </div>
+      )
   }
 }
 
@@ -156,6 +187,20 @@ export function ItemActions({ resolved }: { resolved: ResolvedItem }): ReactNode
   if (resolved.kind === 'view') {
     const Actions = resolved.view.actions
     return Actions ? <Actions /> : null
+  }
+  if (resolved.kind === 'preview') {
+    const { document } = resolved.preview
+    return document === null ? null : (
+      <button
+        type="button"
+        className="dock-action"
+        title="Show Source"
+        aria-label="Show Source"
+        onClick={() => showItem(documentItem(document))}
+      >
+        <FileText size={16} strokeWidth={1.5} aria-hidden="true" />
+      </button>
+    )
   }
   if (resolved.kind === 'terminal') {
     const keys = primaryKeybinding(getCommand('terminal.new'))

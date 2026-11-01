@@ -630,7 +630,7 @@ connects it to the editor, settings, and frontend. The developer guide is
 
 Extensions customize the workbench declaratively ([ADR 0007](adr/0007-workbench-contributions.md)).
 The manifest declares contributions (validated in `contributions.rs`), and the workbench renders
-them. Extensions fill in content through the `workbench` interface (API 1.1).
+them. Extensions fill in content through the `workbench` interface (API 1.1; previews in 1.2).
 
 | Contribution     | Declared                               | Filled in by the extension                        | Rendered by                        |
 | ---------------- | -------------------------------------- | ------------------------------------------------- | ---------------------------------- |
@@ -641,6 +641,7 @@ them. Extensions fill in content through the `workbench` interface (API 1.1).
 | Status bar items | alignment, priority, initial text      | `set-status-item`                                 | `StatusBar`                        |
 | Side bar views   | title, icon                            | `set-view-items`, `set-view-message`, `show-view` | `panels/ExtensionViewPanel`        |
 | Decorations      | colors (dark/light), underline, weight | `set-decorations` (ranges per document)           | `EditorView` overlay and line runs |
+| Previews         | icon                                   | `show-preview`, `set-preview-content` (nodes)     | `panels/PreviewPane` in a dock tab |
 
 - **Host state.** Status and view content live in the host's state, keyed by extension. They are
   compared on update (unchanged content sends no event) and removed when the extension stops.
@@ -658,6 +659,13 @@ them. Extensions fill in content through the `workbench` interface (API 1.1).
   theme loads, and for anything it doesn't match, the explorer and Go to File use the built-in Lucide icons.
 - **Command arguments.** View items and explorer menu items run their command with an argument,
   which the extension reads with `workbench::command-argument()` during that command.
+- **Previews** ([ADR 0016](adr/0016-previews.md)) are formatted text sent as a flat list of typed
+  nodes. The host checks the tree and resolves links and pictures against the document's folder
+  (`ferrite-extension-host/src/preview.rs`). Open previews are dock items (`preview:<id>`) that
+  follow `state/previews.ts`, as terminals follow theirs. `extension_preview_content` highlights
+  code blocks with the editor's grammars, and pictures load through `extension_preview_image`,
+  only for files the content names. Links to web addresses open through `open_external`, which
+  accepts only `http:`, `https:`, and `mailto:`.
 - **`reveal`** asks the frontend to activate a document and select a range; **`show-view`** opens
   a view.
 
@@ -853,13 +861,14 @@ These are tracked for later milestones:
   implemented, nor are completion's additional edits (such as auto-imports) or snippets
   (completion asks servers for plain text). There's no problems panel; diagnostics for files that
   aren't open aren't shown.
-- Highlighting uses each grammar's own query. Of the example languages only HTML has an
-  injection query, and there's no language detection beyond file names. A
+- Highlighting uses each grammar's own query. Of the example languages only HTML and Markdown
+  have injection queries, and there's no language detection beyond file names. A
   WebAssembly grammar's external scanner can't be interrupted mid-call.
 - Extensions have no storage API and can't depend on other extensions. Components that import
   WASI are rejected. There's no installer; extensions are installed by copying their folder.
-- Contributed views are trees of text items; there are no rich custom views, inline text
-  (inlays), gutter icons, or decoration hover text. Menus exist only in the editor and the
+- Contributed views are trees of text items, and previews are formatted text from a fixed set of
+  elements; there are no custom interactive views, inline text (inlays), gutter icons, or
+  decoration hover text. Menus exist only in the editor and the
   explorer (files), and keybindings support only the `editorFocus` condition.
 - Extension diagnostics count toward the status bar's problem counts only in files with a known
   language, because the counts live in the language status.

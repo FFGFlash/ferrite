@@ -12,6 +12,7 @@ import { listenToBackend } from '../state/events'
 import { refreshExtensions } from '../state/extensions'
 import { restoreLayout } from '../state/layout'
 import { reportError } from '../state/notifications'
+import { refreshPreviews } from '../state/previews'
 import { loadWorkspace } from '../state/workspace'
 import { restoreTerminals } from '../terminal/terminals'
 import { documentsRestored, restoreDock, terminalsRestored } from '../dock/dock'
@@ -53,7 +54,8 @@ async function restoreSession(): Promise<void> {
   restoreDock()
   await Promise.all([
     loadWorkspace(),
-    loadDocuments(activeFile).then(documentsRestored),
+    // Previews still open (after a window reload) go with their documents.
+    loadDocuments(activeFile).then(documentsRestored).then(refreshPreviews),
     refreshExtensions(),
     loadTerminals(),
   ])

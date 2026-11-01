@@ -1,14 +1,16 @@
 /**
- * The dock's state: where every document, view, and terminal shows, which
- * group the user is working in, and the actions on them.
+ * The dock's state: where every document, view, terminal, and preview
+ * shows, which group the user is working in, and the actions on them.
  *
- * The documents and terminals stores own what's open; the dock follows them
- * (adding a tab for a new document, removing it when the document closes)
- * and decides only where things go. Views are added when shown.
+ * The documents, terminals, and previews stores own what's open; the dock
+ * follows them (adding a tab for a new document, removing it when the
+ * document closes) and decides only where things go. Views are added when
+ * shown.
  *
  * The layout is saved with the rest of the workbench layout. Documents are
  * saved by path (`file:<path>`), because document ids change between
- * runs; they hold their place until the documents load.
+ * runs; they hold their place until the documents load. Previews aren't
+ * saved: their extensions open them again.
  */
 import { activeEditor, editorFor } from '../editor/activeEditor'
 import {
@@ -18,6 +20,12 @@ import {
 } from '../state/documents'
 import { layoutStore, updateLayout } from '../state/layout'
 import { reportError } from '../state/notifications'
+import {
+  closePreview,
+  previewsStore,
+  setPreviewHandler,
+  takeBesideRequest,
+} from '../state/previews'
 import { createStore } from '../state/store'
 import { setViewHandler } from '../state/viewRequests'
 import {
@@ -52,15 +60,17 @@ import {
   type DropTarget,
   type Edge,
   type ItemId,
+  type ItemKind,
 } from './model'
 
 export const documentItem = (id: number): ItemId => `document:${id}`
 export const viewItem = (id: string): ItemId => `view:${id}`
 export const terminalItem = (id: number): ItemId => `terminal:${id}`
+export const previewItem = (id: string): ItemId => `preview:${id}`
 /** A saved document, until the documents load. */
 const fileItem = (path: string): ItemId => `file:${path}`
 
-/** The id after the kind: a document or terminal number, or a view id. */
+/** The id after the kind: a document or terminal number, or a view or preview id. */
 export function itemId(item: ItemId): string {
   return item.slice(item.indexOf(':') + 1)
 }
@@ -132,6 +142,8 @@ function placementFor(layout: DockLayout, item: ItemId): { target: DropTarget; s
         size: 0.3,
       }
     }
+    case 'preview':
+      return { target: appendTo(previewSourceGroup(layout, item), true), size: 0.5 }
     default: {
       const remembered = closedViews.get(item)
       if (remembered && findGroup(layout, remembered.group)) {
@@ -143,6 +155,37 @@ function placementFor(layout: DockLayout, item: ItemId): { target: DropTarget; s
       return { target: sidebarTarget(layout, 'view'), size: 0.2 }
     }
   }
+}
+
+/** The group of a preview's document, else the group documents open in. */
+function previewSourceGroup(layout: DockLayout, item: ItemId): DockGroup {
+  const document = previewsStore.get().find(preview => previewItem(preview.id) === item)?.document
+  return (
+    (document != null ? groupOf(layout, documentItem(document)) : undefined) ??
+    findGroup(layout, documentGroup) ??
+    findGroup(layout, layout.main)!
+  )
+}
+
+/**
+ * Beside a preview's document: in the group to the right of the document's
+ * group, or in a new group there.
+ */
+function besideTarget(layout: DockLayout, item: ItemId): DropTarget {
+  const source = previewSourceGroup(layout, item)
+  const rects = visibleGroupRects()
+  const from = rects.find(entry => entry.id === source.id)
+  const neighbour =
+    from &&
+    neighbourInDirection(
+      from.rect,
+      'right',
+      rects.filter(entry => entry.id !== source.id),
+    )
+  const group = neighbour && findGroup(layout, neighbour.id)
+  return group
+    ? { kind: 'tabs', group: group.id, index: group.items.length }
+    : { kind: 'split', group: source.id, edge: 'right' }
 }
 
 /**
@@ -199,10 +242,11 @@ function replaceItem(layout: DockLayout, from: ItemId, to: ItemId): DockLayout {
   }))
 }
 
-// Following the documents and terminals.
+// Following the documents, terminals, and previews.
 
 let knownDocuments = new Set<number>()
 let knownTerminals = new Set<number>()
+let knownPreviews = new Set<string>()
 
 function syncDocuments(): void {
   const { documents, activeId } = documentsStore.get()
@@ -259,17 +303,50 @@ function syncTerminals(): void {
   }
 }
 
+/** New previews open with their document, or beside it if their extension asked. */
+function syncPreviews(): void {
+  const previews = previewsStore.get()
+  const before = dockStore.get()
+  let layout = before
+  const ids = new Set(previews.map(preview => preview.id))
+  for (const id of knownPreviews) {
+    if (!ids.has(id)) {
+      layout = removeItem(layout, previewItem(id))
+    }
+  }
+  for (const preview of previews) {
+    const item = previewItem(preview.id)
+    if (groupOf(layout, item)) {
+      continue
+    }
+    layout = takeBesideRequest(preview.id)
+      ? placeItem(layout, item, besideTarget(layout, item), 0.5)
+      : ensure(layout, item)
+  }
+  knownPreviews = ids
+  if (layout !== before) {
+    setLayout(layout)
+  }
+}
+
 documentsStore.subscribe(syncDocuments)
 terminalsStore.subscribe(syncTerminals)
+previewsStore.subscribe(syncPreviews)
 
 // Saving and restoring.
 
-/** The layout as saved: documents by path; untitled documents aren't saved. */
+/**
+ * The layout as saved: documents by path; untitled documents and previews
+ * aren't saved.
+ */
 export function serializeDock(layout: DockLayout = dockStore.get()): DockLayout {
   const paths = new Map(
     documentsStore.get().documents.map(document => [documentItem(document.id), document.path]),
   )
   const saved = (item: ItemId): ItemId | null => {
+    if (itemKind(item) === 'preview') {
+      return null
+    }
     if (itemKind(item) !== 'document') {
       return item
     }
@@ -307,11 +384,13 @@ export function restoreDock(): void {
     })
   knownDocuments = new Set()
   knownTerminals = new Set()
+  knownPreviews = new Set()
   setLayout(layout)
   currentGroup.set(layout.main)
   documentGroup = layout.main
   syncDocuments()
   syncTerminals()
+  syncPreviews()
 }
 
 /** Drops saved documents that didn't open again. */
@@ -416,6 +495,22 @@ export function showView(id: string, focus = true): void {
 }
 
 setViewHandler(showView)
+
+/**
+ * Shows a preview its extension asked to show. One opened beside its
+ * document leaves focus (and the current group) in the editor, so typing
+ * carries on and updates it.
+ */
+function showPreview(id: string, beside: boolean): void {
+  const item = previewItem(id)
+  if (beside) {
+    setLayout(activateItem(ensure(dockStore.get(), item), item))
+  } else {
+    showItem(item)
+  }
+}
+
+setPreviewHandler(showPreview)
 
 /** Records the item as the one in use, for the stores that care. */
 function noteActive(item: ItemId): void {
@@ -573,7 +668,7 @@ export async function toggleTerminals(): Promise<void> {
   }
 }
 
-/** Closes a tab: closes the document, ends the terminal, or closes the view. */
+/** Closes a tab: closes the document, ends the terminal, or closes the view or preview. */
 export function closeItem(item: ItemId): void {
   const group = groupOf(dockStore.get(), item)
   const hadFocus = group ? hasFocus(group.id) : false
@@ -584,6 +679,10 @@ export function closeItem(item: ItemId): void {
       return
     case 'terminal':
       closeTerminal(Number(id))
+      break
+    case 'preview':
+      closePreview(id)
+      setLayout(removeItem(dockStore.get(), item))
       break
     default:
       if (group) {
@@ -719,7 +818,7 @@ export function resetLayout(): void {
   const old = dockStore.get()
   const items = allItems(old)
   let layout = defaultDock()
-  const placeAll = (kind: 'document' | 'terminal' | 'view') => {
+  const placeAll = (kind: ItemKind) => {
     for (const item of items.filter(other => itemKind(other) === kind)) {
       if (!groupOf(layout, item)) {
         const { target, size } = placementFor(layout, item)
@@ -732,6 +831,7 @@ export function resetLayout(): void {
   currentGroup.set(MAIN_GROUP)
   placeAll('view')
   placeAll('document')
+  placeAll('preview')
   placeAll('terminal')
   setLayout(normalize(layout))
   const { activeId } = documentsStore.get()

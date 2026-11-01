@@ -75,6 +75,9 @@ export function log(level: LogLevel, message: string): void {
   })
 }
 
+/** Opens an `http:`, `https:`, or `mailto:` address with the system. */
+export const openExternal = (url: string) => call<void>('open_external', { url })
+
 let readyReported = false
 
 /** Tells the backend the workbench has rendered. Only the first call is sent. */

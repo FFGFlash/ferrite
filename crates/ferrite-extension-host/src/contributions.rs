@@ -1,10 +1,10 @@
 //! Workbench contributions declared in a manifest: themes, file icon themes,
 //! keybindings, menu items, status bar items, side bar views, decoration
-//! types, languages, and language servers.
+//! types, previews, languages, and language servers.
 //!
 //! Contributions are data: the workbench renders them, and extensions only
-//! fill in content (status text, view items, decorated ranges) through the
-//! `workbench` interface. Every value is validated here, so nothing an
+//! fill in content (status text, view items, decorated ranges, preview
+//! nodes) through the `workbench` interface. Every value is validated here, so nothing an
 //! extension declares reaches the frontend as markup or arbitrary CSS:
 //! colors must be hex colors and theme keys must be known tokens, and icons
 //! are images (see [`crate::icons`]).
@@ -24,7 +24,7 @@ use crate::manifest::{CommandContribution, ManifestError};
 pub static THEME_TOKENS: LazyLock<BTreeSet<String>> = LazyLock::new(|| {
   serde_json::from_str(include_str!("../../../src/themes/tokens.json")).unwrap_or_default()
 });
-/// Icons a view can use in the activity bar.
+/// Icons a view can use in the activity bar, and a preview on its tab.
 pub const VIEW_ICONS: &[&str] = &[
   "list", "check", "bolt", "book", "bug", "tag", "star", "flag", "bell",
 ];
@@ -128,6 +128,19 @@ pub struct ViewContribution {
   /// `<extension id>.<view id>`, unique in the workbench.
   pub full_id: String,
   pub title: String,
+  pub icon: String,
+}
+
+/// A kind of preview: a tab of formatted text the extension fills in, such
+/// as a rendered Markdown file.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PreviewContribution {
+  /// The id the extension uses.
+  pub id: String,
+  /// `<extension id>.<preview id>`.
+  pub full_id: String,
+  /// Shown on its tabs.
   pub icon: String,
 }
 
@@ -236,6 +249,7 @@ pub struct Contributions {
   pub status_items: Vec<StatusItemContribution>,
   pub views: Vec<ViewContribution>,
   pub decorations: Vec<DecorationType>,
+  pub previews: Vec<PreviewContribution>,
   pub languages: Vec<LanguageContribution>,
   pub language_servers: Vec<LanguageServerContribution>,
 }
@@ -247,7 +261,12 @@ impl Contributions {
       && self.menus.is_empty()
       && self.status_items.is_empty()
       && self.views.is_empty()
-      && self.decorations.is_empty())
+      && self.decorations.is_empty()
+      && self.previews.is_empty())
+  }
+
+  pub fn preview(&self, id: &str) -> Option<&PreviewContribution> {
+    self.previews.iter().find(|preview| preview.id == id)
   }
 
   pub fn view(&self, id: &str) -> Option<&ViewContribution> {
@@ -319,6 +338,13 @@ pub struct RawView {
   icon: Option<String>,
 }
 
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RawPreview {
+  id: String,
+  icon: Option<String>,
+}
+
 #[derive(Deserialize, Default)]
 #[serde(deny_unknown_fields)]
 pub struct RawDecorationColors {
@@ -383,6 +409,7 @@ pub struct RawContributions {
   pub status_items: Vec<RawStatusItem>,
   pub views: Vec<RawView>,
   pub decorations: BTreeMap<String, RawDecoration>,
+  pub previews: Vec<RawPreview>,
   pub languages: Vec<RawLanguage>,
   pub language_servers: Vec<RawLanguageServer>,
 }
@@ -417,6 +444,7 @@ pub fn parse(
   limit("status_items", raw.status_items.len(), 20)?;
   limit("views", raw.views.len(), 10)?;
   limit("decorations", raw.decorations.len(), 20)?;
+  limit("previews", raw.previews.len(), 10)?;
   limit("languages", raw.languages.len(), 20)?;
   limit("language_servers", raw.language_servers.len(), 10)?;
 
@@ -604,6 +632,27 @@ pub fn parse(
       underline,
       bold: decoration.bold,
       italic: decoration.italic,
+    });
+  }
+
+  for preview in raw.previews {
+    local_id("previews", &preview.id)?;
+    unique(
+      "previews",
+      contributions.previews.iter().map(|p| &p.id),
+      &preview.id,
+    )?;
+    let icon = preview.icon.unwrap_or_else(|| "book".into());
+    if !VIEW_ICONS.contains(&icon.as_str()) {
+      return Err(invalid(format!(
+        "previews: icon {icon:?} must be one of {}",
+        VIEW_ICONS.join(", ")
+      )));
+    }
+    contributions.previews.push(PreviewContribution {
+      full_id: format!("{extension}.{}", preview.id),
+      id: preview.id,
+      icon,
     });
   }
 

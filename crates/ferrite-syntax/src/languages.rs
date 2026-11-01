@@ -193,6 +193,18 @@ impl Registry {
     self.languages.iter().find(|language| language.id() == id)
   }
 
+  /// The language with this id, or else for this file extension: how a
+  /// Markdown code fence names one (`rust` or `rs`). Names are lowercase.
+  pub fn for_name(&self, name: &str) -> Option<&Language> {
+    let extension = !name.is_empty()
+      && name
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_' | '+'));
+    self
+      .get(name)
+      .or_else(|| extension.then(|| self.for_path(Path::new(&format!("x.{name}"))))?)
+  }
+
   pub fn languages(&self) -> impl Iterator<Item = &Language> {
     self.languages.iter()
   }
@@ -337,6 +349,17 @@ mod tests {
     assert_eq!(detect("notes.txt"), None);
     assert_eq!(detect(".rs"), None, "a dot file has no extension");
     assert!(Registry::default().for_path(Path::new("main.rs")).is_none());
+
+    let named = |name: &str| registry.for_name(name).map(Language::id);
+    assert_eq!(named("typescript"), Some("typescript"));
+    assert_eq!(
+      named("mts"),
+      Some("typescript"),
+      "names are matched as extensions too"
+    );
+    assert_eq!(named("rs"), Some("rust"));
+    assert_eq!(named("../x.rs"), None);
+    assert_eq!(named(""), None);
   }
 
   #[test]

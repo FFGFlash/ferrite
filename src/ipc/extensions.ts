@@ -89,6 +89,13 @@ export interface ViewContribution {
   icon: string
 }
 
+export interface PreviewContribution {
+  id: string
+  /** `<extension id>.<preview id>`. */
+  fullId: string
+  icon: string
+}
+
 export interface DecorationColors {
   background: string | null
   color: string | null
@@ -132,6 +139,7 @@ export interface Contributions {
   menus: MenuContribution[]
   views: ViewContribution[]
   decorations: DecorationType[]
+  previews: PreviewContribution[]
   languages: LanguageContribution[]
   languageServers: LanguageServerContribution[]
 }
@@ -162,6 +170,73 @@ export interface ViewEntry {
 export interface ViewContent {
   message: string | null
   items: ViewEntry[]
+}
+
+/** An open extension preview: a tab of formatted text. */
+export interface PreviewInfo {
+  /** `<extension id>.<preview id>/<key>`. */
+  id: string
+  /** The extension's name. */
+  extension: string
+  title: string
+  icon: string
+  /** The document it shows. */
+  document: number | null
+}
+
+/** Where a preview's link goes, as the backend resolved it. */
+export type LinkTarget =
+  | { kind: 'web'; url: string }
+  /** A heading in the same preview, by anchor (without `#`). */
+  | { kind: 'heading'; anchor: string }
+  | { kind: 'file'; path: string; anchor: string | null }
+  /** Not followed; shown as text. */
+  | { kind: 'unsupported'; destination: string }
+
+export type ImageSource =
+  /** Loaded with `getPreviewImage`. */
+  | { kind: 'file'; path: string }
+  /** Not loaded: the description is shown. */
+  | { kind: 'web'; url: string }
+  | { kind: 'unsupported'; source: string }
+
+export type ColumnAlignment = 'none' | 'left' | 'center' | 'right'
+
+/** What a preview node is. */
+export type PreviewElement =
+  | { type: 'paragraph' }
+  | { type: 'heading'; level: number }
+  | { type: 'quote' }
+  | { type: 'bulletedList' }
+  | { type: 'numberedList'; start: number }
+  | { type: 'listItem'; checked: boolean | null }
+  | { type: 'codeBlock'; language: string | null; text: string }
+  | { type: 'rule' }
+  | { type: 'table'; alignments: ColumnAlignment[] }
+  | { type: 'tableHead' }
+  | { type: 'tableRow' }
+  | { type: 'tableCell' }
+  | { type: 'text'; text: string }
+  | { type: 'emphasis' }
+  | { type: 'strong' }
+  | { type: 'strikethrough' }
+  | { type: 'code'; text: string }
+  | { type: 'link'; target: LinkTarget; title: string | null }
+  | { type: 'image'; source: ImageSource; description: string; title: string | null }
+  | { type: 'lineBreak' }
+
+/** A node of a preview: each comes after the node it's inside. */
+export type PreviewNode = PreviewElement & { parent: number | null }
+
+export interface PreviewContent {
+  nodes: PreviewNode[]
+  /**
+   * Code blocks in known languages, by node index: each line's highlights
+   * as flat `[start, end, kind]` triples, as in editor views.
+   */
+  highlights: Record<number, number[][]>
+  /** Code blocks were left plain because time ran out; fetching again highlights them. */
+  highlightsPending: boolean
 }
 
 export interface ExtensionStatus {
@@ -211,6 +286,16 @@ export const listStatusItems = () => call<StatusItem[]>('extension_status_items'
 export const getViewContent = (view: string) => call<ViewContent>('extension_view', { view })
 /** Tells the backend a view is shown, which may start its extension. */
 export const viewOpened = (view: string) => call<void>('extension_view_opened', { view })
+export const listPreviews = () => call<PreviewInfo[]>('extension_previews')
+/** A preview's content; `null` if it isn't open. */
+export const getPreviewContent = (preview: string) =>
+  call<PreviewContent | null>('extension_preview_content', { preview })
+/** Tells the backend the user closed a preview's tab. */
+export const previewClosed = (preview: string) =>
+  call<void>('extension_preview_closed', { preview })
+/** A picture a preview shows, as a `data:` URL. */
+export const getPreviewImage = (preview: string, path: string) =>
+  call<string>('extension_preview_image', { preview, path })
 /** Grants `granted` and denies the extension's other requested permissions. */
 export const setExtensionPermissions = (id: string, granted: Permission[]) =>
   call<void>('extension_set_permissions', { id, granted })

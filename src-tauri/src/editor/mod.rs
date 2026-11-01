@@ -8,7 +8,7 @@ pub(crate) mod fold_memory;
 mod folding;
 mod minimap;
 pub(crate) mod protocol;
-mod syntax;
+pub(crate) mod syntax;
 
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};

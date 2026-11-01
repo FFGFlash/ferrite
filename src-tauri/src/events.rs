@@ -110,6 +110,18 @@ pub enum AppEvent {
     start: Position,
     end: Position,
   },
+  /// Extension previews were opened or closed, or one's title changed.
+  ExtensionPreviewsChanged,
+  /// The content of an extension preview changed.
+  ExtensionPreviewChanged {
+    preview: String,
+  },
+  /// An extension asked to show one of its previews.
+  ExtensionShowPreview {
+    preview: String,
+    /// Beside its document, rather than in the same group.
+    beside: bool,
+  },
   /// Something the user should know about, such as files that could not be
   /// reopened or restored unsaved changes.
   Notice {

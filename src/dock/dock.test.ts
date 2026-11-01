@@ -12,8 +12,14 @@ vi.mock('../ipc/terminal', () => ({
   terminalPlatform: vi.fn(async () => ({ windowsBuild: null })),
 }))
 vi.mock('../ipc/editor', () => ({ closeDocument: vi.fn(async () => true) }))
+vi.mock('../ipc/extensions', () => ({
+  listPreviews: vi.fn(async () => []),
+  previewClosed: vi.fn(async () => {}),
+}))
 
 const terminalIpc = await import('../ipc/terminal')
+const extensionIpc = await import('../ipc/extensions')
+const previews = await import('../state/previews')
 const dock = await import('./dock')
 const { findGroup, groupOf, groups, sidebarGroups } = await import('./model')
 const { documentsStore } = await import('../state/documents')
@@ -29,6 +35,14 @@ const doc = (id: number, path: string | null = `/w/file${id}.rs`): DocumentSumma
   encoding: 'UTF-8',
 })
 
+const preview = (id: string, document: number | null) => ({
+  id,
+  extension: 'Markdown',
+  title: `Preview ${id}`,
+  icon: 'book',
+  document,
+})
+
 const layout = () => dock.dockStore.get()
 const groupItems = (id: string) => findGroup(layout(), id)?.items
 const groupHolding = (item: string) => groupOf(layout(), item)
@@ -40,6 +54,7 @@ describe('dock', () => {
       terminals.closeTerminal(tab.id)
     }
     documentsStore.set({ documents: [], activeId: null })
+    previews.previewsStore.set([])
     vi.clearAllMocks()
     vi.mocked(terminalIpc.createTerminal).mockImplementation(async () => ({
       id: nextTerminal++,
@@ -76,6 +91,44 @@ describe('dock', () => {
 
     documentsStore.update(state => ({ documents: [...state.documents, doc(3)], activeId: 3 }))
     expect(groupHolding('document:3')!.id).toBe(side)
+  })
+
+  it('opens previews with their document, or beside it, and saves neither', async () => {
+    documentsStore.set({ documents: [doc(1), doc(2)], activeId: 1 })
+    dock.moveItem('document:2', { kind: 'split', group: 'main', edge: 'bottom' })
+    const second = groupHolding('document:2')!.id
+
+    vi.mocked(extensionIpc.listPreviews).mockResolvedValue([preview('p/2', 2)])
+    await previews.showPreviewRequested('p/2', false)
+    expect(groupItems(second)).toEqual(['document:2', 'preview:p/2'])
+    expect(findGroup(layout(), second)!.active).toBe('preview:p/2')
+
+    vi.mocked(extensionIpc.listPreviews).mockResolvedValue([preview('p/2', 2), preview('p/1', 1)])
+    dock.activateTab('document:1')
+    await previews.showPreviewRequested('p/1', true)
+    const beside = groupHolding('preview:p/1')!
+    expect(beside.id).not.toBe('main')
+    expect(beside.items).toEqual(['preview:p/1'])
+    expect(dock.currentGroup.get(), 'focus stays with the document').toBe('main')
+
+    const saved = JSON.stringify(dock.serializeDock())
+    expect(saved).not.toContain('preview:')
+  })
+
+  it('closes a preview tab, telling the backend, and follows previews it closes', async () => {
+    documentsStore.set({ documents: [doc(1)], activeId: 1 })
+    vi.mocked(extensionIpc.listPreviews).mockResolvedValue([preview('p/1', 1), preview('q', null)])
+    await previews.refreshPreviews()
+    expect(groupItems('main')).toEqual(['document:1', 'preview:p/1', 'preview:q'])
+
+    dock.closeItem('preview:p/1')
+    expect(extensionIpc.previewClosed).toHaveBeenCalledWith('p/1')
+    expect(groupItems('main')).toEqual(['document:1', 'preview:q'])
+
+    // The backend closed it (its document or extension did).
+    vi.mocked(extensionIpc.listPreviews).mockResolvedValue([])
+    await previews.refreshPreviews()
+    expect(groupItems('main')).toEqual(['document:1'])
   })
 
   it('activating a document shows its tab and makes its group current', () => {

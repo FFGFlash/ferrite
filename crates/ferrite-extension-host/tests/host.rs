@@ -12,8 +12,10 @@ use std::sync::{Arc, Condvar, Mutex, MutexGuard, OnceLock, PoisonError};
 use std::time::{Duration, Instant};
 
 use ferrite_core::{DocumentId, Editor, EditorOp};
+use ferrite_extension_host::preview::{ImageSource, LinkTarget, PreviewElement};
 use ferrite_extension_host::{
-  Embedder, ExtensionHost, ExtensionState, HostOptions, Limits, Notification, Permission, Severity,
+  Embedder, ExtensionHost, ExtensionState, HostOptions, Limits, Notification, Permission,
+  PreviewInfo, Severity,
 };
 
 /// Builds the extensions workspace once and returns its output folder.
@@ -57,7 +59,12 @@ impl Embedder for Fake {
     path
       .extension()
       .and_then(|extension| extension.to_str())
-      .map(|extension| if extension == "rs" { "rust" } else { extension }.to_owned())
+      .map(|extension| match extension {
+        "rs" => "rust",
+        "md" => "markdown",
+        other => other,
+      })
+      .map(str::to_owned)
   }
 
   fn notify(&self, notification: Notification) {
@@ -128,6 +135,15 @@ impl Fake {
       })
       .expect("cursor");
     host.sync(document);
+    id
+  }
+
+  /// Opens the file at `path` and tells the host.
+  fn open_file(&self, host: &ExtensionHost, path: &Path) -> DocumentId {
+    let file = ferrite_workspace::load_text_file(path).expect("readable");
+    let mut editor = self.editor();
+    let id = editor.open(path.to_path_buf(), file);
+    host.sync(editor.document(id).expect("open"));
     id
   }
 
@@ -755,6 +771,20 @@ fn extensions_built_against_api_1_0_still_run() {
 }
 
 #[test]
+fn extensions_built_against_api_1_1_still_run() {
+  let s = setup("todos", "todos", Some(ALL), "", |m| m);
+  let dir = PathBuf::from(&s.host.statuses()[0].path);
+  let old = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/todos-api-1.1.wasm");
+  std::fs::copy(old, dir.join("todos.wasm")).expect("copy");
+  let id = s.fake.open(&s.host, "// TODO: x\n");
+  s.host.load();
+  s.fake.wait_for("decorations", |n| {
+    *n == Notification::DecorationsChanged(id)
+  });
+  assert_eq!(state_of(&s.host).0, ExtensionState::Active);
+}
+
+#[test]
 fn theme_only_extensions_need_no_code() {
   let dir = tempfile::tempdir().expect("temp dir");
   let extension = dir.path().join("themes");
@@ -833,7 +863,17 @@ fn the_icons_example_contributes_an_icon_theme() {
 #[test]
 fn the_language_examples_load_and_declare_their_languages_and_servers() {
   let examples = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../extensions");
-  let folders = ["rust", "typescript", "javascript", "json", "toml", "python"];
+  // Markdown has code too, which must be built.
+  wasm_dir();
+  let folders = [
+    "rust",
+    "typescript",
+    "javascript",
+    "json",
+    "toml",
+    "python",
+    "markdown",
+  ];
   let options = HostOptions {
     editor_version: semver::Version::new(0, 1, 0),
     extensions_dir: None,
@@ -860,6 +900,8 @@ fn the_language_examples_load_and_declare_their_languages_and_servers() {
     [
       "javascript",
       "json",
+      "markdown",
+      "markdown_inline",
       "python",
       "rust",
       "toml",
@@ -1009,4 +1051,147 @@ fn todos_example_highlights_lists_and_counts_markers() {
   assert!(
     matches!(revealed, Notification::Reveal { start, .. } if start.line == 1 && start.column == 5)
   );
+}
+
+/// The Markdown example without its languages, which need grammar files
+/// the test doesn't install; the fake embedder knows `.md` files anyway.
+fn markdown() -> Setup {
+  setup(
+    "markdown",
+    "markdown",
+    Some(&[Permission::DocumentsRead]),
+    "",
+    |manifest| {
+      let languages = manifest.find("[[languages]]").expect("languages");
+      manifest[..languages].to_owned()
+    },
+  )
+}
+
+#[test]
+fn markdown_example_previews_documents_as_they_change() {
+  let s = markdown();
+  let docs = s._dir.path().join("docs");
+  std::fs::create_dir_all(&docs).expect("mkdir");
+  let path = docs.join("README.md");
+  std::fs::write(
+    &path,
+    "# Hello\n\nSee [setup](setup.md#install) and ![logo](img/logo.png).\n",
+  )
+  .expect("write");
+  let id = s.fake.open_file(&s.host, &path);
+  s.host.load();
+  let run = |command: &str, document| {
+    s.host
+      .run_command(&format!("example.markdown.{command}"), document, None)
+      .expect("queued")
+      .wait()
+  };
+  run("previewToSide", Some(id)).expect("previewed");
+
+  let preview = format!("example.markdown.preview/{}", id.get());
+  s.fake.wait_for("show", |n| {
+    *n == Notification::ShowPreview {
+      id: preview.clone(),
+      beside: true,
+    }
+  });
+  s.fake.wait_for("content", |n| {
+    *n == Notification::PreviewChanged(preview.clone())
+  });
+  assert_eq!(
+    s.host.previews(),
+    [PreviewInfo {
+      id: preview.clone(),
+      extension: "Markdown".into(),
+      title: "Preview README.md".into(),
+      icon: "book".into(),
+      document: Some(id.get()),
+    }]
+  );
+  let content = s.host.preview_content(&preview).expect("open");
+  let elements: Vec<_> = content.nodes.iter().map(|node| &node.element).collect();
+  assert_eq!(*elements[0], PreviewElement::Heading { level: 1 });
+  assert!(elements.contains(&&PreviewElement::Link {
+    target: LinkTarget::File {
+      path: docs.join("setup.md").to_string_lossy().into_owned(),
+      anchor: Some("install".into()),
+    },
+    title: None,
+  }));
+  let logo = docs.join("img").join("logo.png");
+  assert!(elements.contains(&&PreviewElement::Image {
+    source: ImageSource::File {
+      path: logo.to_string_lossy().into_owned(),
+    },
+    description: "logo".into(),
+    title: None,
+  }));
+  assert!(s.host.preview_shows_image(&preview, &logo));
+  assert!(
+    !s.host
+      .preview_shows_image(&preview, &docs.join("other.png"))
+  );
+  std::fs::create_dir_all(docs.join("img")).expect("mkdir");
+  std::fs::write(&logo, b"\x89PNG\r\n").expect("write");
+  assert_eq!(
+    s.host.preview_image(&preview, &logo).as_deref(),
+    Ok("data:image/png;base64,iVBORw0K")
+  );
+  std::fs::write(docs.join("other.png"), b"x").expect("write");
+  assert!(
+    s.host
+      .preview_image(&preview, &docs.join("other.png"))
+      .is_err()
+  );
+
+  // The preview follows the document.
+  s.fake.type_text(&s.host, id, "Intro\n\n");
+  s.fake.wait_for("updated content", |n| {
+    *n == Notification::PreviewChanged(preview.clone())
+  });
+  let content = s.host.preview_content(&preview).expect("open");
+  assert_eq!(content.nodes[0].element, PreviewElement::Paragraph);
+
+  // Closing the tab closes the preview; the command opens it again, and
+  // closing the document closes it for good.
+  s.host.preview_closed(&preview);
+  assert!(s.host.previews().is_empty());
+  s.fake.type_text(&s.host, id, "More\n\n");
+  run("preview", Some(id)).expect("previewed");
+  s.fake.wait_for("show again", |n| {
+    *n == Notification::ShowPreview {
+      id: preview.clone(),
+      beside: false,
+    }
+  });
+  assert_eq!(s.host.previews().len(), 1);
+  s.fake.editor().close(id).expect("closed");
+  s.host.closed(id);
+  s.fake
+    .wait_for("closed", |n| *n == Notification::PreviewsChanged);
+  assert!(s.host.previews().is_empty());
+  assert!(s.host.preview_content(&preview).is_none());
+}
+
+#[test]
+fn markdown_previews_only_markdown_documents() {
+  let s = markdown();
+  let id = s.fake.open(&s.host, "# Untitled");
+  s.host.load();
+  let error = s
+    .host
+    .run_command("example.markdown.preview", Some(id), None)
+    .expect("queued")
+    .wait()
+    .expect_err("not Markdown");
+  assert_eq!(error, "Untitled isn't a Markdown file.");
+  let error = s
+    .host
+    .run_command("example.markdown.preview", None, None)
+    .expect("queued")
+    .wait()
+    .expect_err("no document");
+  assert!(error.contains("Open a Markdown file"), "{error}");
+  assert!(s.host.previews().is_empty());
 }

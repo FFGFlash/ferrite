@@ -295,6 +295,25 @@ mod tests {
   }
 
   #[test]
+  fn highlights_markdown_with_inline_text_and_fenced_code() {
+    let lines = highlight(
+      "markdown",
+      "# Title\n\nSome `code` and *words* in a [link](a.md).\n\n```rs\nfn main() {}\n```\n\n```typescript\nconst x = 1\n```\n",
+    );
+    assert!(has(&lines[0], "# Title", "keyword"));
+    // Inline text comes from the injected markdown_inline language.
+    assert!(has(&lines[2], "code", "string"));
+    assert!(has(&lines[2], "words", "type"));
+    assert!(has(&lines[2], "link", "function"));
+    assert!(has(&lines[2], "a.md", "string"));
+    // Fences name languages by file extension or by id.
+    assert!(has(&lines[4], "```", "punctuation"));
+    assert!(has(&lines[4], "rs", "label"));
+    assert!(has(&lines[5], "fn", "keyword"));
+    assert!(has(&lines[9], "const", "keyword"));
+  }
+
+  #[test]
   fn long_lines_are_highlighted_only_up_to_the_limit() {
     let line = format!("let s = \"{}\";", "x".repeat(100_000));
     let buffer = TextBuffer::from_text(&line);

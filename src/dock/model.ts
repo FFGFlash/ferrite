@@ -1,13 +1,13 @@
 /**
  * The dock layout: a tree of splits whose leaves are tab groups. Every item
- * (a document, a view such as the explorer, a terminal) is a tab in exactly
- * one group, and any item can go in any group.
+ * (a document, a view such as the explorer, a terminal, an extension's
+ * preview) is a tab in exactly one group, and any item can go in any group.
  *
  * These functions are pure: they take a layout and return a new one, so the
  * store, persistence, and tests share them.
  */
 
-/** `document:<id>`, `view:<id>`, or `terminal:<id>`. */
+/** `document:<id>`, `view:<id>`, `terminal:<id>`, or `preview:<id>`. */
 export type ItemId = string
 
 export type Edge = 'left' | 'right' | 'top' | 'bottom'
@@ -55,9 +55,13 @@ export const ROOT_EDGE_SIZE = 0.25
 
 export const MAIN_GROUP = 'main'
 
-export function itemKind(item: ItemId): 'document' | 'view' | 'terminal' | null {
+export type ItemKind = 'document' | 'view' | 'terminal' | 'preview'
+
+export function itemKind(item: ItemId): ItemKind | null {
   const kind = item.slice(0, item.indexOf(':'))
-  return kind === 'document' || kind === 'view' || kind === 'terminal' ? kind : null
+  return kind === 'document' || kind === 'view' || kind === 'terminal' || kind === 'preview'
+    ? kind
+    : null
 }
 
 export function emptyGroup(id: string, items: ItemId[] = []): DockGroup {

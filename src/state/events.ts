@@ -11,6 +11,7 @@ import {
   viewChanged,
 } from './extensions'
 import { notify } from './notifications'
+import { previewChanged, refreshPreviews, showPreviewRequested } from './previews'
 import { showView } from './viewRequests'
 import { refreshDirectories, setIndexing, setWorkspace } from './workspace'
 
@@ -79,6 +80,15 @@ export function handleEvent(event: AppEvent): void {
       break
     case 'extensionReveal':
       revealInDocument(event.documentId, event.start, event.end)
+      break
+    case 'extensionPreviewsChanged':
+      void refreshPreviews()
+      break
+    case 'extensionPreviewChanged':
+      previewChanged(event.preview)
+      break
+    case 'extensionShowPreview':
+      void showPreviewRequested(event.preview, event.beside)
       break
     case 'notice':
       notify(event.level, event.message)

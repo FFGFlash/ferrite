@@ -135,7 +135,7 @@ pub fn parse(
         if layers.len() >= MAX_LAYERS {
           break;
         }
-        let Some(injected) = registry.get(&found.language) else {
+        let Some(injected) = registry.for_name(&found.language) else {
           continue;
         };
         let Ok(grammar) = injected.grammar() else {

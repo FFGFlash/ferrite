@@ -146,6 +146,8 @@ struct RawManifest {
   #[serde(default)]
   decorations: BTreeMap<String, contributions::RawDecoration>,
   #[serde(default)]
+  previews: Vec<contributions::RawPreview>,
+  #[serde(default)]
   languages: Vec<contributions::RawLanguage>,
   #[serde(default)]
   language_servers: Vec<contributions::RawLanguageServer>,
@@ -402,6 +404,7 @@ pub fn parse(
       status_items: raw.status_items,
       views: raw.views,
       decorations: raw.decorations,
+      previews: raw.previews,
       languages: raw.languages,
       language_servers: raw.language_servers,
     },
@@ -663,6 +666,13 @@ background = "#E5C07B33"
 underline = "dotted"
 [decorations.todo.light]
 background = "#98680122"
+
+[[previews]]
+id = "report"
+icon = "bug"
+
+[[previews]]
+id = "summary"
 "##;
 
   #[test]
@@ -685,6 +695,9 @@ background = "#98680122"
     assert_eq!(todo.key, "example.tidy/todo");
     assert_eq!(todo.dark.background.as_deref(), Some("#e5c07b33"));
     assert_eq!(todo.light.background.as_deref(), Some("#98680122"));
+    assert_eq!(contributions.previews[0].full_id, "example.tidy.report");
+    assert_eq!(contributions.previews[0].icon, "bug");
+    assert_eq!(contributions.previews[1].icon, "book", "the default");
   }
 
   #[test]
@@ -703,6 +716,9 @@ background = "#98680122"
     assert!(with("icon = \"check\"", "icon = \"skull\"").contains("icon"));
     assert!(with("#E5C07B33", "red").contains("hex color"));
     assert!(with("underline = \"dotted\"", "underline = \"zigzag\"").contains("underline"));
+    assert!(with("icon = \"bug\"", "icon = \"globe\"").contains("previews: icon"));
+    assert!(with("id = \"summary\"", "id = \"report\"").contains("declared twice"));
+    assert!(with("id = \"summary\"", "id = \"Sum mary\"").contains("previews: id"));
     let view = VALID.replace("\"on-startup\"", "\"on-view:missing\"");
     assert!(error_of(&view).contains("view that is not declared"));
   }

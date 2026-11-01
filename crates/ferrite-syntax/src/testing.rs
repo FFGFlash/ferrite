@@ -6,7 +6,7 @@ use crate::languages::{LanguageDefinition, Registry};
 
 /// (extension folder, id, file extensions, grammar file, grammar name,
 /// highlight query, injection query). The fold query is `folds.scm` beside
-/// the highlight query.
+/// the highlight query, if there is one.
 type Example = (
   &'static str,
   &'static str,
@@ -99,6 +99,24 @@ const EXAMPLES: &[Example] = &[
     "css/highlights.scm",
     None,
   ),
+  (
+    "markdown",
+    "markdown",
+    &["md"],
+    "tree-sitter-markdown",
+    "markdown",
+    "markdown/highlights.scm",
+    Some("markdown/injections.scm"),
+  ),
+  (
+    "markdown",
+    "markdown_inline",
+    &[],
+    "tree-sitter-markdown_inline",
+    "markdown_inline",
+    "markdown_inline/highlights.scm",
+    Some("markdown_inline/injections.scm"),
+  ),
 ];
 
 /// All the example languages.
@@ -125,11 +143,13 @@ fn build(folds: bool) -> Registry {
         grammar_name: grammar_name.to_owned(),
         highlights: dir.join("queries").join(highlights),
         injections: injections.map(|path| dir.join("queries").join(path)),
-        folds: folds.then(|| {
-          dir
-            .join("queries")
-            .join(highlights.replace("highlights.scm", "folds.scm"))
-        }),
+        folds: folds
+          .then(|| {
+            dir
+              .join("queries")
+              .join(highlights.replace("highlights.scm", "folds.scm"))
+          })
+          .filter(|path| path.is_file()),
       }
     },
   );

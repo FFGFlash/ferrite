@@ -110,6 +110,9 @@ export type AppEvent =
   | { type: 'extensionShowView'; view: string }
   | { type: 'decorationsChanged'; documentId: number }
   | { type: 'extensionReveal'; documentId: number; start: Position; end: Position }
+  | { type: 'extensionPreviewsChanged' }
+  | { type: 'extensionPreviewChanged'; preview: string }
+  | { type: 'extensionShowPreview'; preview: string; beside: boolean }
   | { type: 'notice'; level: 'warning'; message: string }
 
 export const getWorkspace = () => call<WorkspaceInfo | null>('workspace_get')

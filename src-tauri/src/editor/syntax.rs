@@ -243,6 +243,35 @@ fn hash_spans(spans: &[u32]) -> u64 {
   hasher.finish()
 }
 
+/// Highlights a snippet of code, such as a code block in a preview, in the
+/// language `name` (an id or file extension): each line's spans, flattened
+/// as in views. `None` for unknown languages, or if parsing takes longer
+/// than `budget`.
+pub fn highlight_snippet(
+  registry: &Registry,
+  name: &str,
+  text: &str,
+  budget: Duration,
+) -> Option<Vec<Vec<u32>>> {
+  let language = registry.for_name(&name.to_ascii_lowercase())?;
+  let buffer = TextBuffer::from_text(text);
+  let tree = parse(language, registry, &buffer, None, deadline(budget)).ok()??;
+  let lines = 0..buffer.line_count();
+  let spans = highlight_lines(&tree, &buffer, lines.clone(), MAX_DISPLAY_LINE_BYTES);
+  Some(
+    lines
+      .zip(spans)
+      .map(|(line, spans)| {
+        if spans.is_empty() {
+          return Vec::new();
+        }
+        let (text, _) = buffer.line_prefix(line, MAX_DISPLAY_LINE_BYTES);
+        flatten_utf16(&text, &spans)
+      })
+      .collect(),
+  )
+}
+
 /// `spans` (byte columns into `text`, in order) as flat UTF-16 triples.
 fn flatten_utf16(text: &str, spans: &[Span]) -> Vec<u32> {
   let mut flat = Vec::with_capacity(spans.len() * 3);
@@ -571,6 +600,21 @@ mod tests {
       1
     );
     assert_eq!(syntax.edited, buffer.version());
+  }
+
+  #[test]
+  fn highlights_snippets_by_language_id_or_extension() {
+    let registry = crate::languages::examples(&["rust", "typescript"]);
+    let budget = Duration::from_secs(5);
+    let lines = highlight_snippet(&registry, "RS", "// é\nfn main() {}", budget).expect("rust");
+    assert_eq!(
+      lines[0],
+      [0, 4, TokenKind::Comment as u32],
+      "UTF-16 columns"
+    );
+    assert_eq!(lines[1][..3], [0, 2, TokenKind::Keyword as u32]);
+    assert!(highlight_snippet(&registry, "typescript", "const x = 1", budget).is_some());
+    assert!(highlight_snippet(&registry, "cobol", "MOVE A TO B", budget).is_none());
   }
 
   #[test]

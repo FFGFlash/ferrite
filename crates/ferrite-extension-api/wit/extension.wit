@@ -1,9 +1,10 @@
-/// The Ferrite extension API, version 1 (1.1: workbench contributions).
+/// The Ferrite extension API, version 1 (1.1: workbench contributions;
+/// 1.2: previews).
 ///
 /// An extension is a WebAssembly component targeting the `extension` world.
 /// It can call only the functions in `host`; there is no filesystem,
 /// network, environment, or clock access. See `docs/extensions.md`.
-package ferrite:extension@1.1.0;
+package ferrite:extension@1.2.0;
 
 /// Types shared by the host functions and the extension's exports.
 interface types {
@@ -174,6 +175,95 @@ interface types {
     command: option<string>,
     argument: option<string>,
   }
+
+  /// How a table column's cells are aligned. (1.2)
+  enum column-alignment {
+    none,
+    left,
+    center,
+    right,
+  }
+
+  /// Preformatted text in a preview. (1.2)
+  record preview-code {
+    /// The language it's in, as written after a Markdown code fence: a
+    /// language id (`rust`) or file extension (`rs`). Code in a known
+    /// language is highlighted.
+    language: option<string>,
+    text: string,
+  }
+
+  /// A link in a preview. Its text is its children. (1.2)
+  record preview-link {
+    /// A web address (`https:`, `http:`, or `mailto:`), a heading in the
+    /// preview (`#name`), or a file relative to the preview's document
+    /// (`guide.md`, `docs/setup.md#install`). Anything else is shown as
+    /// text.
+    destination: string,
+    title: option<string>,
+  }
+
+  /// A picture in a preview. (1.2)
+  record preview-image {
+    /// A PNG, JPEG, GIF, WebP, or SVG file relative to the preview's
+    /// document. Web addresses aren't loaded: `description` is shown.
+    source: string,
+    /// Text describing the picture, shown when it can't be.
+    description: string,
+    title: option<string>,
+  }
+
+  /// What a node of a preview is. Blocks go in the preview itself, in
+  /// quotes, and in list items; inline nodes go in paragraphs, headings,
+  /// table cells, list items, and other inline nodes. (1.2)
+  variant preview-element {
+    paragraph,
+    /// Level 1 to 6.
+    heading(u8),
+    quote,
+    bulleted-list,
+    /// Numbered from the given number.
+    numbered-list(u32),
+    /// An item of a list; `some(done)` for a task list item.
+    list-item(option<bool>),
+    code-block(preview-code),
+    rule,
+    /// One alignment per column.
+    table(list<column-alignment>),
+    /// A table's header row, holding cells. Rows follow it.
+    table-head,
+    table-row,
+    table-cell,
+    text(string),
+    emphasis,
+    strong,
+    strikethrough,
+    /// Inline code.
+    code(string),
+    link(preview-link),
+    image(preview-image),
+    line-break,
+  }
+
+  /// A node of a preview's content. (1.2)
+  record preview-node {
+    /// The index of the node this one is inside, which must come before
+    /// it; `none` for the top level.
+    parent: option<u32>,
+    element: preview-element,
+  }
+
+  /// How to show a preview. (1.2)
+  record preview-options {
+    /// The tab's title, at most 100 characters.
+    title: string,
+    /// The document it shows. The preview closes with it, and relative
+    /// links and images are found from its folder.
+    document: option<document-id>,
+    /// Opens it beside the document (or the active editor) instead of in
+    /// the same group.
+    beside: bool,
+  }
 }
 
 /// Functions the editor provides.
@@ -218,10 +308,10 @@ interface host {
   ) -> result<_, api-error>;
 }
 
-/// Contributions to the workbench: status bar items, side bar views, and
-/// editor decorations, all declared in the manifest. (1.1)
+/// Contributions to the workbench: status bar items, side bar views,
+/// editor decorations, and previews, all declared in the manifest. (1.1)
 interface workbench {
-  use types.{api-error, document-id, range, status-item, view-item};
+  use types.{api-error, document-id, preview-node, preview-options, range, status-item, view-item};
 
   /// Shows a status bar item with new content, or hides it (`none`).
   set-status-item: func(id: string, item: option<status-item>) -> result<_, api-error>;
@@ -253,6 +343,21 @@ interface workbench {
   /// The argument the running command was invoked with, from a view item
   /// or an explorer menu (the file's path); `none` otherwise.
   command-argument: func() -> option<string>;
+
+  /// Opens one of the extension's previews in a tab, or shows it if it's
+  /// open. `key` tells apart the previews of one type, e.g. one per
+  /// document. Showing a document's preview needs the `documents-read`
+  /// permission. (1.2)
+  show-preview: func(preview: string, key: string, options: preview-options) -> result<_, api-error>;
+
+  /// Replaces the content of an open preview: at most 100,000 nodes and
+  /// 8 MiB of text. Returns false, changing nothing, if the preview isn't
+  /// open (the user closed it), so the extension can stop updating it.
+  /// (1.2)
+  set-preview-content: func(preview: string, key: string, nodes: list<preview-node>) -> result<bool, api-error>;
+
+  /// Closes a preview, if it's open. (1.2)
+  close-preview: func(preview: string, key: string) -> result<_, api-error>;
 }
 
 world extension {

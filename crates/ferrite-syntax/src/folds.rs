@@ -186,6 +186,15 @@ mod tests {
   }
 
   #[test]
+  fn markdown_headings_fold_their_sections() {
+    let markdown = "# A\n\ntext\n\n## B\n\n```\ncode\n```\n\n# C\nmore\n";
+    assert_eq!(
+      folds("markdown", markdown),
+      [(1, 9), (5, 9), (7, 9), (11, 12)]
+    );
+  }
+
+  #[test]
   fn single_line_and_empty_regions_do_not_fold() {
     assert!(folds("rust", "fn f() {}\nfn g() {\n}\n").is_empty());
     assert!(folds("json", "{\"a\": [1, 2]}").is_empty());

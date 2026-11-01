@@ -45,6 +45,7 @@ const tidy: ExtensionStatus = {
     menus: [],
     views: [],
     decorations: [],
+    previews: [],
     languages: [],
     languageServers: [],
   },

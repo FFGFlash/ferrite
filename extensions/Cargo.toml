@@ -2,7 +2,7 @@
 # editor (see `.cargo/config.toml` for the target).
 [workspace]
 resolver = "3"
-members = ["tidy", "todos", "test-fixtures/misbehaving"]
+members = ["markdown", "tidy", "todos", "test-fixtures/misbehaving"]
 
 [workspace.package]
 version = "0.1.0"
