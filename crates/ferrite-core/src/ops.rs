@@ -146,11 +146,45 @@ pub enum EditorOp {
   SelectAllOccurrences,
   /// Moves each cursor to the matching bracket.
   JumpToBracket,
+  /// Folds the innermost unfolded region around each cursor. Fold
+  /// operations take the document's foldable regions as line ranges (see
+  /// [`crate::folds`]).
+  Fold(Vec<Range<usize>>),
+  /// Unfolds the folded regions starting on a cursor's line.
+  Unfold,
+  /// Unfolds the region starting on each cursor's line, or folds the
+  /// innermost region around the cursor.
+  ToggleFold(Vec<Range<usize>>),
+  /// Unfolds the regions starting on `line`, or folds the largest one.
+  ToggleFoldAt {
+    line: usize,
+    regions: Vec<Range<usize>>,
+  },
+  FoldAll(Vec<Range<usize>>),
+  UnfoldAll,
+  /// Folds the innermost region around each cursor and the regions in it.
+  FoldRecursively(Vec<Range<usize>>),
+  /// Unfolds the region around each cursor and the regions in it.
+  UnfoldRecursively(Vec<Range<usize>>),
+  /// Folds the regions nested `level` deep (1 is outermost), except those
+  /// around a cursor.
+  FoldLevel {
+    level: usize,
+    regions: Vec<Range<usize>>,
+  },
 }
 
 impl Document {
-  /// Applies an operation. Returns whether the text changed.
+  /// Applies an operation. Returns whether the text changed. Afterwards no
+  /// selection is in a folded region's hidden lines: movement steps over
+  /// them, and other operations unfold the regions selections end up in.
   pub fn apply(&mut self, op: EditorOp) -> Result<bool, CoreError> {
+    let result = self.apply_op(op);
+    self.sync_folds();
+    result
+  }
+
+  fn apply_op(&mut self, op: EditorOp) -> Result<bool, CoreError> {
     match op {
       EditorOp::Insert(text) => self.insert(&text),
       EditorOp::Paste { text, whole_lines } => self.paste(&text, whole_lines),
@@ -168,7 +202,9 @@ impl Document {
         self.edit_selections(|_, s| (s.range(), String::new()), EditKind::Other, false)
       }
       EditorOp::Move { motion, extend } => {
-        let moved = self.selections.map(|s| self.moved(s, motion, extend));
+        let moved = self
+          .selections
+          .map(|s| self.step_over_folds(s, self.moved(s, motion, extend)));
         self.set_selections(moved);
         Ok(false)
       }
@@ -235,6 +271,42 @@ impl Document {
       }
       EditorOp::JumpToBracket => {
         self.jump_to_bracket();
+        Ok(false)
+      }
+      EditorOp::Fold(regions) => {
+        self.fold(&regions);
+        Ok(false)
+      }
+      EditorOp::Unfold => {
+        self.unfold();
+        Ok(false)
+      }
+      EditorOp::ToggleFold(regions) => {
+        self.toggle_fold(&regions);
+        Ok(false)
+      }
+      EditorOp::ToggleFoldAt { line, regions } => {
+        self.toggle_fold_at(line, &regions);
+        Ok(false)
+      }
+      EditorOp::FoldAll(regions) => {
+        self.fold_all(&regions);
+        Ok(false)
+      }
+      EditorOp::UnfoldAll => {
+        self.unfold_all();
+        Ok(false)
+      }
+      EditorOp::FoldRecursively(regions) => {
+        self.fold_recursively(&regions);
+        Ok(false)
+      }
+      EditorOp::UnfoldRecursively(regions) => {
+        self.unfold_recursively(&regions);
+        Ok(false)
+      }
+      EditorOp::FoldLevel { level, regions } => {
+        self.fold_level(level, &regions);
         Ok(false)
       }
     }
@@ -439,8 +511,9 @@ impl Document {
     }
   }
 
-  /// Moves `lines` lines up or down, aiming for the selection's goal column.
-  /// Moving past the first or last line goes to the start or end of the text.
+  /// Moves `lines` visible lines up or down, aiming for the selection's goal
+  /// column. Moving past the first or last line goes to the start or end of
+  /// the text.
   fn vertical(
     &self,
     s: Selection,
@@ -449,13 +522,13 @@ impl Document {
     extend: bool,
   ) -> Selection {
     let goal = s.goal.unwrap_or_else(|| self.visual_column(s.head));
-    let line = self.buffer.line_of(s.head);
+    let row = self.row_of(self.buffer.line_of(s.head));
     let target = match direction {
-      VerticalDirection::Up => line.checked_sub(lines),
-      VerticalDirection::Down => Some(line + lines).filter(|&t| t < self.buffer.line_count()),
+      VerticalDirection::Up => row.checked_sub(lines),
+      VerticalDirection::Down => Some(row + lines).filter(|&t| t < self.row_count()),
     };
     let head = match (target, direction) {
-      (Some(target), _) => self.offset_at_visual_column(target, goal),
+      (Some(target), _) => self.offset_at_visual_column(self.line_at_row(target), goal),
       (None, VerticalDirection::Up) => 0,
       (None, VerticalDirection::Down) => self.buffer.len(),
     };
@@ -485,10 +558,10 @@ impl Document {
     let Some(&edge) = edge else {
       return;
     };
-    let line = self.buffer.line_of(edge.head);
+    let row = self.row_of(self.buffer.line_of(edge.head));
     let at_edge = match direction {
-      VerticalDirection::Up => line == 0,
-      VerticalDirection::Down => line + 1 >= self.buffer.line_count(),
+      VerticalDirection::Up => row == 0,
+      VerticalDirection::Down => row + 1 >= self.row_count(),
     };
     if at_edge {
       return;

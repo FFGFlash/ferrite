@@ -18,6 +18,7 @@ name = "Python"
 file_extensions = ["py", "pyi"]
 grammar = "grammars/tree-sitter-python.wasm"
 highlights = "queries/highlights.scm"
+folds = "queries/folds.scm"
 line_comment = "#"
 
 # `npm install -g pyright`

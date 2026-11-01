@@ -13,6 +13,7 @@ mod document;
 mod editor;
 mod error;
 mod find;
+mod folds;
 mod history;
 mod lines;
 mod ops;

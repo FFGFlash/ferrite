@@ -1,6 +1,8 @@
 //! Keybinding syntax, shared by extension manifests and user settings:
 //! modifiers and a key joined by `+`, such as `ctrl+shift+p`, `mod+k`, or
-//! `alt+f12`. `mod` is Ctrl on Windows and Linux and Cmd on macOS.
+//! `alt+f12`. `mod` is Ctrl on Windows and Linux and Cmd on macOS. A chord
+//! is two of these separated by a space, such as `mod+k mod+0`: the second
+//! is pressed after the first.
 
 const MODIFIERS: &[&str] = &["mod", "ctrl", "alt", "shift", "meta"];
 const NAMED_KEYS: &[&str] = &[
@@ -22,9 +24,28 @@ const NAMED_KEYS: &[&str] = &[
 ];
 
 /// Checks a keybinding and returns it in normal form: lowercase, modifiers
-/// in a fixed order (`mod`, `ctrl`, `alt`, `shift`, `meta`).
+/// in a fixed order (`mod`, `ctrl`, `alt`, `shift`, `meta`), and a chord's
+/// steps separated by one space.
 pub fn normalize(binding: &str) -> Result<String, String> {
-  let lower = binding.trim().to_lowercase();
+  let steps: Vec<&str> = binding.split_whitespace().collect();
+  if steps.len() > 2 {
+    return Err(format!(
+      "keybinding {binding:?} has more than two steps (a chord is two key combinations)"
+    ));
+  }
+  if steps.is_empty() {
+    return Err(format!("keybinding {binding:?} is malformed"));
+  }
+  let steps = steps
+    .into_iter()
+    .map(|step| normalize_step(binding, step))
+    .collect::<Result<Vec<_>, _>>()?;
+  Ok(steps.join(" "))
+}
+
+/// One key combination of `binding`, in normal form.
+fn normalize_step(binding: &str, step: &str) -> Result<String, String> {
+  let lower = step.to_lowercase();
   // A literal "+" key is written "mod++".
   let (rest, plus_key) = match lower.strip_suffix("++") {
     Some(rest) => (rest.to_owned(), true),
@@ -82,6 +103,17 @@ mod tests {
     assert_eq!(normalize("ctrl+space"), Ok("ctrl+space".into()));
     assert_eq!(normalize("mod++"), Ok("mod++".into()));
     assert_eq!(normalize("/"), Ok("/".into()));
+  }
+
+  #[test]
+  fn normalizes_chords() {
+    assert_eq!(normalize("Ctrl+K  Ctrl+0"), Ok("ctrl+k ctrl+0".into()));
+    assert_eq!(
+      normalize("mod+k shift+mod+["),
+      Ok("mod+k mod+shift+[".into())
+    );
+    assert!(normalize("mod+k mod+k mod+k").is_err());
+    assert!(normalize("mod+k banana").is_err());
   }
 
   #[test]

@@ -5,7 +5,8 @@ use std::path::Path;
 use crate::languages::{LanguageDefinition, Registry};
 
 /// (extension folder, id, file extensions, grammar file, grammar name,
-/// highlight query, injection query)
+/// highlight query, injection query). The fold query is `folds.scm` beside
+/// the highlight query.
 type Example = (
   &'static str,
   &'static str,
@@ -102,6 +103,15 @@ const EXAMPLES: &[Example] = &[
 
 /// All the example languages.
 pub(crate) fn registry() -> Registry {
+  build(true)
+}
+
+/// All the example languages, without their fold queries.
+pub(crate) fn registry_without_folds() -> Registry {
+  build(false)
+}
+
+fn build(folds: bool) -> Registry {
   let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../extensions");
   let definitions = EXAMPLES.iter().map(
     |&(folder, id, extensions, grammar, grammar_name, highlights, injections)| {
@@ -115,6 +125,11 @@ pub(crate) fn registry() -> Registry {
         grammar_name: grammar_name.to_owned(),
         highlights: dir.join("queries").join(highlights),
         injections: injections.map(|path| dir.join("queries").join(path)),
+        folds: folds.then(|| {
+          dir
+            .join("queries")
+            .join(highlights.replace("highlights.scm", "folds.scm"))
+        }),
       }
     },
   );

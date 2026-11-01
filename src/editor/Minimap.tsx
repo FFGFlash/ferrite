@@ -29,15 +29,15 @@ const CHANGE_THROTTLE_MS = 100
 
 interface MinimapProps {
   documentId: number
-  /** The document version and line count of the editor's latest view. */
+  /** The document version and row count of the editor's latest view. */
   version: number
-  lineCount: number
+  rowCount: number
   /** Bumped when the editor refreshes without an edit (e.g. new highlights). */
   refreshTick: number
   /** The editor's scroll container. */
   scroller: RefObject<HTMLDivElement | null>
   lineHeight: number
-  fetchLines?: (id: number, startLine: number, endLine: number) => Promise<MinimapView>
+  fetchLines?: (id: number, startRow: number, endRow: number) => Promise<MinimapView>
 }
 
 interface Measured extends EditorScroll {
@@ -58,7 +58,7 @@ interface Fetched {
 export function Minimap({
   documentId,
   version,
-  lineCount,
+  rowCount,
   refreshTick,
   scroller,
   lineHeight,
@@ -74,7 +74,7 @@ export function Minimap({
   const height = measured?.clientHeight ?? 0
   const layout = measured ? minimapLayout(measured, lineHeight, height) : null
   const wantStart = layout?.firstLine ?? 0
-  const wantEnd = Math.min(lineCount, wantStart + (layout?.lineCount ?? 0))
+  const wantEnd = Math.min(rowCount, wantStart + (layout?.lineCount ?? 0))
 
   useLineRequests(
     { documentId, version, refreshTick, wantStart, wantEnd, enabled: layout !== null },
@@ -110,7 +110,7 @@ export function Minimap({
     context.globalAlpha = 0.75
     let fill = ''
     for (let line = layout.firstLine; line < layout.firstLine + layout.lineCount; line++) {
-      const runs = view.lines[line - view.startLine]
+      const runs = view.lines[line - view.startRow]
       if (!runs) {
         continue
       }
@@ -280,8 +280,8 @@ function useLineRequests(
     const current = sameDocument && view.version === version && fetched?.refreshTick === refreshTick
     const covers =
       sameDocument &&
-      view.startLine <= wantStart &&
-      view.startLine + view.lines.length >= Math.min(wantEnd, view.lineCount)
+      view.startRow <= wantStart &&
+      view.startRow + view.lines.length >= Math.min(wantEnd, view.rowCount)
     if (current && covers) {
       return
     }

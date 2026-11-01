@@ -18,6 +18,7 @@ name = "Rust"
 file_extensions = ["rs"]
 grammar = "grammars/tree-sitter-rust.wasm"
 highlights = "queries/highlights.scm"
+folds = "queries/folds.scm"
 # For Toggle Line Comment (Ctrl+/).
 line_comment = "//"
 block_comment = ["/*", "*/"]

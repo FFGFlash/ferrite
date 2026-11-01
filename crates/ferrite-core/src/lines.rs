@@ -21,25 +21,26 @@ pub struct CommentTokens {
   pub block: Option<(String, String)>,
 }
 
-/// One block's rewrite: `edit` changes the text around the block, and the
-/// block's text (which started at `origin`) ends up `landing` bytes into
-/// the edit's new text. Selections in the block move with it.
+/// One block's rewrite: `edit` changes the text around the block, and each
+/// piece of old text in `moved` ends up `landing` bytes into the edit's new
+/// text. The block comes first; selections in it move with it. Folded
+/// regions move with their piece; others in the edit are unfolded.
 struct Rewrite {
   edit: Edit,
-  origin: usize,
-  landing: usize,
+  moved: Vec<(Range<usize>, usize)>,
 }
 
 impl Document {
   /// The lines a selection covers. A selection ending at the start of a line
-  /// doesn't cover that line.
+  /// doesn't cover that line; one ending on the first line of a folded
+  /// region covers the whole region.
   pub(crate) fn selection_lines(&self, s: Selection) -> Range<usize> {
     let first = self.buffer.line_of(s.start());
     let mut last = self.buffer.line_of(s.end());
     if last > first && s.end() == self.buffer.line_start(last) {
       last -= 1;
     }
-    first..last + 1
+    first..self.through_fold(last) + 1
   }
 
   /// The lines the selections cover, as sorted blocks; overlapping and
@@ -97,15 +98,39 @@ impl Document {
     blocks: &[Range<usize>],
     rewrites: Vec<Rewrite>,
   ) -> Result<bool, CoreError> {
-    let moves: Vec<(usize, usize)> = rewrites.iter().map(|r| (r.origin, r.landing)).collect();
+    let moves: Vec<(usize, usize)> = rewrites
+      .iter()
+      .map(|r| (r.moved[0].0.start, r.moved[0].1))
+      .collect();
     let owners: Vec<usize> = self
       .selections
       .iter()
       .map(|&s| self.block_of(blocks, s))
       .collect();
-    let changes = ChangeSet::new(rewrites.into_iter().map(|r| r.edit).collect())?;
+    let changes = ChangeSet::new(rewrites.iter().map(|r| r.edit.clone()).collect())?;
+    if changes.is_empty() {
+      return Ok(false);
+    }
     let post = changes.post_ranges();
-    self.commit(changes, |document, _| {
+    // (rewrite, header, end) of each folded region that moves, relative to
+    // the rewrite's new text.
+    let mut carried = Vec::new();
+    for (index, rewrite) in rewrites.iter().enumerate() {
+      for (header, end) in self.folds.take_within(rewrite.edit.range.clone()) {
+        if let Some((from, landing)) = rewrite
+          .moved
+          .iter()
+          .find(|(from, _)| from.start <= header && end <= from.end)
+        {
+          carried.push((
+            index,
+            header - from.start + landing,
+            end - from.start + landing,
+          ));
+        }
+      }
+    }
+    let changed = self.commit(changes, |document, _| {
       let ranges = document
         .selections
         .iter()
@@ -118,7 +143,13 @@ impl Document {
         })
         .collect();
       Selections::new(ranges, document.selections.primary_index())
-    })
+    })?;
+    self.folds.sync(&self.buffer);
+    let moved = carried
+      .into_iter()
+      .map(|(index, header, end)| (post[index].start + header, post[index].start + end));
+    self.folds.put(&self.buffer, moved);
+    Ok(changed)
   }
 
   /// Inserts a line above or below each selection's lines, indented like
@@ -174,8 +205,9 @@ impl Document {
     })
   }
 
-  /// Swaps each block of selected lines with the line above or below it.
-  /// Does nothing if a block is already at the top or bottom.
+  /// Swaps each block of selected lines with the line above or below it (a
+  /// folded region and its first line count as one line). Does nothing if a
+  /// block is already at the top or bottom.
   pub(crate) fn move_lines(&mut self, direction: VerticalDirection) -> Result<bool, CoreError> {
     let blocks = self.line_blocks();
     let buffer = &self.buffer;
@@ -194,42 +226,48 @@ impl Document {
         let start = buffer.line_start(first);
         match direction {
           VerticalDirection::Up => {
-            let above = buffer.line_start(first - 1);
+            let above_line = self
+              .folds
+              .hidden_at(first - 1)
+              .map_or(first - 1, |hidden| hidden.start - 1);
+            let above = buffer.line_start(above_line);
             let end = self.full_line_end(last);
             let mut text = buffer.text_in(start..end);
+            let neighbour;
             if last + 1 < line_count {
+              neighbour = (above..start, text.len());
               text += &buffer.text_in(above..start);
             } else {
               // The last line has no line break: take the one above.
               let above_end = buffer.line_end(first - 1);
               text += &buffer.text_in(above_end..start);
+              neighbour = (above..above_end, text.len());
               text += &buffer.text_in(above..above_end);
             }
             Rewrite {
               edit: Edit::new(above..end, text),
-              origin: start,
-              landing: 0,
+              moved: vec![(start..end, 0), neighbour],
             }
           }
           VerticalDirection::Down => {
+            let below_last = self.through_fold(last + 1);
             let below = buffer.line_start(last + 1);
-            let end = self.full_line_end(last + 1);
+            let end = self.full_line_end(below_last);
             let mut text = buffer.text_in(below..end);
-            let landing;
-            if last + 2 < line_count {
-              landing = text.len();
+            let block;
+            if below_last + 1 < line_count {
+              block = (start..below, text.len());
               text += &buffer.text_in(start..below);
             } else {
               // The line below is the last and has no line break: take ours.
               let block_end = buffer.line_end(last);
               text += &buffer.text_in(block_end..below);
-              landing = text.len();
+              block = (start..block_end, text.len());
               text += &buffer.text_in(start..block_end);
             }
             Rewrite {
               edit: Edit::new(start..end, text),
-              origin: start,
-              landing,
+              moved: vec![block, (below..end, 0)],
             }
           }
         }
@@ -261,8 +299,7 @@ impl Document {
         };
         Rewrite {
           edit,
-          origin: start,
-          landing,
+          moved: vec![(start..end, landing)],
         }
       })
       .collect();
@@ -545,7 +582,8 @@ impl Document {
   pub(crate) fn select_line(&mut self) {
     let selections = self.selections.map(|s| {
       let start = self.buffer.line_start(self.buffer.line_of(s.start()));
-      Selection::new(start, self.full_line_end(self.buffer.line_of(s.end())))
+      let last = self.through_fold(self.buffer.line_of(s.end()));
+      Selection::new(start, self.full_line_end(last))
     });
     self.set_selections(selections);
   }
@@ -561,7 +599,7 @@ impl Document {
       } else {
         let first = self.buffer.line_of(s.start());
         let last = self.buffer.line_of(s.end());
-        for line in first..last {
+        for line in (first..last).filter(|&line| !self.is_hidden(line)) {
           ranges.push(Selection::cursor(self.buffer.line_end(line)));
         }
         if first == last || s.end() > self.buffer.line_start(last) {

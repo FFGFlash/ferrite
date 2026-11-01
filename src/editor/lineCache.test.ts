@@ -2,17 +2,29 @@ import { describe, expect, it } from 'vitest'
 import type { LinesUpdate, WireView } from '../ipc/editor'
 import { applyUpdate, knownLines, type LineCache } from './lineCache'
 
-function wire(version: number, startLine: number, endLine: number, lines: LinesUpdate): WireView {
+function wire(
+  version: number,
+  startLine: number,
+  endLine: number,
+  lines: LinesUpdate,
+  visible: [number, number][] = [[startLine, endLine]],
+): WireView {
   return {
     documentId: 1,
     version,
     lineCount: 1000,
+    rowCount: 1000,
+    startRow: startLine,
     startLine,
     endLine,
+    visible,
+    folded: [],
+    foldable: [],
+    foldGeneration: 0,
     lines,
     selections: [],
     selectionCount: 1,
-    primary: { position: { line: 0, column: 0 }, visualColumn: 0 },
+    primary: { position: { line: 0, column: 0 }, visualColumn: 0, row: 0 },
     dirty: false,
     search: null,
     highlights: [],
@@ -36,7 +48,7 @@ const initial = applyUpdate(
 describe('applyUpdate', () => {
   it('fills an empty cache from a full update', () => {
     expect(texts(initial)).toEqual(['a', 'b', 'c', 'd', 'e'])
-    expect(knownLines(initial)).toEqual({ version: 1, startLine: 0, endLine: 5 })
+    expect(knownLines(initial)).toEqual({ version: 1, ranges: [[0, 5]] })
   })
 
   it('replaces only an edited line', () => {
@@ -69,7 +81,32 @@ describe('applyUpdate', () => {
       wire(1, 3, 7, { base: 1, splices: [], chunks: [{ start: 5, lines: ['f', 'g'] }] }),
     )
     expect(texts(next)).toEqual(['d', 'e', 'f', 'g'])
-    expect(next?.startLine).toBe(3)
+    expect(next?.lineNumbers).toEqual([3, 4, 5, 6])
+  })
+
+  it('holds only the visible lines around folded regions', () => {
+    const folded = applyUpdate(
+      initial,
+      wire(1, 0, 7, { base: 1, splices: [], chunks: [{ start: 5, lines: ['f', 'g'] }] }, [
+        [0, 2],
+        [4, 7],
+      ]),
+    )
+    expect(texts(folded)).toEqual(['a', 'b', 'e', 'f', 'g'])
+    expect(folded?.lineNumbers).toEqual([0, 1, 4, 5, 6])
+    expect(knownLines(folded)).toEqual({
+      version: 1,
+      ranges: [
+        [0, 2],
+        [4, 7],
+      ],
+    })
+    // Unfolding needs the hidden lines, which the backend sends.
+    const unfolded = applyUpdate(
+      folded,
+      wire(1, 0, 5, { base: 1, splices: [], chunks: [{ start: 2, lines: ['c', 'd'] }] }),
+    )
+    expect(texts(unfolded)).toEqual(['a', 'b', 'c', 'd', 'e'])
   })
 
   it('carries the full length of shortened lines', () => {

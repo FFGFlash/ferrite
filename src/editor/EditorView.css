@@ -45,6 +45,50 @@
   color: var(--color-editor-line-number-active);
 }
 
+/* Fold markers: shown while the pointer is over the gutter, and always for
+   folded regions, as in VS Code. */
+.editor-view__fold {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: var(--editor-line-height);
+  margin-left: 4px;
+  vertical-align: top;
+  color: var(--color-editor-line-number);
+  opacity: 0;
+  transition: opacity 0.1s;
+}
+
+.editor-view__gutter:hover .editor-view__fold,
+.editor-view__fold[data-folded] {
+  opacity: 1;
+}
+
+.editor-view__fold[data-fold-line] {
+  cursor: pointer;
+}
+
+.editor-view__fold[data-fold-line]:hover {
+  color: var(--color-editor-line-number-active);
+}
+
+/* Shown after a folded line; clicking it unfolds. */
+.editor-view__folded {
+  margin-left: var(--space-1);
+  padding: 0 var(--space-1);
+  border-radius: var(--radius-control);
+  background: var(--color-control-hover-background);
+  color: var(--color-editor-line-number-active);
+  cursor: pointer;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .editor-view__fold {
+    transition: none;
+  }
+}
+
 .editor-view__content {
   position: relative;
   flex: 1;

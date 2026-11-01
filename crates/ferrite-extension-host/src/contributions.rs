@@ -185,6 +185,9 @@ pub struct LanguageContribution {
   pub highlights: PathBuf,
   #[serde(skip)]
   pub injections: Option<PathBuf>,
+  /// The fold query (`folds.scm`), which captures foldable nodes as `@fold`.
+  #[serde(skip)]
+  pub folds: Option<PathBuf>,
   /// Starts a comment to the end of the line, e.g. `//`.
   pub line_comment: Option<String>,
   /// Open and close a block comment, e.g. `/*` and `*/`.
@@ -353,6 +356,7 @@ pub struct RawLanguage {
   grammar_name: Option<String>,
   highlights: String,
   injections: Option<String>,
+  folds: Option<String>,
   line_comment: Option<String>,
   block_comment: Option<(String, String)>,
 }
@@ -665,6 +669,11 @@ pub fn parse(
         .as_deref()
         .map(|path| inside(&section, path))
         .transpose()?,
+      folds: language
+        .folds
+        .as_deref()
+        .map(|path| inside(&section, path))
+        .transpose()?,
       line_comment: language
         .line_comment
         .as_deref()
@@ -754,7 +763,8 @@ pub fn check_language_files(
 ) -> Result<(), ManifestError> {
   let paths = [&language.grammar, &language.highlights]
     .into_iter()
-    .chain(&language.injections);
+    .chain(&language.injections)
+    .chain(&language.folds);
   for path in paths {
     let full = dir.join(path);
     let metadata = std::fs::metadata(&full).map_err(|source| ManifestError::Read {

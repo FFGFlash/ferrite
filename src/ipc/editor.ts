@@ -12,10 +12,13 @@ export interface Position {
   column: number
 }
 
-/** Lines `startLine..endLine` (end exclusive). */
+/**
+ * Display rows `startRow..endRow` (end exclusive). Rows skip the hidden
+ * lines of folded regions.
+ */
 export interface Viewport {
-  startLine: number
-  endLine: number
+  startRow: number
+  endRow: number
 }
 
 export type Motion =
@@ -66,6 +69,18 @@ export type EditorOp =
   | { type: 'addNextMatch' }
   | { type: 'selectAllOccurrences' }
   | { type: 'jumpToBracket' }
+  /** Fold operations use the document's foldable regions around the cursors. */
+  | { type: 'fold' }
+  | { type: 'unfold' }
+  | { type: 'toggleFold' }
+  /** A click on the fold marker of `line`. */
+  | { type: 'toggleFoldAt'; line: number }
+  | { type: 'foldAll' }
+  | { type: 'unfoldAll' }
+  | { type: 'foldRecursively' }
+  | { type: 'unfoldRecursively' }
+  /** Folds the regions nested `level` deep (1 is outermost), except around the cursors. */
+  | { type: 'foldLevel'; level: number }
 
 export interface SearchQuery {
   pattern: string
@@ -129,11 +144,10 @@ export interface LinesUpdate {
   chunks: { start: number; lines: WireLine[] }[]
 }
 
-/** Lines a client holds: `startLine..endLine` at `version`. */
+/** Lines a client holds at `version`: the `visible` ranges of its last view. */
 export interface KnownLines {
   version: number
-  startLine: number
-  endLine: number
+  ranges: [number, number][]
 }
 
 /** Highlight categories, in protocol order: span kind `k` is `TOKEN_KINDS[k - 1]`. */
@@ -193,13 +207,27 @@ interface ViewFields {
   documentId: number
   version: number
   lineCount: number
-  /** The viewport: lines `startLine..endLine`. */
+  /** Display rows: lines less those hidden in folded regions. */
+  rowCount: number
+  /**
+   * The viewport: rows from `startRow`, showing the `visible` line ranges
+   * (`[start, end)`), which run from `startLine` to `endLine`.
+   */
+  startRow: number
   startLine: number
   endLine: number
+  visible: [number, number][]
+  /** Visible lines whose region is folded. */
+  folded: number[]
+  /** Visible lines that start a foldable region. */
+  foldable: number[]
+  /** Changes whenever the folded regions do. */
+  foldGeneration: number
   /** Selections touching the viewport, plus the primary selection. */
   selections: SelectionView[]
   selectionCount: number
-  primary: { position: Position; visualColumn: number }
+  /** The primary cursor, and the display row of its line. */
+  primary: { position: Position; visualColumn: number; row: number }
   dirty: boolean
   search: SearchView | null
   diagnostics: DiagnosticView[]
@@ -236,20 +264,23 @@ export interface DisplayLine {
 
 /** A view with every viewport line resolved, ready to render. */
 export interface EditorView extends ViewFields {
-  /** Lines `startLine..endLine`. */
+  /** The visible lines, one per row from `startRow`. */
   lines: DisplayLine[]
+  /** The document line each of `lines` is, in order. */
+  lineNumbers: number[]
 }
 
 /**
- * Lines `startLine..startLine + lines.length` drawn small for the minimap:
- * each line's runs of non-blank columns as `[start, end, kind, ...]`, in
- * visual columns. Kind 0 is plain text; others index `TOKEN_KINDS` from 1.
+ * Display rows `startRow..startRow + lines.length` drawn small for the
+ * minimap: each line's runs of non-blank columns as `[start, end, kind,
+ * ...]`, in visual columns. Kind 0 is plain text; others index
+ * `TOKEN_KINDS` from 1.
  */
 export interface MinimapView {
   documentId: number
   version: number
-  lineCount: number
-  startLine: number
+  rowCount: number
+  startRow: number
   lines: number[][]
 }
 
@@ -270,8 +301,8 @@ export const getView = (
   known: KnownLines | null,
   search: SearchQuery | null,
 ) => call<WireView>('editor_view', { id, viewport, known, search })
-export const getMinimap = (id: number, startLine: number, endLine: number) =>
-  call<MinimapView>('editor_minimap', { id, startLine, endLine })
+export const getMinimap = (id: number, startRow: number, endRow: number) =>
+  call<MinimapView>('editor_minimap', { id, startRow, endRow })
 export const applyOps = (
   id: number,
   ops: EditorOp[],

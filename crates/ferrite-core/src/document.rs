@@ -8,6 +8,7 @@ use ferrite_text::{
 use ferrite_workspace::FileStamp;
 
 use crate::error::CoreError;
+use crate::folds::Folds;
 use crate::history::{EditKind, History, HistoryLimits, StateId};
 use crate::selection::{Selection, Selections};
 
@@ -93,6 +94,8 @@ pub struct Document {
   saved_state: StateId,
   /// Earlier selections, newest last, with the version they belong to.
   cursor_history: VecDeque<(Version, Selections)>,
+  /// Folded regions.
+  pub(crate) folds: Folds,
 }
 
 impl Document {
@@ -109,6 +112,7 @@ impl Document {
       .unwrap_or(config.default_line_ending);
     let history = History::new(config.history);
     let saved_state = history.current_state();
+    let folds = Folds::new(buffer.version());
     Self {
       id,
       buffer,
@@ -125,6 +129,7 @@ impl Document {
       untitled_number,
       saved_state,
       cursor_history: VecDeque::new(),
+      folds,
     }
   }
 
@@ -248,6 +253,7 @@ impl Document {
       .history
       .record(changes, inverse, before, after, EditKind::Other, false);
     self.history.seal();
+    self.sync_folds();
     Ok(true)
   }
 
@@ -280,7 +286,15 @@ impl Document {
       .history
       .record(changes, inverse, before, after, EditKind::Other, false);
     self.history.seal();
+    self.sync_folds();
     Ok(true)
+  }
+
+  /// Brings the folded regions up to date with the text, unfolding any a
+  /// selection reaches into.
+  pub(crate) fn sync_folds(&mut self) {
+    self.folds.sync(&self.buffer);
+    self.reveal_selections();
   }
 
   /// Records selections that were just replaced, for cursor undo.

@@ -56,12 +56,13 @@ impl Position {
   }
 }
 
-/// Lines `start_line..end_line` (end exclusive) the frontend is displaying.
+/// Display rows `start_row..end_row` (end exclusive) the frontend is
+/// displaying. Rows skip the hidden lines of folded regions.
 #[derive(Debug, Clone, Copy, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Viewport {
-  pub start_line: usize,
-  pub end_line: usize,
+  pub start_row: usize,
+  pub end_row: usize,
 }
 
 #[derive(Debug, Clone, Copy, Deserialize)]
@@ -212,6 +213,22 @@ pub enum OpDto {
   AddNextMatch,
   SelectAllOccurrences,
   JumpToBracket,
+  /// Fold operations use the document's foldable regions (see
+  /// [`OpContext::folds`]).
+  Fold,
+  Unfold,
+  ToggleFold,
+  /// A click on the fold marker of `line`.
+  ToggleFoldAt {
+    line: usize,
+  },
+  FoldAll,
+  UnfoldAll,
+  FoldRecursively,
+  UnfoldRecursively,
+  FoldLevel {
+    level: usize,
+  },
 }
 
 /// What some operations need besides the document.
@@ -219,12 +236,31 @@ pub enum OpDto {
 pub struct OpContext {
   /// The comment syntax of the document's language.
   pub comments: CommentTokens,
+  /// Foldable regions as line ranges: all of them, or those around the
+  /// lines the operation is about.
+  pub folds: Vec<Range<usize>>,
   /// The text last copied as whole lines. Pasting the same text pastes
   /// whole lines.
   pub copied_lines: Option<String>,
 }
 
 impl OpDto {
+  /// Whether this is a fold operation.
+  pub fn changes_folds(&self) -> bool {
+    matches!(
+      self,
+      Self::Fold
+        | Self::Unfold
+        | Self::ToggleFold
+        | Self::ToggleFoldAt { .. }
+        | Self::FoldAll
+        | Self::UnfoldAll
+        | Self::FoldRecursively
+        | Self::UnfoldRecursively
+        | Self::FoldLevel { .. }
+    )
+  }
+
   pub fn into_core(self, buffer: &TextBuffer, context: &OpContext) -> EditorOp {
     match self {
       Self::Insert { text } => EditorOp::Insert(text),
@@ -315,6 +351,21 @@ impl OpDto {
       Self::AddNextMatch => EditorOp::AddNextMatch,
       Self::SelectAllOccurrences => EditorOp::SelectAllOccurrences,
       Self::JumpToBracket => EditorOp::JumpToBracket,
+      Self::Fold => EditorOp::Fold(context.folds.clone()),
+      Self::Unfold => EditorOp::Unfold,
+      Self::ToggleFold => EditorOp::ToggleFold(context.folds.clone()),
+      Self::ToggleFoldAt { line } => EditorOp::ToggleFoldAt {
+        line,
+        regions: context.folds.clone(),
+      },
+      Self::FoldAll => EditorOp::FoldAll(context.folds.clone()),
+      Self::UnfoldAll => EditorOp::UnfoldAll,
+      Self::FoldRecursively => EditorOp::FoldRecursively(context.folds.clone()),
+      Self::UnfoldRecursively => EditorOp::UnfoldRecursively(context.folds.clone()),
+      Self::FoldLevel { level } => EditorOp::FoldLevel {
+        level: level.max(1),
+        regions: context.folds.clone(),
+      },
     }
   }
 }
@@ -367,6 +418,8 @@ pub struct CursorDto {
   pub position: Position,
   /// Zero-based visual column (tabs expanded), for display.
   pub visual_column: usize,
+  /// The display row of its line.
+  pub row: usize,
 }
 
 #[derive(Debug, Serialize)]
@@ -472,13 +525,18 @@ impl SearchView {
   }
 }
 
-/// Lines the client holds, from its last view.
-#[derive(Debug, Clone, Copy, Deserialize)]
+/// Lines the client holds, from its last view: its `visible` ranges.
+#[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct KnownDto {
   pub version: u64,
-  pub start_line: usize,
-  pub end_line: usize,
+  pub ranges: Vec<[usize; 2]>,
+}
+
+impl KnownDto {
+  pub fn ranges(&self) -> Vec<Range<usize>> {
+    self.ranges.iter().map(|&[start, end]| start..end).collect()
+  }
 }
 
 #[derive(Debug, Serialize)]
@@ -563,9 +621,20 @@ pub struct EditorView {
   pub document_id: u64,
   pub version: u64,
   pub line_count: usize,
-  /// The viewport this view describes: lines `start_line..end_line`.
+  /// Display rows: lines less those hidden in folded regions.
+  pub row_count: usize,
+  /// The viewport this view describes: rows from `start_row`, showing the
+  /// `visible` line ranges, which run from `start_line` to `end_line`.
+  pub start_row: usize,
   pub start_line: usize,
   pub end_line: usize,
+  pub visible: Vec<[usize; 2]>,
+  /// Visible lines whose region is folded.
+  pub folded: Vec<usize>,
+  /// Visible lines that start a foldable region.
+  pub foldable: Vec<usize>,
+  /// Changes whenever the folded regions do.
+  pub fold_generation: u64,
   pub lines: LinesDto,
   /// Selections touching the viewport, plus the primary selection.
   pub selections: Vec<SelectionDto>,
@@ -597,34 +666,36 @@ pub struct DecorationDto {
 
 impl EditorView {
   /// The view of `viewport` for a client holding `known`. `search` builds
-  /// the search section for the clamped viewport lines, if requested;
-  /// `highlights` the highlights for those lines, given the line ranges sent
-  /// as chunks.
+  /// the search section for the lines the clamped viewport spans, if
+  /// requested; `highlights` the highlights for its visible lines, given
+  /// the line ranges sent as chunks.
   pub fn of(
     document: &Document,
     viewport: Viewport,
-    known: Option<KnownDto>,
+    known: Option<&KnownDto>,
     search: impl FnOnce(usize, usize) -> Option<SearchView>,
-    highlights: impl FnOnce(Range<usize>, &[Range<usize>]) -> Vec<LineHighlightsDto>,
+    highlights: impl FnOnce(&[Range<usize>], &[Range<usize>]) -> Vec<LineHighlightsDto>,
   ) -> Self {
     let buffer = document.buffer();
     let known = known.map(|known| KnownLines {
       version: Version::from_raw(known.version),
-      start: known.start_line,
-      end: known.end_line,
+      ranges: known.ranges(),
     });
     let update = document.viewport_update(
-      known,
-      viewport.start_line..viewport.end_line,
+      known.as_ref(),
+      viewport.start_row..viewport.end_row,
       MAX_VIEW_LINES,
     );
-    let (start, end) = (update.lines.start, update.lines.end);
+    let ranges = update.lines.clone();
+    let start = ranges.first().map_or(0, |range| range.start);
+    let end = ranges.last().map_or(0, |range| range.end);
+    let start_row = update.start_row;
     let chunks: Vec<Range<usize>> = update
       .chunks
       .iter()
       .map(|chunk| chunk.start..chunk.start + chunk.lines.len())
       .collect();
-    let highlights = highlights(start..end, &chunks);
+    let highlights = highlights(&ranges, &chunks);
 
     let selections = document.selections();
     let primary_index = selections.primary_index();
@@ -648,14 +719,24 @@ impl EditorView {
       document_id: document.id().get(),
       version: document.version().get(),
       line_count: buffer.line_count(),
+      row_count: document.row_count(),
+      start_row,
       start_line: start,
       end_line: end,
+      visible: ranges
+        .iter()
+        .map(|range| [range.start, range.end])
+        .collect(),
+      folded: document.folded_lines(start..end),
+      foldable: Vec::new(),
+      fold_generation: document.fold_generation(),
       lines: update.into(),
       selections: visible,
       selection_count: selections.len(),
       primary: CursorDto {
         position: buffer.offset_to_utf16(head).into(),
         visual_column: document.visual_column(head),
+        row: document.row_of(buffer.line_of(head)),
       },
       dirty: document.is_dirty(),
       search: search(start, end),
@@ -668,6 +749,8 @@ impl EditorView {
 }
 
 #[cfg(test)]
+// Line ranges are naturally single-element arrays here.
+#[allow(clippy::single_range_in_vec_init)]
 mod tests {
   use ferrite_core::{Editor, MAX_MATCHES};
 
@@ -677,14 +760,11 @@ mod tests {
     serde_json::from_str(json).expect("valid ops")
   }
 
-  fn viewport(start_line: usize, end_line: usize) -> Viewport {
-    Viewport {
-      start_line,
-      end_line,
-    }
+  fn viewport(start_row: usize, end_row: usize) -> Viewport {
+    Viewport { start_row, end_row }
   }
 
-  fn view(document: &Document, viewport: Viewport, known: Option<KnownDto>) -> EditorView {
+  fn view(document: &Document, viewport: Viewport, known: Option<&KnownDto>) -> EditorView {
     EditorView::of(document, viewport, known, |_, _| None, |_, _| Vec::new())
   }
 
@@ -738,7 +818,9 @@ mod tests {
         {"type": "paste", "text": "b\n"},
         {"type": "toggleComment"},
         {"type": "moveLines", "direction": "down"},
-        {"type": "insertLine", "direction": "up"}
+        {"type": "insertLine", "direction": "up"},
+        {"type": "toggleFoldAt", "line": 3},
+        {"type": "foldLevel", "level": 0}
       ]"#,
     );
     let context = OpContext {
@@ -746,6 +828,7 @@ mod tests {
         line: Some("#".into()),
         block: None,
       },
+      folds: vec![3..6],
       copied_lines: Some("a\n".into()),
     };
     let buffer = TextBuffer::from_text("");
@@ -770,6 +853,21 @@ mod tests {
     assert_eq!(core[2], EditorOp::ToggleComment(context.comments.clone()));
     assert_eq!(core[3], EditorOp::MoveLines(VerticalDirection::Down));
     assert_eq!(core[4], EditorOp::InsertLine(VerticalDirection::Up));
+    assert_eq!(
+      core[5],
+      EditorOp::ToggleFoldAt {
+        line: 3,
+        regions: vec![3..6]
+      }
+    );
+    assert_eq!(
+      core[6],
+      EditorOp::FoldLevel {
+        level: 1,
+        regions: vec![3..6]
+      },
+      "levels start at 1"
+    );
   }
 
   #[test]
@@ -822,14 +920,13 @@ mod tests {
     let first = view(document, viewport(0, 10), None);
     let known = KnownDto {
       version: first.version,
-      start_line: first.start_line,
-      end_line: first.end_line,
+      ranges: first.visible.clone(),
     };
     // The cursor is on line 50, outside the viewport.
     document
       .apply(EditorOp::Insert("!".into()))
       .expect("applies");
-    let next = json(&view(document, viewport(0, 10), Some(known)));
+    let next = json(&view(document, viewport(0, 10), Some(&known)));
     assert_eq!(next["lines"]["base"], first.version);
     assert_eq!(next["lines"]["chunks"], serde_json::json!([]));
     assert_eq!(next["lines"]["splices"].as_array().map(Vec::len), Some(1));
@@ -861,21 +958,20 @@ mod tests {
     let first = view(document, page, None);
     let known = |view: &EditorView| KnownDto {
       version: view.version,
-      start_line: view.start_line,
-      end_line: view.end_line,
+      ranges: view.visible.clone(),
     };
 
     document
       .apply(EditorOp::Insert("y".into()))
       .expect("applies");
-    let keystroke = view(document, page, Some(known(&first)));
+    let keystroke = view(document, page, Some(&known(&first)));
     let sent: usize = keystroke.lines.chunks.iter().map(|c| c.lines.len()).sum();
     let bytes = serde_json::to_string(&keystroke).expect("serializes").len();
     assert_eq!(sent, 1, "a keystroke resends only its line");
     assert!(bytes < 1024, "a keystroke's view is {bytes} bytes");
 
     let next_page = viewport(LINES / 2 + 30, LINES / 2 + 90);
-    let scrolled = view(document, next_page, Some(known(&keystroke)));
+    let scrolled = view(document, next_page, Some(&known(&keystroke)));
     let sent: usize = scrolled.lines.chunks.iter().map(|c| c.lines.len()).sum();
     let bytes = serde_json::to_string(&scrolled).expect("serializes").len();
     assert!(sent <= 60, "a page of scrolling sent {sent} lines");

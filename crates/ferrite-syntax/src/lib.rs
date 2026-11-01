@@ -12,9 +12,12 @@
 //!   (injections, such as CSS in HTML) are parsed as layers of the tree.
 //! - [`highlight_lines`] turns a tree into per-line [`Span`]s of
 //!   [`TokenKind`]s for display.
+//! - [`fold_ranges`] finds the foldable regions a language's fold query
+//!   captures.
 //!
 //! Positions are UTF-8 byte offsets, as everywhere in Ferrite.
 
+mod folds;
 mod highlight;
 mod injections;
 mod languages;
@@ -22,6 +25,7 @@ mod parse;
 #[cfg(test)]
 mod testing;
 
+pub use folds::fold_ranges;
 pub use highlight::{Span, TokenKind, highlight_lines};
 pub use languages::{Language, LanguageDefinition, MAX_GRAMMAR_BYTES, MAX_QUERY_BYTES, Registry};
 pub use parse::{SyntaxError, SyntaxTree, TextSource, apply_edits, deadline, parse};

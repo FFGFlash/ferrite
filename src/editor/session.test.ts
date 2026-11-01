@@ -8,12 +8,18 @@ function view(version: number, viewport: Viewport): WireView {
     documentId: 1,
     version,
     lineCount: 100,
-    startLine: viewport.startLine,
-    endLine: viewport.startLine,
+    rowCount: 100,
+    startRow: viewport.startRow,
+    startLine: viewport.startRow,
+    endLine: viewport.startRow,
+    visible: [],
+    folded: [],
+    foldable: [],
+    foldGeneration: 0,
     lines: { base: null, splices: [], chunks: [] },
     selections: [],
     selectionCount: 1,
-    primary: { position: { line: 0, column: 0 }, visualColumn: 0 },
+    primary: { position: { line: 0, column: 0 }, visualColumn: 0, row: 0 },
     dirty: false,
     search: null,
     highlights: [],
@@ -58,16 +64,16 @@ describe('EditorSession', () => {
   it('fetches the initial view', async () => {
     const { transport, calls, next } = controlledTransport()
     const onView = vi.fn()
-    new EditorSession(1, { startLine: 0, endLine: 10 }, onView, vi.fn(), transport)
+    new EditorSession(1, { startRow: 0, endRow: 10 }, onView, vi.fn(), transport)
     await Promise.resolve()
-    expect(calls).toEqual([{ kind: 'view', viewport: { startLine: 0, endLine: 10 } }])
+    expect(calls).toEqual([{ kind: 'view', viewport: { startRow: 0, endRow: 10 } }])
     await next()
     expect(onView).toHaveBeenCalledOnce()
   })
 
   it('sends operations dispatched right after construction with the first request', async () => {
     const { transport, calls } = controlledTransport()
-    const session = new EditorSession(1, { startLine: 0, endLine: 10 }, vi.fn(), vi.fn(), transport)
+    const session = new EditorSession(1, { startRow: 0, endRow: 10 }, vi.fn(), vi.fn(), transport)
     session.dispatch(insert('a'))
     await Promise.resolve()
     expect(calls).toHaveLength(1)
@@ -77,7 +83,7 @@ describe('EditorSession', () => {
   it('batches operations sent while a request is in flight', async () => {
     const { transport, calls, next } = controlledTransport()
     const onView = vi.fn()
-    const session = new EditorSession(1, { startLine: 0, endLine: 10 }, onView, vi.fn(), transport)
+    const session = new EditorSession(1, { startRow: 0, endRow: 10 }, onView, vi.fn(), transport)
     await Promise.resolve()
 
     session.dispatch(insert('a'))
@@ -97,7 +103,7 @@ describe('EditorSession', () => {
 
   it('keeps only the latest drag position', async () => {
     const { transport, calls, next } = controlledTransport()
-    const session = new EditorSession(1, { startLine: 0, endLine: 10 }, vi.fn(), vi.fn(), transport)
+    const session = new EditorSession(1, { startRow: 0, endRow: 10 }, vi.fn(), vi.fn(), transport)
     session.dispatch(drag(1))
     session.dispatch(drag(2))
     session.dispatch(drag(3))
@@ -107,12 +113,12 @@ describe('EditorSession', () => {
 
   it('sends the latest viewport with the next request', async () => {
     const { transport, calls, next } = controlledTransport()
-    const session = new EditorSession(1, { startLine: 0, endLine: 10 }, vi.fn(), vi.fn(), transport)
-    session.setViewport({ startLine: 5, endLine: 15 })
-    session.setViewport({ startLine: 20, endLine: 30 })
+    const session = new EditorSession(1, { startRow: 0, endRow: 10 }, vi.fn(), vi.fn(), transport)
+    session.setViewport({ startRow: 5, endRow: 15 })
+    session.setViewport({ startRow: 20, endRow: 30 })
     session.dispatch(insert('x'))
     await next()
-    expect(calls[1]).toMatchObject({ kind: 'apply', viewport: { startLine: 20, endLine: 30 } })
+    expect(calls[1]).toMatchObject({ kind: 'apply', viewport: { startRow: 20, endRow: 30 } })
     await next()
     expect(calls).toHaveLength(2)
   })
@@ -125,7 +131,7 @@ describe('EditorSession', () => {
       view: vi.fn((_id, viewport: Viewport) => Promise.resolve(view(1, viewport))),
       clipboard: vi.fn(),
     }
-    const session = new EditorSession(1, { startLine: 0, endLine: 10 }, onView, onError, transport)
+    const session = new EditorSession(1, { startRow: 0, endRow: 10 }, onView, onError, transport)
     await session.idle()
     session.dispatch(insert('x'))
     await session.idle()
@@ -143,13 +149,7 @@ describe('EditorSession', () => {
         view: vi.fn().mockRejectedValue(new Error('unknown document')),
         clipboard: vi.fn(),
       }
-      const session = new EditorSession(
-        1,
-        { startLine: 0, endLine: 10 },
-        vi.fn(),
-        onError,
-        transport,
-      )
+      const session = new EditorSession(1, { startRow: 0, endRow: 10 }, vi.fn(), onError, transport)
       await vi.advanceTimersByTimeAsync(0)
       // The first failure is retried at once; the second waits.
       expect(transport.view).toHaveBeenCalledTimes(2)
@@ -173,7 +173,7 @@ describe('EditorSession', () => {
     const { transport, calls, next } = controlledTransport()
     const search = { pattern: 'x', regex: false, caseSensitive: false, wholeWord: false }
     const apply = vi.spyOn(transport, 'apply')
-    const session = new EditorSession(1, { startLine: 0, endLine: 10 }, vi.fn(), vi.fn(), transport)
+    const session = new EditorSession(1, { startRow: 0, endRow: 10 }, vi.fn(), vi.fn(), transport)
     await Promise.resolve()
     await next()
     session.setSearch(search)
@@ -206,11 +206,11 @@ describe('EditorSession', () => {
       }),
       clipboard: vi.fn(),
     }
-    const session = new EditorSession(1, { startLine: 3, endLine: 10 }, vi.fn(), vi.fn(), transport)
+    const session = new EditorSession(1, { startRow: 3, endRow: 10 }, vi.fn(), vi.fn(), transport)
     await session.idle()
     session.dispatch(insert('a'))
     await session.idle()
-    expect(known).toEqual([null, { version: 5, startLine: 3, endLine: 3 }])
+    expect(known).toEqual([null, { version: 5, ranges: [] }])
   })
 
   it('refetches everything when an update cannot be applied', async () => {
@@ -228,7 +228,7 @@ describe('EditorSession', () => {
       apply: vi.fn(),
       clipboard: vi.fn(),
     }
-    const session = new EditorSession(1, { startLine: 0, endLine: 10 }, onView, vi.fn(), transport)
+    const session = new EditorSession(1, { startRow: 0, endRow: 10 }, onView, vi.fn(), transport)
     await session.idle()
     await new Promise(r => setTimeout(r, 0))
     await session.idle()
@@ -238,7 +238,7 @@ describe('EditorSession', () => {
 
   it('resolves idle once queued work is done', async () => {
     const { transport, next } = controlledTransport()
-    const session = new EditorSession(1, { startLine: 0, endLine: 10 }, vi.fn(), vi.fn(), transport)
+    const session = new EditorSession(1, { startRow: 0, endRow: 10 }, vi.fn(), vi.fn(), transport)
     session.dispatch(insert('a'))
     session.dispatch(insert('b'))
     let idle = false

@@ -43,7 +43,7 @@ describe('decorations', () => {
       ],
       types,
       'dark',
-      1,
+      [1, 2],
       [10, 5],
     )
     const style = { color: '#e5c07b', fontWeight: 'bold' }

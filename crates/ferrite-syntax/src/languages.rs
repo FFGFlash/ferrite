@@ -35,6 +35,8 @@ pub(crate) struct Grammar {
   /// The token kind of each capture in `query`, by capture index.
   pub(crate) kinds: Vec<Option<TokenKind>>,
   pub(crate) injections: Option<Injections>,
+  /// The fold query, which captures foldable nodes as `@fold`.
+  pub(crate) folds: Option<Query>,
 }
 
 /// A language as an extension declares it: a Tree-sitter grammar compiled
@@ -58,6 +60,8 @@ pub struct LanguageDefinition {
   /// The injection query (`injections.scm`), if other languages are
   /// embedded in this one.
   pub injections: Option<PathBuf>,
+  /// The fold query (`folds.scm`), if the language folds by its syntax.
+  pub folds: Option<PathBuf>,
 }
 
 impl Language {
@@ -69,6 +73,11 @@ impl Language {
   /// The name shown to people, e.g. `Rust`.
   pub fn name(&self) -> &str {
     &self.0.definition.name
+  }
+
+  /// Whether the language has a fold query. Loads the grammar.
+  pub fn has_folds(&self) -> bool {
+    self.grammar().is_ok_and(|grammar| grammar.folds.is_some())
   }
 
   /// The compiled grammar, loaded on first use.
@@ -221,7 +230,19 @@ fn compile(definition: &LanguageDefinition) -> Result<Grammar, SyntaxError> {
     .map(query)
     .transpose()
     .map_err(load)?;
-  build(id, language, &highlights, injections.as_deref())
+  let folds = definition
+    .folds
+    .as_deref()
+    .map(query)
+    .transpose()
+    .map_err(load)?;
+  build(
+    id,
+    language,
+    &highlights,
+    injections.as_deref(),
+    folds.as_deref(),
+  )
 }
 
 fn read_limited(path: &Path, limit: u64) -> Result<Vec<u8>, String> {
@@ -247,6 +268,7 @@ fn build(
   language: TsLanguage,
   highlights: &str,
   injections: Option<&str>,
+  folds: Option<&str>,
 ) -> Result<Grammar, SyntaxError> {
   let invalid = |kind: &'static str, error: tree_sitter::QueryError| SyntaxError::Query {
     language: id.to_owned(),
@@ -258,6 +280,9 @@ fn build(
     .map(|text| Query::new(&language, text).map_err(|error| invalid("injection", error)))
     .transpose()?
     .and_then(Injections::new);
+  let folds = folds
+    .map(|text| Query::new(&language, text).map_err(|error| invalid("fold", error)))
+    .transpose()?;
   let kinds = query
     .capture_names()
     .iter()
@@ -268,6 +293,7 @@ fn build(
     query,
     kinds,
     injections,
+    folds,
   })
 }
 
@@ -286,6 +312,7 @@ mod tests {
       grammar_name: id.to_owned(),
       highlights: PathBuf::from("missing.scm"),
       injections: None,
+      folds: None,
     }
   }
 

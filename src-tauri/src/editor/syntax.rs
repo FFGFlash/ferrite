@@ -12,6 +12,9 @@
 //! already have: the last spans sent are remembered (as hashes) for the lines
 //! the client holds and replayed through line splices like the lines
 //! themselves.
+//!
+//! The tree also gives the document's foldable regions, when its language
+//! has a fold query.
 
 use std::collections::HashMap;
 use std::hash::{DefaultHasher, Hash, Hasher};
@@ -21,7 +24,7 @@ use std::time::{Duration, Instant};
 
 use ferrite_core::{Document, DocumentId, MAX_DISPLAY_LINE_BYTES};
 use ferrite_syntax::{
-  Language, Registry, Span, SyntaxTree, apply_edits, deadline, highlight_lines, parse,
+  Language, Registry, Span, SyntaxTree, apply_edits, deadline, fold_ranges, highlight_lines, parse,
 };
 use ferrite_tasks::Priority;
 use ferrite_text::{TextBuffer, TextSnapshot, Version};
@@ -49,7 +52,9 @@ pub struct LineHighlightsDto {
 /// The spans sent for the lines a client holds.
 struct Mirror {
   version: Version,
-  start: usize,
+  /// The lines, as sorted ranges.
+  ranges: Vec<Range<usize>>,
+  /// A hash of each line's spans, in order.
   hashes: Vec<u64>,
 }
 
@@ -152,60 +157,65 @@ impl DocumentSyntax {
     true
   }
 
-  /// Highlights for `lines` that a client holding `known` lacks, given that
-  /// the view replaces `chunks` (whose spans the client resets).
+  /// Highlights for the lines in `ranges` that a client holding `known`
+  /// lacks, given that the view replaces `chunks` (whose spans the client
+  /// resets).
   fn highlights(
     &mut self,
     buffer: &TextBuffer,
-    lines: Range<usize>,
-    known: Option<KnownDto>,
+    ranges: &[Range<usize>],
+    known: Option<&KnownDto>,
     chunks: &[Range<usize>],
   ) -> Vec<LineHighlightsDto> {
-    let spans = match &self.tree {
-      Some(tree) => highlight_lines(tree, buffer, lines.clone(), MAX_DISPLAY_LINE_BYTES),
-      None => vec![Vec::new(); lines.len()],
-    };
-    let carried = self.carried(buffer, known, lines.clone(), chunks);
+    let carried = self.carried(buffer, known, chunks);
     let mut changed = Vec::new();
-    let mut hashes = Vec::with_capacity(lines.len());
-    for ((line, spans), carried) in lines.clone().zip(spans).zip(carried) {
-      let spans = if spans.is_empty() {
-        Vec::new()
-      } else {
-        let (text, _) = buffer.line_prefix(line, MAX_DISPLAY_LINE_BYTES);
-        flatten_utf16(&text, &spans)
+    let mut hashes = Vec::new();
+    for lines in ranges {
+      let spans = match &self.tree {
+        Some(tree) => highlight_lines(tree, buffer, lines.clone(), MAX_DISPLAY_LINE_BYTES),
+        None => vec![Vec::new(); lines.len()],
       };
-      let hash = hash_spans(&spans);
-      if carried != Some(hash) {
-        changed.push(LineHighlightsDto { line, spans });
+      for (line, spans) in lines.clone().zip(spans) {
+        let spans = if spans.is_empty() {
+          Vec::new()
+        } else {
+          let (text, _) = buffer.line_prefix(line, MAX_DISPLAY_LINE_BYTES);
+          flatten_utf16(&text, &spans)
+        };
+        let hash = hash_spans(&spans);
+        if carried.get(&line) != Some(&hash) {
+          changed.push(LineHighlightsDto { line, spans });
+        }
+        hashes.push(hash);
       }
-      hashes.push(hash);
     }
     self.mirror = Some(Mirror {
       version: buffer.version(),
-      start: lines.start,
+      ranges: ranges.to_vec(),
       hashes,
     });
     changed
   }
 
-  /// The hash of the spans the client has for each of `lines`, if known.
+  /// The hash of the spans the client has for each line it holds, where
+  /// known.
   fn carried(
     &self,
     buffer: &TextBuffer,
-    known: Option<KnownDto>,
-    lines: Range<usize>,
+    known: Option<&KnownDto>,
     chunks: &[Range<usize>],
-  ) -> Vec<Option<u64>> {
-    let mut carried = vec![None; lines.len()];
+  ) -> HashMap<usize, u64> {
+    let mut carried = HashMap::new();
     if let (Some(mirror), Some(known)) = (&self.mirror, known)
       && mirror.version.get() == known.version
-      && mirror.start == known.start_line
-      && mirror.start + mirror.hashes.len() == known.end_line
+      && mirror.ranges == known.ranges()
       && let Some(splices) = buffer.line_changes_since(mirror.version)
     {
       // As the client does with its lines (see `lineCache.ts`).
-      let mut held: Vec<(usize, u64)> = (mirror.start..)
+      let mut held: Vec<(usize, u64)> = mirror
+        .ranges
+        .iter()
+        .flat_map(Clone::clone)
         .zip(mirror.hashes.iter().copied())
         .collect();
       for splice in splices {
@@ -217,17 +227,11 @@ impl DocumentSyntax {
           }
         }
       }
-      for (line, hash) in held {
-        if lines.contains(&line) {
-          carried[line - lines.start] = Some(hash);
-        }
-      }
+      carried.extend(held);
     }
     let empty = hash_spans(&[]);
     for line in chunks.iter().flat_map(Clone::clone) {
-      if lines.contains(&line) {
-        carried[line - lines.start] = Some(empty);
-      }
+      carried.insert(line, empty);
     }
     carried
   }
@@ -284,14 +288,15 @@ impl SyntaxStates {
       .unwrap_or_else(PoisonError::into_inner)
   }
 
-  /// Highlights for a view of `lines` (see [`DocumentSyntax::highlights`]),
-  /// scheduling a background parse if needed. Called with the editor locked.
+  /// Highlights for a view of the lines in `ranges` (see
+  /// [`DocumentSyntax::highlights`]), scheduling a background parse if
+  /// needed. Called with the editor locked.
   pub fn highlights(
     &self,
     app: &AppHandle,
     document: &Document,
-    lines: Range<usize>,
-    known: Option<KnownDto>,
+    ranges: &[Range<usize>],
+    known: Option<&KnownDto>,
     chunks: &[Range<usize>],
   ) -> Vec<LineHighlightsDto> {
     let mut documents = self.lock();
@@ -300,7 +305,7 @@ impl SyntaxStates {
     };
     let started = Instant::now();
     let job = syntax.update(document.buffer());
-    let highlights = syntax.highlights(document.buffer(), lines, known, chunks);
+    let highlights = syntax.highlights(document.buffer(), ranges, known, chunks);
     drop(documents);
     let perf = app.state::<Perf>();
     perf.record("syntax.highlight", started.elapsed());
@@ -324,6 +329,57 @@ impl SyntaxStates {
       spawn_parse(app, document.id(), job);
     }
     tree
+  }
+
+  /// The regions the fold query of `document`'s language finds touching
+  /// the lines in `ranges`, from the tree as it is (none before the first
+  /// parse). `None` if the document has no language or its language has no
+  /// fold query. Called with the editor locked.
+  pub fn fold_regions(
+    &self,
+    app: &AppHandle,
+    document: &Document,
+    ranges: &[Range<usize>],
+  ) -> Option<Vec<Range<usize>>> {
+    let mut documents = self.lock();
+    let syntax = Self::entry(app, &mut documents, document)?;
+    if !syntax.language.has_folds() {
+      return None;
+    }
+    let job = syntax.update(document.buffer());
+    let mut regions = Vec::new();
+    if let Some(tree) = &syntax.tree {
+      for lines in ranges {
+        regions.extend(fold_ranges(tree, document.buffer(), lines.clone())?);
+      }
+    }
+    drop(documents);
+    if let Some(job) = job {
+      spawn_parse(app, document.id(), job);
+    }
+    regions.sort_by(|a, b| a.start.cmp(&b.start).then(b.end.cmp(&a.end)));
+    regions.dedup();
+    Some(regions)
+  }
+
+  /// Whether `document`'s foldable regions are known: its language has no
+  /// fold query (so they come from indentation), or its tree is parsed.
+  /// Called with the editor locked.
+  pub fn folds_ready(&self, app: &AppHandle, document: &Document) -> bool {
+    let mut documents = self.lock();
+    let Some(syntax) = Self::entry(app, &mut documents, document) else {
+      return true;
+    };
+    if !syntax.language.has_folds() {
+      return true;
+    }
+    let job = syntax.update(document.buffer());
+    let ready = syntax.tree.is_some();
+    drop(documents);
+    if let Some(job) = job {
+      spawn_parse(app, document.id(), job);
+    }
+    ready
   }
 
   /// The syntax state of `document`, created or reset for its language
@@ -443,22 +499,21 @@ mod tests {
   fn known(version: Version, lines: Range<usize>) -> Option<KnownDto> {
     Some(KnownDto {
       version: version.get(),
-      start_line: lines.start,
-      end_line: lines.end,
+      ranges: vec![[lines.start, lines.end]],
     })
   }
 
   #[test]
   fn sends_only_highlights_the_client_lacks() {
     let (mut buffer, mut syntax) = parsed("fn a() {}\nfn b() {}\nfn c() {}\n");
-    let first = syntax.highlights(&buffer, 0..4, None, &[0..4]);
+    let first = syntax.highlights(&buffer, &[0..4], None, &[0..4]);
     assert_eq!(first.len(), 3, "the empty last line needs nothing");
     let v1 = buffer.version();
 
     // Unchanged: nothing to send.
     assert!(
       syntax
-        .highlights(&buffer, 0..4, known(v1, 0..4), &[])
+        .highlights(&buffer, &[0..4], known(v1, 0..4).as_ref(), &[])
         .is_empty()
     );
 
@@ -470,24 +525,24 @@ mod tests {
       syntax.update(&buffer).is_none(),
       "small reparse runs inline"
     );
-    let after = syntax.highlights(&buffer, 0..4, known(v1, 0..4), &[1..2]);
+    let after = syntax.highlights(&buffer, &[0..4], known(v1, 0..4).as_ref(), &[1..2]);
     assert_eq!(after.iter().map(|h| h.line).collect::<Vec<_>>(), [1]);
 
     // A view from a client that does not match resends everything.
-    let mismatch = syntax.highlights(&buffer, 0..4, known(v1, 0..4), &[]);
+    let mismatch = syntax.highlights(&buffer, &[0..4], known(v1, 0..4).as_ref(), &[]);
     assert_eq!(mismatch.len(), 4);
   }
 
   #[test]
   fn edits_that_change_later_lines_resend_them() {
     let (mut buffer, mut syntax) = parsed("a();\nb();\n");
-    syntax.highlights(&buffer, 0..3, None, &[0..3]);
+    syntax.highlights(&buffer, &[0..3], None, &[0..3]);
     let v1 = buffer.version();
     buffer
       .apply(&ChangeSet::single(Edit::insert(0, "/*")).expect("valid"))
       .expect("applies");
     syntax.update(&buffer);
-    let after = syntax.highlights(&buffer, 0..3, known(v1, 0..3), &[0..1]);
+    let after = syntax.highlights(&buffer, &[0..3], known(v1, 0..3).as_ref(), &[0..1]);
     let lines: Vec<usize> = after.iter().map(|h| h.line).collect();
     assert_eq!(lines, [0, 1], "line 1 is inside the new comment");
     assert_eq!(after[1].spans, [0, 4, TokenKind::Comment as u32]);

@@ -72,6 +72,11 @@ preserved exactly, and new lines use the file's existing line ending.
 | Indent / outdent line               | Ctrl+] / Ctrl+[, Tab / Shift+Tab | ⌘] / ⌘[, Tab / ⇧Tab      |
 | Toggle line comment                 | Ctrl+/                           | ⌘/                       |
 | Go to matching bracket              | Ctrl+Shift+\                     | ⇧⌘\                      |
+| Fold / unfold                       | Ctrl+Shift+[ / Ctrl+Shift+]      | ⌥⌘[ / ⌥⌘]                |
+| Toggle fold                         | Ctrl+K Ctrl+L                    | ⌘K ⌘L                    |
+| Fold / unfold recursively           | Ctrl+K Ctrl+[ / Ctrl+K Ctrl+]    | ⌘K ⌘[ / ⌘K ⌘]            |
+| Fold all / unfold all               | Ctrl+K Ctrl+0 / Ctrl+K Ctrl+J    | ⌘K ⌘0 / ⌘K ⌘J            |
+| Fold level 1 to 7                   | Ctrl+K Ctrl+1 … Ctrl+K Ctrl+7    | ⌘K ⌘1 … ⌘K ⌘7            |
 | Add cursor above / below / at click | Ctrl+Alt+↑ / ↓, Alt+click        | ⌘⌥↑ / ↓, ⌥click          |
 | Select word / one cursor            | Double-click / Escape            | Double-click / Escape    |
 | Select line / all occurrences       | Ctrl+L / Ctrl+Shift+L            | ⌘L / ⇧⌘L                 |
@@ -84,6 +89,12 @@ With nothing selected, cut and copy take the whole line, and pasting it inserts 
 above the cursor, as in VS Code. Tab indents when the selection spans lines. Toggle Line Comment
 uses the comment syntax the language's extension declares; languages without line comments (HTML,
 CSS) get a block comment around the lines.
+
+Code folds where the language's fold query says (blocks, bodies, long argument lists, comments),
+or by indentation for languages without one. Fold markers appear in the gutter when the pointer
+is over it; click one to fold, or click the ⋯ after a folded line to unfold. A folded region
+moves, copies, and deletes with its first line, and searching or undoing into it unfolds it.
+Ferrite remembers what was folded in each file.
 
 A minimap beside the scrollbar shows the whole document small, in its syntax colors. Click it to
 jump to that part of the file, or drag its slider to scroll. **View: Toggle Minimap** hides or

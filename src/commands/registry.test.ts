@@ -2,6 +2,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { KeyInput } from '../editor/keymap'
 import { fuzzyFilter, fuzzyMatch } from './fuzzy'
 import {
+  chordStart,
+  commandForChord,
   commandForKey,
   executeCommand,
   formatKeybinding,
@@ -73,6 +75,15 @@ describe('keybindings', () => {
     const circumflex = key('ˆ', { altKey: true, shiftKey: true, code: 'KeyI' })
     expect(matchesKeybinding('alt+shift+i', circumflex, true)).toBe(true)
     expect(matchesKeybinding('alt+shift+j', circumflex, true)).toBe(false)
+    // Option+Cmd+[ types "“".
+    const quote = key('“', { altKey: true, metaKey: true, code: 'BracketLeft' })
+    expect(matchesKeybinding('mod+alt+[', quote, true)).toBe(true)
+  })
+
+  it('formats chords as their two key combinations', () => {
+    expect(formatKeybinding('mod+k mod+0', false)).toBe('Ctrl+K Ctrl+0')
+    expect(formatKeybinding('mod+k mod+0', true)).toBe('⌘K ⌘0')
+    expect(matchesKeybinding('mod+k mod+0', key('k', { ctrlKey: true }), false)).toBe(false)
   })
 
   it('formats bindings for display', () => {
@@ -123,6 +134,21 @@ describe('command registry', () => {
     expect(commandForKey(key('h', { ctrlKey: true }), false, false)).toBe(replace)
     expect(commandForKey(key('f', { metaKey: true, altKey: true }), true, false)).toBe(replace)
     expect(commandForKey(key('h', { metaKey: true }), true, false)).toBeUndefined()
+  })
+
+  it('finds commands bound to chords in two steps', () => {
+    const foldAll = command({ id: 'foldAll', keybinding: 'mod+k mod+0', editorFocus: true })
+    const unfoldAll = command({ id: 'unfoldAll', keybinding: 'mod+k mod+j', editorFocus: true })
+    unregister = registerCommands([foldAll, unfoldAll])
+
+    const ctrlK = key('k', { ctrlKey: true })
+    expect(commandForKey(ctrlK, false, true)).toBeUndefined()
+    expect(chordStart(ctrlK, false, false)).toBeUndefined()
+    const first = chordStart(ctrlK, false, true)
+    expect(first).toBe('mod+k')
+    expect(commandForChord(first!, key('0', { ctrlKey: true }), false, true)).toBe(foldAll)
+    expect(commandForChord(first!, key('j', { ctrlKey: true }), false, true)).toBe(unfoldAll)
+    expect(commandForChord(first!, key('j'), false, true)).toBeUndefined()
   })
 
   it('executes commands by id', async () => {

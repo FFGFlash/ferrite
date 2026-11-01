@@ -14,13 +14,13 @@ const size = {
   clientWidth: 590,
 }
 
-function lines(version: number, startLine: number, endLine: number): MinimapView {
+function lines(version: number, startRow: number, endRow: number): MinimapView {
   return {
     documentId: 7,
     version,
-    lineCount: 100,
-    startLine,
-    lines: Array.from({ length: Math.min(endLine, 100) - startLine }, () => [0, 4, 0]),
+    rowCount: 100,
+    startRow,
+    lines: Array.from({ length: Math.min(endRow, 100) - startRow }, () => [0, 4, 0]),
   }
 }
 
@@ -50,7 +50,7 @@ function renderMinimap() {
         <Minimap
           documentId={7}
           version={version}
-          lineCount={100}
+          rowCount={100}
           refreshTick={0}
           scroller={scroller}
           lineHeight={20}

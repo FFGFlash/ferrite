@@ -8,7 +8,8 @@
 //!
 //! A minimap covers many more lines than the editor shows, so it is built
 //! from a [`Snapshot`] taken under the editor lock, and the lock is released
-//! while lines are highlighted.
+//! while lines are highlighted. Like the editor, it shows display rows: the
+//! hidden lines of folded regions are left out.
 
 use std::ops::Range;
 
@@ -24,16 +25,16 @@ pub const MINIMAP_LINE_BYTES: usize = MINIMAP_COLUMNS * 4;
 /// Most lines sent at once.
 pub const MAX_MINIMAP_LINES: usize = 1000;
 
-/// Lines `start_line..start_line + lines.len()` of a document, each as runs
-/// `[start, end, kind, ...]` in visual columns. Kind 0 is text without a
-/// highlight; others are token kinds as in the view's highlights.
+/// Display rows `start_row..start_row + lines.len()` of a document, each as
+/// runs `[start, end, kind, ...]` in visual columns. Kind 0 is text without
+/// a highlight; others are token kinds as in the view's highlights.
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct MinimapDto {
   pub document_id: u64,
   pub version: u64,
-  pub line_count: usize,
-  pub start_line: usize,
+  pub row_count: usize,
+  pub start_row: usize,
   pub lines: Vec<Vec<u32>>,
 }
 
@@ -46,23 +47,41 @@ pub struct Snapshot {
   buffer: TextBuffer,
   /// The syntax tree, edited to match `buffer`.
   syntax: Option<SyntaxTree>,
+  row_count: usize,
+  start_row: usize,
+  /// The visible lines of the rows to draw, as sorted ranges.
+  lines: Vec<Range<usize>>,
 }
 
 impl Snapshot {
-  pub fn of(document: &Document, syntax: Option<SyntaxTree>) -> Self {
+  /// What a minimap of display rows `rows` needs, clamped to the document
+  /// and to [`MAX_MINIMAP_LINES`].
+  pub fn of(document: &Document, syntax: Option<SyntaxTree>, rows: Range<usize>) -> Self {
+    let row_count = document.row_count();
+    let start = rows.start.min(row_count);
+    let end = rows
+      .end
+      .clamp(start, row_count)
+      .min(start + MAX_MINIMAP_LINES);
+    let lines = if start < end {
+      document.visible_lines(document.line_at_row(start)..document.line_at_row(end - 1) + 1)
+    } else {
+      Vec::new()
+    };
     Self {
       document_id: document.id().get(),
       version: document.version().get(),
       tab_size: document.tab_size(),
       buffer: document.buffer().clone(),
       syntax,
+      row_count,
+      start_row: start,
+      lines,
     }
   }
 
-  /// The minimap for `lines`, clamped to the document and to
-  /// [`MAX_MINIMAP_LINES`].
-  pub fn build(&self, lines: Range<usize>) -> MinimapDto {
-    self.build_with(lines, |range| match &self.syntax {
+  pub fn build(&self) -> MinimapDto {
+    self.build_with(|range| match &self.syntax {
       Some(tree) => highlight_lines(tree, &self.buffer, range, MINIMAP_LINE_BYTES),
       None => vec![Vec::new(); range.len()],
     })
@@ -70,30 +89,21 @@ impl Snapshot {
 
   /// [`Self::build`], with `spans` highlighting a range of lines (each cut to
   /// [`MINIMAP_LINE_BYTES`]).
-  fn build_with(
-    &self,
-    lines: Range<usize>,
-    spans: impl FnOnce(Range<usize>) -> Vec<Vec<Span>>,
-  ) -> MinimapDto {
-    let line_count = self.buffer.line_count();
-    let start = lines.start.min(line_count);
-    let end = lines
-      .end
-      .clamp(start, line_count)
-      .min(start + MAX_MINIMAP_LINES);
-    let spans = spans(start..end);
-    let lines = (start..end)
-      .map(|line| {
+  fn build_with(&self, mut spans: impl FnMut(Range<usize>) -> Vec<Vec<Span>>) -> MinimapDto {
+    let mut lines = Vec::new();
+    for range in &self.lines {
+      let spans = spans(range.clone());
+      lines.extend(range.clone().map(|line| {
         let (text, _) = self.buffer.line_prefix(line, MINIMAP_LINE_BYTES);
-        let line_spans = spans.get(line - start).map_or(&[][..], Vec::as_slice);
+        let line_spans = spans.get(line - range.start).map_or(&[][..], Vec::as_slice);
         line_runs(&text, line_spans, self.tab_size)
-      })
-      .collect();
+      }));
+    }
     MinimapDto {
       document_id: self.document_id,
       version: self.version,
-      line_count,
-      start_line: start,
+      row_count: self.row_count,
+      start_row: self.start_row,
       lines,
     }
   }
@@ -135,6 +145,8 @@ fn line_runs(text: &str, spans: &[Span], tab_size: usize) -> Vec<u32> {
 }
 
 #[cfg(test)]
+// Line ranges are naturally single-element arrays here.
+#[allow(clippy::single_range_in_vec_init)]
 mod tests {
   use ferrite_core::{Editor, EditorConfig, EditorOp};
   use ferrite_syntax::TokenKind;
@@ -193,20 +205,40 @@ mod tests {
       .apply(EditorOp::Insert("a\n\tb\n\nc".into()))
       .expect("applies");
 
-    let snapshot = Snapshot::of(document, None);
+    let snapshot = Snapshot::of(document, None, 1..99);
     let mut asked = None;
-    let minimap = snapshot.build_with(1..99, |lines| {
+    let minimap = snapshot.build_with(|lines| {
       asked = Some(lines.clone());
       lines.map(|_| Vec::new()).collect()
     });
     assert_eq!(asked, Some(1..4));
-    assert_eq!(minimap.start_line, 1);
-    assert_eq!(minimap.line_count, 4);
+    assert_eq!(minimap.start_row, 1);
+    assert_eq!(minimap.row_count, 4);
     assert_eq!(minimap.lines, vec![vec![2, 3, 0], vec![], vec![0, 1, 0]]);
 
-    let past_the_end = snapshot.build(10..20);
-    assert_eq!(past_the_end.start_line, 4);
+    let past_the_end = Snapshot::of(document, None, 10..20).build();
+    assert_eq!(past_the_end.start_row, 4);
     assert!(past_the_end.lines.is_empty());
+  }
+
+  #[test]
+  fn leaves_out_folded_lines() {
+    let mut editor = Editor::default();
+    let id = editor.create_untitled();
+    let document = editor.document_mut(id).expect("open");
+    document
+      .apply(EditorOp::Insert(
+        "a
+ b
+ c
+d"
+        .into(),
+      ))
+      .expect("applies");
+    document.set_folded([0..3]);
+    let minimap = Snapshot::of(document, None, 0..10).build();
+    assert_eq!(minimap.row_count, 2);
+    assert_eq!(minimap.lines, vec![vec![0, 1, 0], vec![0, 1, 0]], "a and d");
   }
 
   #[test]
@@ -217,7 +249,7 @@ mod tests {
     document
       .apply(EditorOp::Insert("x\n".repeat(MAX_MINIMAP_LINES * 2)))
       .expect("applies");
-    let minimap = Snapshot::of(document, None).build(0..usize::MAX);
+    let minimap = Snapshot::of(document, None, 0..usize::MAX).build();
     assert_eq!(minimap.lines.len(), MAX_MINIMAP_LINES);
   }
 }

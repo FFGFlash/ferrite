@@ -1,5 +1,5 @@
 import { memo } from 'react'
-import { executeCommand } from '../commands/registry'
+import { executeCommand, pendingChord } from '../commands/registry'
 import type { AppInfo } from '../ipc'
 import type { LanguageStatus } from '../ipc/editor'
 import type { StatusItem } from '../ipc/extensions'
@@ -18,6 +18,7 @@ export const StatusBar = memo(function StatusBar({ appInfo }: StatusBarProps) {
   const { documents, activeId } = useStore(documentsStore)
   const active = documents.find(document => document.id === activeId)
   const items = useStore(statusItemsStore)
+  const chord = useStore(pendingChord)
   const side = (alignment: StatusItem['alignment']) =>
     items
       .filter(item => item.alignment === alignment)
@@ -31,6 +32,11 @@ export const StatusBar = memo(function StatusBar({ appInfo }: StatusBarProps) {
           <span className="statusbar__item">
             Ln {status.line}, Col {status.column}
             {status.selectionCount > 1 && ` (${status.selectionCount} selections)`}
+          </span>
+        )}
+        {chord && (
+          <span className="statusbar__item" role="status">
+            ({chord}) was pressed. Waiting for the second key of the chord…
           </span>
         )}
         {side('left')}

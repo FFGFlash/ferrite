@@ -5,6 +5,7 @@
  * is an offset into the concatenation of those text nodes.
  */
 import type { DecorationView, DiagnosticView, Position, Range, SelectionView } from '../ipc/editor'
+import { rowAtOrAfter, rowOf } from './rows'
 
 /** Width of the selection highlight shown for a selected line break. */
 const LINE_BREAK_WIDTH = 6
@@ -34,7 +35,7 @@ export const EMPTY_OVERLAY: Overlay = {
 }
 
 /** Marks elements inside a line that are not part of its text. */
-const NOT_TEXT = '.editor-view__cut'
+const NOT_TEXT = '.editor-view__cut, .editor-view__folded'
 
 /** The text nodes of a line element, in order. */
 function textNodes(line: Element): Text[] {
@@ -103,21 +104,24 @@ export function columnAt(line: Element, clientX: number, clientY: number): numbe
 }
 
 /**
- * Carets and selection rectangles for the rendered lines, positioned relative
- * to the first rendered line (`startLine`).
+ * Carets and selection rectangles for the rendered lines, which are the
+ * document lines `lineNumbers` (in order), positioned relative to the first.
  */
 export function measureOverlay(
   lines: HTMLElement,
-  startLine: number,
+  lineNumbers: readonly number[],
   selections: readonly SelectionView[],
   matches: readonly Range[],
   lineHeight: number,
   diagnostics: readonly DiagnosticView[] = [],
   decorations: readonly DecorationView[] = [],
 ): Overlay {
-  const count = lines.children.length
-  const lineAt = (line: number) =>
-    line >= startLine && line < startLine + count ? lines.children[line - startLine] : undefined
+  const count = Math.min(lines.children.length, lineNumbers.length)
+  const lineAt = (line: number) => {
+    const row = rowOf(lineNumbers, line)
+    return row >= 0 && row < count ? lines.children[row] : undefined
+  }
+  const topOf = (line: number) => rowOf(lineNumbers, line) * lineHeight
   const overlay: Overlay = {
     carets: [],
     selections: [],
@@ -130,10 +134,12 @@ export function measureOverlay(
   const rectsFor = (from: Position, to: Position): Rect[] => {
     const [start, end] = ordered(from, to)
     const rects: Rect[] = []
-    const first = Math.max(start.line, startLine)
-    const last = Math.min(end.line, startLine + count - 1)
-    for (let line = first; line <= last; line++) {
-      const element = lineAt(line)
+    for (let row = rowAtOrAfter(lineNumbers, start.line); row < count; row++) {
+      const line = lineNumbers[row]!
+      if (line > end.line) {
+        break
+      }
+      const element = lines.children[row]
       if (!element) {
         continue
       }
@@ -143,7 +149,7 @@ export function measureOverlay(
           ? columnX(element, end.column)
           : columnX(element, lineLength(element)) + LINE_BREAK_WIDTH
       if (right > left) {
-        rects.push({ top: (line - startLine) * lineHeight, left, width: right - left })
+        rects.push({ top: row * lineHeight, left, width: right - left })
       }
     }
     return rects
@@ -157,7 +163,7 @@ export function measureOverlay(
     const head = lineAt(selection.head.line)
     if (head) {
       overlay.carets.push({
-        top: (selection.head.line - startLine) * lineHeight,
+        top: topOf(selection.head.line),
         left: columnX(head, selection.head.column),
         width: 0,
         primary: selection.primary,
@@ -179,7 +185,7 @@ export function measureOverlay(
     if (rects.length === 0 && element) {
       // An empty range (e.g. "expected `;`") still gets a short mark.
       const left = columnX(element, start.column)
-      rects.push({ top: (start.line - startLine) * lineHeight, left, width: LINE_BREAK_WIDTH })
+      rects.push({ top: topOf(start.line), left, width: LINE_BREAK_WIDTH })
     }
     overlay.diagnostics.push(...rects.map(rect => ({ ...rect, severity })))
   }

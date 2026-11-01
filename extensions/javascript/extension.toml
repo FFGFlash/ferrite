@@ -19,6 +19,7 @@ name = "JavaScript"
 file_extensions = ["js", "mjs", "cjs", "jsx"]
 grammar = "grammars/tree-sitter-javascript.wasm"
 highlights = "queries/highlights.scm"
+folds = "queries/folds.scm"
 line_comment = "//"
 block_comment = ["/*", "*/"]
 

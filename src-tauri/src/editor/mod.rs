@@ -4,6 +4,8 @@
 
 mod commands;
 mod counts;
+pub(crate) mod fold_memory;
+mod folding;
 mod minimap;
 pub(crate) mod protocol;
 mod syntax;
@@ -35,6 +37,8 @@ pub struct EditorState {
   pub(crate) counts: counts::MatchCounts,
   /// Syntax trees and highlighting state.
   pub(crate) syntax: syntax::SyntaxStates,
+  /// Folded regions remembered for documents, until they are restored.
+  pub(crate) pending_folds: fold_memory::PendingFolds,
   /// The text last copied as whole lines (copy with nothing selected), so
   /// pasting it can insert whole lines too.
   copied_lines: Mutex<Option<String>>,
@@ -137,6 +141,7 @@ pub fn open_startup_files(app: &AppHandle, files: Vec<PathBuf>, crashed: Option<
           let id = editor.open(path.clone(), loaded);
           tracing::info!(document = %id, path = %path.display(), "opened file at startup");
           editor.document(id).ok().map(|document| {
+            fold_memory::recall(&task_app, document);
             task_app
               .state::<crate::extensions::ExtensionsState>()
               .sync(document);

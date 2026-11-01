@@ -1,5 +1,5 @@
 //! Window and session state restored on the next launch: the open folder,
-//! open files, and the frontend's layout. Stored as JSON in the app's local
+//! open files, files' folded regions, and the frontend's layout. Stored as JSON in the app's local
 //! data directory and written atomically whenever it changes.
 
 use std::path::PathBuf;
@@ -10,6 +10,7 @@ use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Manager, State};
 
 use crate::editor::EditorState;
+use crate::editor::fold_memory::FileFolds;
 use crate::error::CommandError;
 
 const FILE_NAME: &str = "state.json";
@@ -22,6 +23,8 @@ pub struct UiState {
   pub workspace: Option<PathBuf>,
   pub open_files: Vec<PathBuf>,
   pub active_file: Option<PathBuf>,
+  /// Files' folded regions, most recently recorded first.
+  pub folds: Vec<FileFolds>,
   /// Owned by the frontend (side bar width, active view, ...).
   pub layout: serde_json::Value,
 }

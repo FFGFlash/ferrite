@@ -90,8 +90,7 @@ fn viewport(c: &mut Criterion) {
 
   let known = KnownLines {
     version: document.version(),
-    start: wanted.start,
-    end: wanted.end,
+    ranges: vec![wanted.clone()],
   };
   let offset = document.buffer().line_start(middle + 10);
   document
@@ -105,7 +104,7 @@ fn viewport(c: &mut Criterion) {
     .apply(EditorOp::Insert("x".into()))
     .expect("applies");
   group.bench_function("after_one_keystroke", |b| {
-    b.iter(|| document.viewport_update(Some(black_box(known)), wanted.clone(), 1000))
+    b.iter(|| document.viewport_update(Some(black_box(&known)), wanted.clone(), 1000))
   });
   group.finish();
 }

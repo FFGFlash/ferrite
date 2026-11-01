@@ -19,6 +19,7 @@ name = "TypeScript"
 file_extensions = ["ts", "mts", "cts"]
 grammar = "grammars/tree-sitter-typescript.wasm"
 highlights = "queries/typescript/highlights.scm"
+folds = "queries/typescript/folds.scm"
 line_comment = "//"
 block_comment = ["/*", "*/"]
 
@@ -30,6 +31,7 @@ file_extensions = ["tsx"]
 grammar = "grammars/tree-sitter-tsx.wasm"
 grammar_name = "tsx"
 highlights = "queries/tsx/highlights.scm"
+folds = "queries/tsx/folds.scm"
 line_comment = "//"
 block_comment = ["/*", "*/"]
 

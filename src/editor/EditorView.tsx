@@ -59,6 +59,7 @@ import {
   type Overlay,
   type Rect,
 } from './measure'
+import { ChevronDown, ChevronRight } from 'lucide-react'
 import { openContextMenu, type MenuEntry } from '../components/contextMenuState'
 import { openPalette } from '../components/paletteState'
 import { getCommand, primaryKeybinding } from '../commands/registry'
@@ -70,6 +71,7 @@ import {
 } from '../state/extensions'
 import { themeKind } from '../themes/theme'
 import { decorationRectStyle, textOverlays } from './decorations'
+import { displayRow, lineAtRow, rowOf } from './rows'
 import { LINK_CLASS, segments, type TextOverlay } from './segments'
 import { EditorSession, ipcTransport, type EditorTransport } from './session'
 import './EditorView.css'
@@ -260,8 +262,10 @@ export function EditorView({ documentId, title, transport = ipcTransport }: Edit
       lineCount: () => viewRef.current?.lineCount ?? 0,
       scrollToLine: line => {
         const scroller = scrollRef.current
+        const current = viewRef.current
         if (scroller) {
-          scroller.scrollTop = line * lineHeightRef.current
+          const row = current ? displayRow(current, line) : line
+          scroller.scrollTop = row * lineHeightRef.current
         }
       },
       scrollBy: lines => {
@@ -309,6 +313,14 @@ export function EditorView({ documentId, title, transport = ipcTransport }: Edit
 
   useEffect(() => () => window.clearTimeout(hoverTimerRef.current), [])
 
+  // Folding changes which lines the minimap shows without an edit.
+  const foldGeneration = view?.foldGeneration
+  useEffect(() => {
+    if (foldGeneration !== undefined) {
+      setRefreshTick(tick => tick + 1)
+    }
+  }, [foldGeneration])
+
   useLayoutEffect(() => {
     const lines = linesRef.current
     const scroller = scrollRef.current
@@ -317,7 +329,7 @@ export function EditorView({ documentId, title, transport = ipcTransport }: Edit
     }
     const measured = measureOverlay(
       lines,
-      view.startLine,
+      view.lineNumbers,
       view.selections,
       view.search?.matches ?? [],
       lineHeight,
@@ -349,7 +361,7 @@ export function EditorView({ documentId, title, transport = ipcTransport }: Edit
       const caret = measured.carets.find(c => c.primary)
       reveal(
         scroller,
-        view.primary.position.line * lineHeight,
+        view.primary.row * lineHeight,
         lineHeight,
         caret?.left,
         (gutterRef.current?.offsetWidth ?? 0) + (minimapVisible ? MINIMAP_WIDTH : 0),
@@ -365,7 +377,7 @@ export function EditorView({ documentId, title, transport = ipcTransport }: Edit
     const primary = primarySelection()
     let prefill: string | null = null
     if (current && primary && primary.anchor.line === primary.head.line) {
-      const text = current.lines[primary.head.line - current.startLine]?.text
+      const text = current.lines[rowOf(current.lineNumbers, primary.head.line)]?.text
       const from = Math.min(primary.anchor.column, primary.head.column)
       const to = Math.max(primary.anchor.column, primary.head.column)
       if (text !== undefined && to > from) {
@@ -575,16 +587,15 @@ export function EditorView({ documentId, title, transport = ipcTransport }: Edit
     }
     const top = lines.getBoundingClientRect().top
     const row = Math.floor((clientY - top) / lineHeight)
-    const line = current.startLine + row
-    if (line < 0) {
+    if (current.startRow + row < 0) {
       return { line: 0, column: 0 }
     }
-    if (line >= current.lineCount) {
+    if (current.startRow + row >= current.rowCount) {
       return { line: current.lineCount - 1, column: END_OF_LINE }
     }
-    const element = lines.children[line - current.startLine]
+    const element = lines.children[row]
     const column = element ? columnAt(element, clientX, top + (row + 0.5) * lineHeight) : 0
-    return { line, column }
+    return { line: lineAtRow(current, row), column }
   }
 
   /**
@@ -599,7 +610,7 @@ export function EditorView({ documentId, title, transport = ipcTransport }: Edit
       return false
     }
     const textBottom =
-      lines.getBoundingClientRect().top + (current.lineCount - current.startLine) * lineHeight
+      lines.getBoundingClientRect().top + (current.rowCount - current.startRow) * lineHeight
     return clientY >= textBottom
   }
 
@@ -613,6 +624,11 @@ export function EditorView({ documentId, title, transport = ipcTransport }: Edit
     closeCompletion()
     const position = positionAt(event.clientX, event.clientY)
     if (!position) {
+      return
+    }
+    // The marker after a folded line unfolds it.
+    if ((event.target as Element).closest('.editor-view__folded')) {
+      dispatch({ type: 'toggleFoldAt', line: position.line })
       return
     }
     if (definitionModifier(event)) {
@@ -658,9 +674,12 @@ export function EditorView({ documentId, title, transport = ipcTransport }: Edit
     if (!frame || !lines || !current) {
       return null
     }
+    const row = rowOf(current.lineNumbers, line)
+    if (row < 0) {
+      return null
+    }
     const frameBox = frame.getBoundingClientRect()
-    const lineTop =
-      lines.getBoundingClientRect().top - frameBox.top + (line - current.startLine) * lineHeight
+    const lineTop = lines.getBoundingClientRect().top - frameBox.top + row * lineHeight
     const x = Math.max(0, Math.min(left, frameBox.width - COMPLETION_WIDTH))
     const fitsBelow = lineTop + lineHeight + height <= frameBox.height
     return fitsBelow || lineTop < height
@@ -719,7 +738,7 @@ export function EditorView({ documentId, title, transport = ipcTransport }: Edit
     hoverTimerRef.current = window.setTimeout(() => {
       // Only over text, not the empty space after a line.
       const lines = linesRef.current
-      const element = lines?.children[position.line - (viewRef.current?.startLine ?? 0)]
+      const element = lines?.children[rowOf(viewRef.current?.lineNumbers ?? [], position.line)]
       if (!lines || !element) {
         return
       }
@@ -833,8 +852,9 @@ export function EditorView({ documentId, title, transport = ipcTransport }: Edit
     if (!position || !lines || !current || belowText(clientY)) {
       return null
     }
-    const element = lines.children[position.line - current.startLine]
-    const text = current.lines[position.line - current.startLine]?.text
+    const row = rowOf(current.lineNumbers, position.line)
+    const element = lines.children[row]
+    const text = current.lines[row]?.text
     if (!element || text === undefined) {
       return null
     }
@@ -976,7 +996,7 @@ export function EditorView({ documentId, title, transport = ipcTransport }: Edit
       ? visibleCompletions(
           completion.items,
           view.primary.position,
-          view.lines[cursorLine - view.startLine]?.text ?? '',
+          view.lines[rowOf(view.lineNumbers, cursorLine)]?.text ?? '',
         )
       : null
   const completionLeft =
@@ -992,8 +1012,12 @@ export function EditorView({ documentId, title, transport = ipcTransport }: Edit
         )
       : null
 
-  const startLine = view?.startLine ?? 0
+  const startRow = view?.startRow ?? 0
+  const rowCount = view?.rowCount ?? 1
   const lineCount = view?.lineCount ?? 1
+  const lineNumbers = view?.lineNumbers ?? NO_LINES
+  const foldedLines = useMemo(() => new Set(view?.folded), [view])
+  const foldableLines = useMemo(() => new Set(view?.foldable), [view])
   const extensions = useStore(extensionsStore)
   const kind = useStore(themeKind)
   const types = useMemo(() => decorationTypes(extensions), [extensions])
@@ -1004,7 +1028,7 @@ export function EditorView({ documentId, title, transport = ipcTransport }: Edit
             view.decorations,
             types,
             kind,
-            view.startLine,
+            view.lineNumbers,
             view.lines.map(line => line.text.length),
           )
         : new Map<number, TextOverlay[]>(),
@@ -1012,7 +1036,20 @@ export function EditorView({ documentId, title, transport = ipcTransport }: Edit
   )
   const primary = primaryCaret
   const activeLine = view?.primary.position.line
-  const layerStyle = { transform: `translateY(${startLine * lineHeight}px)` }
+  const layerStyle = { transform: `translateY(${startRow * lineHeight}px)` }
+
+  /** A click on a fold marker in the gutter folds or unfolds its region. */
+  const onGutterMouseDown = (event: ReactMouseEvent<HTMLDivElement>) => {
+    if (event.button !== 0) {
+      return
+    }
+    event.preventDefault()
+    focusInput()
+    const marker = (event.target as Element).closest<HTMLElement>('[data-fold-line]')
+    if (marker?.dataset.foldLine !== undefined) {
+      dispatch({ type: 'toggleFoldAt', line: Number(marker.dataset.foldLine) })
+    }
+  }
 
   return (
     <div className="editor-view-frame" ref={frameRef}>
@@ -1040,25 +1077,42 @@ export function EditorView({ documentId, title, transport = ipcTransport }: Edit
         <div
           className="editor-view__sizer"
           style={{
-            minHeight: `max(${lineCount * lineHeight}px, 100% + ${(lineCount - 1) * lineHeight}px)`,
+            minHeight: `max(${rowCount * lineHeight}px, 100% + ${(rowCount - 1) * lineHeight}px)`,
           }}
         >
           <div
             className="editor-view__gutter"
             ref={gutterRef}
-            style={{ width: `calc(${String(lineCount).length}ch + 32px)` }}
+            style={{ width: `calc(${String(lineCount).length}ch + 32px + 20px)` }}
             aria-hidden="true"
+            onMouseDown={onGutterMouseDown}
           >
             <div style={layerStyle}>
-              {view?.lines.map((_, index) => (
-                <div
-                  key={startLine + index}
-                  className="editor-view__line-number"
-                  data-active={startLine + index === activeLine || undefined}
-                >
-                  {startLine + index + 1}
-                </div>
-              ))}
+              {lineNumbers.map(line => {
+                const folded = foldedLines.has(line)
+                const foldable = folded || foldableLines.has(line)
+                return (
+                  <div
+                    key={line}
+                    className="editor-view__line-number"
+                    data-active={line === activeLine || undefined}
+                  >
+                    {line + 1}
+                    <span
+                      className="editor-view__fold"
+                      data-fold-line={foldable ? line : undefined}
+                      data-folded={folded || undefined}
+                    >
+                      {foldable &&
+                        (folded ? (
+                          <ChevronRight size={14} strokeWidth={1.75} />
+                        ) : (
+                          <ChevronDown size={14} strokeWidth={1.75} />
+                        ))}
+                    </span>
+                  </div>
+                )
+              })}
             </div>
           </div>
           <div
@@ -1119,18 +1173,20 @@ export function EditorView({ documentId, title, transport = ipcTransport }: Edit
                 ))}
               </div>
               <div className="editor-view__lines" ref={linesRef}>
-                {view?.lines.map((line, index) => (
-                  <Line
-                    key={startLine + index}
-                    line={line}
-                    link={
-                      link?.line === startLine + index && link.version === view.version
-                        ? link
-                        : null
-                    }
-                    overlays={lineOverlays.get(startLine + index) ?? NO_OVERLAYS}
-                  />
-                ))}
+                {view?.lines.map((line, index) => {
+                  const lineNumber = lineNumbers[index]!
+                  return (
+                    <Line
+                      key={lineNumber}
+                      line={line}
+                      link={
+                        link?.line === lineNumber && link.version === view.version ? link : null
+                      }
+                      overlays={lineOverlays.get(lineNumber) ?? NO_OVERLAYS}
+                      folded={foldedLines.has(lineNumber)}
+                    />
+                  )
+                })}
               </div>
               <div className="editor-view__carets" aria-hidden="true">
                 {overlay.carets.map((caret, index) => (
@@ -1150,7 +1206,7 @@ export function EditorView({ documentId, title, transport = ipcTransport }: Edit
                 style={
                   mirror.line >= 0
                     ? {
-                        top: (mirror.line - startLine) * lineHeight,
+                        top: rowOf(lineNumbers, mirror.line) * lineHeight,
                         left: 0,
                         width: '100%',
                         height: mirror.value.split('\n').length * lineHeight,
@@ -1180,7 +1236,7 @@ export function EditorView({ documentId, title, transport = ipcTransport }: Edit
         <Minimap
           documentId={documentId}
           version={view.version}
-          lineCount={view.lineCount}
+          rowCount={view.rowCount}
           refreshTick={refreshTick}
           scroller={scrollRef}
           lineHeight={lineHeight}
@@ -1206,6 +1262,7 @@ function earlier(a: Position, b: Position): Position {
 }
 
 const NO_OVERLAYS: readonly TextOverlay[] = []
+const NO_LINES: readonly number[] = []
 
 /** The input's content when nothing is mirrored: empty, at the caret. */
 const EMPTY_MIRROR: InputMirror = {
@@ -1234,9 +1291,11 @@ interface LineProps {
   link: Word | null
   /** Decoration styles on this line. */
   overlays: readonly TextOverlay[]
+  /** Whether the region starting on this line is folded. */
+  folded: boolean
 }
 
-const Line = memo(function Line({ line, link, overlays }: LineProps) {
+const Line = memo(function Line({ line, link, overlays, folded }: LineProps) {
   const all = link
     ? [...overlays, { from: link.from, to: link.to, className: LINK_CLASS }]
     : overlays
@@ -1244,8 +1303,18 @@ const Line = memo(function Line({ line, link, overlays }: LineProps) {
     line.spans.length === 0 && all.length === 0
       ? line.text
       : highlighted(line.text, line.spans, all)
+  const marker = folded && (
+    <span className="editor-view__folded" title="Unfold">
+      ⋯
+    </span>
+  )
   if (line.fullLength === null) {
-    return <div className="editor-view__line">{text}</div>
+    return (
+      <div className="editor-view__line">
+        {text}
+        {marker}
+      </div>
+    )
   }
   // A very long line shortened for display; the document keeps all of it.
   return (
@@ -1257,6 +1326,7 @@ const Line = memo(function Line({ line, link, overlays }: LineProps) {
       >
         …
       </span>
+      {marker}
     </div>
   )
 })
@@ -1298,10 +1368,10 @@ function visibleRange(scroller: HTMLElement, lineHeight: number): [number, numbe
 
 function viewportFor(scroller: HTMLElement | null, lineHeight: number): Viewport {
   if (!scroller) {
-    return { startLine: 0, endLine: OVERSCAN * 2 }
+    return { startRow: 0, endRow: OVERSCAN * 2 }
   }
   const [first, last] = visibleRange(scroller, lineHeight)
-  return { startLine: Math.max(0, first - OVERSCAN), endLine: last + OVERSCAN }
+  return { startRow: Math.max(0, first - OVERSCAN), endRow: last + OVERSCAN }
 }
 
 /** Whether `view` already contains every visible line. */
@@ -1311,7 +1381,7 @@ function covers(view: View | null, scroller: HTMLElement, lineHeight: number): b
   }
   const [first, last] = visibleRange(scroller, lineHeight)
   return (
-    view.startLine <= first && view.startLine + view.lines.length >= Math.min(last, view.lineCount)
+    view.startRow <= first && view.startRow + view.lines.length >= Math.min(last, view.rowCount)
   )
 }
 

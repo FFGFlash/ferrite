@@ -13,6 +13,7 @@
  * and the mirror follows the view the backend returns.
  */
 import type { EditorView, Position } from '../ipc/editor'
+import { rowAtOrAfter, rowOf } from './rows'
 
 /** At most this many lines (around the cursor) are mirrored. */
 export const MIRROR_MAX_LINES = 100
@@ -33,7 +34,8 @@ const before = (a: Position, b: Position) =>
 
 /**
  * The mirror for `view`, or `null` when the cursor's line isn't in the
- * view or is too long.
+ * view or is too long. A selection across a folded region mirrors only the
+ * cursor's line.
  */
 export function inputMirror(view: EditorView): InputMirror | null {
   const primary = view.selections.find(selection => selection.primary)
@@ -41,14 +43,26 @@ export function inputMirror(view: EditorView): InputMirror | null {
     return null
   }
   const { anchor, head } = primary
-  const lastInView = view.startLine + view.lines.length - 1
-  if (head.line < view.startLine || head.line > lastInView) {
+  const headRow = rowOf(view.lineNumbers, head.line)
+  if (headRow < 0) {
     return null
   }
   const reach = Math.floor(MIRROR_MAX_LINES / 2)
-  const first = Math.max(view.startLine, Math.min(anchor.line, head.line), head.line - reach)
-  const last = Math.min(lastInView, Math.max(anchor.line, head.line), head.line + reach)
-  const lines = view.lines.slice(first - view.startLine, last - view.startLine + 1)
+  let firstRow = rowAtOrAfter(
+    view.lineNumbers,
+    Math.max(Math.min(anchor.line, head.line), head.line - reach),
+  )
+  let lastRow =
+    rowAtOrAfter(
+      view.lineNumbers,
+      Math.min(Math.max(anchor.line, head.line), head.line + reach) + 1,
+    ) - 1
+  if (view.lineNumbers[lastRow]! - view.lineNumbers[firstRow]! !== lastRow - firstRow) {
+    firstRow = lastRow = headRow
+  }
+  const first = view.lineNumbers[firstRow]!
+  const last = view.lineNumbers[lastRow]!
+  const lines = view.lines.slice(firstRow, lastRow + 1)
   if (lines.some(line => line.fullLength !== null || line.text.length > MIRROR_MAX_LINE_LENGTH)) {
     return null
   }

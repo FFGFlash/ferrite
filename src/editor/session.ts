@@ -104,10 +104,7 @@ export class EditorSession {
   }
 
   setViewport(viewport: Viewport): void {
-    if (
-      viewport.startLine === this.viewport.startLine &&
-      viewport.endLine === this.viewport.endLine
-    ) {
+    if (viewport.startRow === this.viewport.startRow && viewport.endRow === this.viewport.endRow) {
       return
     }
     this.viewport = viewport
@@ -227,7 +224,7 @@ export class EditorSession {
       return
     }
     this.cache = cache
-    this.onView({ ...wire, lines: cache.lines })
+    this.onView({ ...wire, lines: cache.lines, lineNumbers: cache.lineNumbers })
   }
 
   private resolveIdle(): void {

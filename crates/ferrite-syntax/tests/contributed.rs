@@ -25,6 +25,7 @@ fn definition(id: &str, name: &str, injections: bool) -> LanguageDefinition {
     grammar_name: id.to_owned(),
     highlights: dir.join(format!("queries/{id}/highlights.scm")),
     injections: injections.then(|| dir.join(format!("queries/{id}/injections.scm"))),
+    folds: None,
   }
 }
 
@@ -39,6 +40,7 @@ fn javascript() -> LanguageDefinition {
     grammar_name: "javascript".into(),
     highlights: dir.join("queries/highlights.scm"),
     injections: None,
+    folds: None,
   }
 }
 

@@ -1,0 +1,28 @@
+; Folding regions for Python. Each capture's first line stays visible when
+; it is folded; a last line that closes it (like `)`) stays visible too.
+[
+  (function_definition)
+  (class_definition)
+  (if_statement)
+  (elif_clause)
+  (else_clause)
+  (for_statement)
+  (while_statement)
+  (try_statement)
+  (except_clause)
+  (finally_clause)
+  (with_statement)
+  (match_statement)
+  (case_clause)
+  (argument_list)
+  (parameters)
+  (list)
+  (dictionary)
+  (set)
+  (tuple)
+  (list_comprehension)
+  (dictionary_comprehension)
+  (set_comprehension)
+  (generator_expression)
+  (string)
+] @fold

@@ -428,6 +428,39 @@ export const builtinCommands: Command[] = [
   editorOp('editor.jumpToBracket', 'Go', 'Go to Bracket', 'mod+shift+\\', {
     type: 'jumpToBracket',
   }),
+  editorOp(
+    'editor.fold',
+    'View',
+    'Fold',
+    { default: 'mod+shift+[', mac: 'mod+alt+[' },
+    {
+      type: 'fold',
+    },
+  ),
+  editorOp(
+    'editor.unfold',
+    'View',
+    'Unfold',
+    { default: 'mod+shift+]', mac: 'mod+alt+]' },
+    {
+      type: 'unfold',
+    },
+  ),
+  editorOp('editor.toggleFold', 'View', 'Toggle Fold', 'mod+k mod+l', { type: 'toggleFold' }),
+  editorOp('editor.foldRecursively', 'View', 'Fold Recursively', 'mod+k mod+[', {
+    type: 'foldRecursively',
+  }),
+  editorOp('editor.unfoldRecursively', 'View', 'Unfold Recursively', 'mod+k mod+]', {
+    type: 'unfoldRecursively',
+  }),
+  editorOp('editor.foldAll', 'View', 'Fold All', 'mod+k mod+0', { type: 'foldAll' }),
+  editorOp('editor.unfoldAll', 'View', 'Unfold All', 'mod+k mod+j', { type: 'unfoldAll' }),
+  ...[1, 2, 3, 4, 5, 6, 7].map(level =>
+    editorOp(`editor.foldLevel${level}`, 'View', `Fold Level ${level}`, `mod+k mod+${level}`, {
+      type: 'foldLevel',
+      level,
+    }),
+  ),
   {
     id: 'editor.scrollLineUp',
     category: 'View',

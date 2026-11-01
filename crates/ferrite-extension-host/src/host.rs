@@ -915,6 +915,7 @@ impl ExtensionHost {
             grammar: dir.join(&language.grammar),
             highlights: dir.join(&language.highlights),
             injections: language.injections.as_ref().map(|path| dir.join(path)),
+            folds: language.folds.as_ref().map(|path| dir.join(path)),
             ..language.clone()
           })
       })

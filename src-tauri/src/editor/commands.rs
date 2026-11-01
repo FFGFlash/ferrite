@@ -21,6 +21,7 @@ use super::protocol::{
   DocumentSummary, EditorView, KnownDto, MAX_OPS_PER_BATCH, OpContext, OpDto, SearchQueryDto,
   SearchView, Viewport, same_text,
 };
+use super::{fold_memory, folding};
 use crate::backups::BackupState;
 use crate::dialogs::{self, UnsavedChoice};
 use crate::error::CommandError;
@@ -120,7 +121,9 @@ pub async fn document_close(window: WebviewWindow, id: u64) -> Result<bool, Comm
     }
   }
   let state = window.state::<EditorState>();
-  state.lock().close(id)?;
+  let closed = state.lock().close(id)?;
+  fold_memory::remember(window.app_handle(), &closed);
+  fold_memory::forget(window.app_handle(), id);
   window.state::<BackupState>().forget(id);
   state.counts.forget(id);
   state.syntax.forget(id);
@@ -132,12 +135,13 @@ pub async fn document_close(window: WebviewWindow, id: u64) -> Result<bool, Comm
 }
 
 /// Syncs the document with its language server and builds a view,
-/// including find matches when `search` is given, syntax highlights, and
-/// diagnostics. Match counts for large documents and syntax parses that take
-/// too long are scheduled in the background.
+/// including find matches when `search` is given, syntax highlights, fold
+/// markers, and diagnostics. Match counts for large documents and syntax
+/// parses that take too long are scheduled in the background. Folds
+/// remembered for the document are restored first, once they can be.
 fn build_view(
   app: &AppHandle,
-  document: &Document,
+  document: &mut Document,
   viewport: Viewport,
   known: Option<KnownDto>,
   search: Option<SearchQueryDto>,
@@ -145,13 +149,15 @@ fn build_view(
   let state = app.state::<EditorState>();
   let lsp = app.state::<LspState>();
   let extensions = app.state::<ExtensionsState>();
+  fold_memory::restore(app, document);
+  let document = &*document;
   lsp.sync(app, document);
   extensions.sync(document);
   app.state::<BackupState>().touch();
   let mut view = EditorView::of(
     document,
     viewport,
-    known,
+    known.as_ref(),
     |start, end| {
       let query = SearchQuery::from(search?);
       let counted = state.counts.get(document.id());
@@ -161,8 +167,18 @@ fn build_view(
       }
       Some(view)
     },
-    |lines, chunks| state.syntax.highlights(app, document, lines, known, chunks),
+    |ranges, chunks| {
+      state
+        .syntax
+        .highlights(app, document, ranges, known.as_ref(), chunks)
+    },
   );
+  let visible: Vec<_> = view
+    .visible
+    .iter()
+    .map(|&[start, end]| start..end)
+    .collect();
+  view.foldable = folding::foldable_lines(app, document, &visible);
   let lines = view.start_line..view.end_line;
   (view.diagnostics, view.language) = lsp.view(app, document, lines.clone());
   view.decorations = extensions.add_to_view(
@@ -188,20 +204,21 @@ pub fn editor_view(
   search: Option<SearchQueryDto>,
 ) -> Result<EditorView, CommandError> {
   let _timer = perf.metrics.time("editor.view");
-  let editor = state.lock();
-  let document = editor.document(DocumentId::from_raw(id))?;
+  let mut editor = state.lock();
+  let document = editor.document_mut(DocumentId::from_raw(id))?;
   Ok(build_view(&app, document, viewport, known, search))
 }
 
-/// The minimap for lines `start_line..end_line`, clamped to the document and
-/// to `MAX_MINIMAP_LINES`. Runs on a worker thread, and highlights from a
-/// snapshot after releasing the editor lock, so editing never waits for it.
+/// The minimap for display rows `start_row..end_row`, clamped to the
+/// document and to `MAX_MINIMAP_LINES`. Runs on a worker thread, and
+/// highlights from a snapshot after releasing the editor lock, so editing
+/// never waits for it.
 #[tauri::command]
 pub async fn editor_minimap(
   app: AppHandle,
   id: u64,
-  start_line: usize,
-  end_line: usize,
+  start_row: usize,
+  end_row: usize,
 ) -> Result<MinimapDto, CommandError> {
   tauri::async_runtime::spawn_blocking(move || {
     let started = std::time::Instant::now();
@@ -209,11 +226,15 @@ pub async fn editor_minimap(
     let snapshot = {
       let editor = state.lock();
       let document = editor.document(DocumentId::from_raw(id))?;
-      Snapshot::of(document, state.syntax.tree(&app, document))
+      Snapshot::of(
+        document,
+        state.syntax.tree(&app, document),
+        start_row..end_row,
+      )
     };
     let perf = app.state::<Perf>();
     perf.record("editor.minimap.lock", started.elapsed());
-    let minimap = snapshot.build(start_line..end_line);
+    let minimap = snapshot.build();
     perf.record("editor.minimap", started.elapsed());
     Ok(minimap)
   })
@@ -245,13 +266,22 @@ pub fn editor_apply(
   }
   let mut editor = state.lock();
   let document = editor.document_mut(DocumentId::from_raw(id))?;
-  let context = op_context(&app, &state, document, &ops);
+  let mut context = op_context(&app, &state, document, &ops);
+  let changes_folds = ops.iter().any(OpDto::changes_folds);
   for op in ops {
+    // Looked up for each fold operation, as the ops before it may have
+    // moved the cursors.
+    if let Some(scope) = folding::scope(&op, document) {
+      context.folds = folding::regions(&app, document, scope);
+    }
     let op = op.into_core(document.buffer(), &context);
     match document.apply(op) {
       Ok(_) | Err(CoreError::Search(_)) => {}
       Err(error) => return Err(error.into()),
     }
+  }
+  if changes_folds {
+    fold_memory::remember(&app, document);
   }
   Ok(build_view(&app, document, viewport, known, search))
 }
@@ -393,6 +423,7 @@ async fn open_path(app: &AppHandle, path: &Path) -> Result<DocumentSummary, Comm
   let id = editor.open(path.clone(), loaded);
   tracing::info!(document = %id, path = %path.display(), bytes, "opened file");
   let document = editor.document(id)?;
+  fold_memory::recall(app, document);
   app.state::<ExtensionsState>().sync(document);
   let summary = DocumentSummary::of(document);
   drop(editor);
@@ -480,6 +511,7 @@ async fn save(
     let document = editor.document_mut(id)?;
     document.mark_saved(&point, saved_path.clone(), stamp);
     window.state::<LspState>().saved(document);
+    fold_memory::remember(window.app_handle(), document);
     tracing::info!(document = %id, path = %path.display(), bytes = point.snapshot.len(), "saved file");
     DocumentSummary::of(document)
   };

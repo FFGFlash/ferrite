@@ -130,6 +130,13 @@ See [ADR 0002](adr/0002-text-model-and-editor-protocol.md) for the reasoning.
   bracket, so brackets in strings and comments count.
 - **Cursor undo** keeps up to 100 earlier selections, each tagged with the text version; editing
   the text makes them stale.
+- **Folding** (`folds.rs`, [ADR 0015](adr/0015-code-folding.md)) keeps the folded regions as
+  byte offsets that follow edits. The fold operations take the document's foldable regions as line
+  ranges from the caller: the language's fold query (`ferrite_syntax::fold_ranges`) or
+  indentation (`Document::indentation_folds`). Display rows skip hidden lines. Up and Down count
+  rows, other movement steps over hidden lines, and any other operation that leaves a selection
+  in hidden lines unfolds their region. Line operations take a folded region with its first
+  line.
 - **Find** compiles a `SearchQuery` (literal or regex; case-sensitive; whole word) with
   `regex-cursor`, which searches the rope's chunks directly without copying the text. `^`/`$`
   match per line, including before CRLF. Counts stop at 20,000 matches and are reported as
@@ -294,8 +301,10 @@ editor-only keys. One capture-phase listener runs bound commands. While a termin
 only commands flagged `terminal` (the palette, Go to File, showing views, switching tabs,
 settings, terminal commands) run; other keys go to the shell. Bindings with Shift and
 punctuation (`` ctrl+shift+` ``) also match by the physical key, since the browser reports the
-shifted character, as do bindings with Alt and a letter, since Option changes the character on
-macOS. The **command palette** lists
+shifted character, as do bindings with Alt and a letter or punctuation, since Option changes the
+character on macOS. A binding can be a **chord** of two key combinations (`mod+k mod+0`): the
+first key press waits (the status bar says so), and the next one runs the command or cancels the
+chord. The **command palette** lists
 enabled commands with their shortcuts (`>`), finds files (no prefix), and goes to a line (`:`).
 Editing keys that need the editor's textarea (arrows, Backspace, clipboard) stay in
 `editor/keymap.ts`. Extension commands, declared in their manifests, are registered into the
@@ -336,10 +345,12 @@ viewport:
 
 ```text
 editor_apply(id, ops[], viewport, known?, search?) → EditorView
-known      = { version, startLine, endLine }          lines the client holds
-EditorView = { version, lineCount, startLine, endLine,
+viewport   = { startRow, endRow }                      display rows (folded lines skipped)
+known      = { version, ranges: [[start, end]] }       lines the client holds
+EditorView = { version, lineCount, rowCount, startRow, startLine, endLine,
+               visible: [[start, end]], folded[], foldable[], foldGeneration,
                lines: { base, splices[], chunks[{ start, lines[] }] },
-               selections[], selectionCount, primary: { position, visualColumn }, dirty,
+               selections[], selectionCount, primary: { position, visualColumn, row }, dirty,
                search?: { matches[] (visible only), total | null, truncated, current, error },
                highlights: [{ line, spans: [start, end, kind, ...] }]  changed lines only,
                diagnostics: [{ start, end, severity }]                  visible lines,
@@ -353,6 +364,10 @@ EditorView = { version, lineCount, startLine, endLine,
 - `EditorSession` (`src/editor/session.ts`) keeps at most one request in flight. Operations
   issued in the meantime are sent together as the next batch, so ordering is preserved and fast
   typing costs few round trips. Consecutive drag positions collapse to the latest one.
+- **Viewports are display rows.** Lines in folded regions have no row. A view covers the
+  `visible` line ranges of its rows, and the client places each line by its row. `folded` and
+  `foldable` list the visible lines with gutter fold markers. `foldGeneration` changes whenever
+  the folded regions do.
 - **Views are incremental.** The viewport is the visible lines plus 20 lines of overscan above
   and below. Each request says which lines the client holds (`known`). The backend replays the
   buffer's line splices since that version (`base`) and sends only the lines the client is

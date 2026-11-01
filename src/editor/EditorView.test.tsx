@@ -13,12 +13,18 @@ function makeView(lines: string[], overrides: Partial<View> = {}): View {
     documentId: 7,
     version: 1,
     lineCount: lines.length,
+    rowCount: lines.length,
+    startRow: 0,
     startLine: 0,
     endLine: lines.length,
+    visible: [[0, lines.length]],
+    folded: [],
+    foldable: [],
+    foldGeneration: 0,
     lines: { base: null, splices: [], chunks: [{ start: 0, lines }] },
     selections: [{ anchor: { line: 0, column: 0 }, head: { line: 0, column: 0 }, primary: true }],
     selectionCount: 1,
-    primary: { position: { line: 0, column: 0 }, visualColumn: 0 },
+    primary: { position: { line: 0, column: 0 }, visualColumn: 0, row: 0 },
     dirty: false,
     search: null,
     highlights: [],
@@ -39,7 +45,7 @@ function fakeTransport(initial: View) {
         makeView(['changed'], {
           version: 2,
           dirty: true,
-          primary: { position: { line: 0, column: 3 }, visualColumn: 3 },
+          primary: { position: { line: 0, column: 3 }, visualColumn: 3, row: 0 },
         }),
       )
     }),
@@ -66,7 +72,7 @@ describe('EditorView', () => {
     expect(screen.getByText('2')).toBeInTheDocument()
     expect(transport.view).toHaveBeenCalledWith(
       7,
-      expect.objectContaining({ startLine: 0 }),
+      expect.objectContaining({ startRow: 0 }),
       null,
       null,
     )
@@ -109,7 +115,7 @@ describe('EditorView', () => {
         selections: [
           { anchor: { line: 1, column: 2 }, head: { line: 1, column: 6 }, primary: true },
         ],
-        primary: { position: { line: 1, column: 6 }, visualColumn: 6 },
+        primary: { position: { line: 1, column: 6 }, visualColumn: 6, row: 1 },
       }),
     )
     const input = (await renderEditor(transport)) as HTMLTextAreaElement
@@ -162,6 +168,48 @@ describe('EditorView', () => {
       extend: false,
       add: false,
     })
+  })
+
+  it('folds and unfolds from the gutter', async () => {
+    const { transport, applied } = fakeTransport(
+      makeView(['fn a() {', '}', 'x'], { foldable: [0] }),
+    )
+    await renderEditor(transport)
+    expect(document.querySelector('[data-fold-line="1"]')).toBeNull()
+    const marker = document.querySelector('[data-fold-line="0"]')
+    expect(marker).not.toBeNull()
+    fireEvent.mouseDown(marker as Element, { button: 0 })
+    expect(applied.flat()).toContainEqual({ type: 'toggleFoldAt', line: 0 })
+  })
+
+  it('shows a folded region as its first line, with a marker that unfolds it', async () => {
+    const { transport, applied } = fakeTransport(
+      makeView([], {
+        lineCount: 10,
+        rowCount: 3,
+        endLine: 10,
+        visible: [
+          [0, 1],
+          [8, 10],
+        ],
+        folded: [0],
+        foldable: [0],
+        lines: {
+          base: null,
+          splices: [],
+          chunks: [
+            { start: 0, lines: ['fn a() {'] },
+            { start: 8, lines: ['}', ''] },
+          ],
+        },
+      }),
+    )
+    await renderEditor(transport)
+    expect(screen.getByText('9')).toBeInTheDocument()
+    expect(screen.queryByText('2')).toBeNull()
+    expect(document.querySelector('[data-folded]')).not.toBeNull()
+    fireEvent.mouseDown(screen.getByTitle('Unfold'), { button: 0, clientX: 100, clientY: 1 })
+    expect(applied.flat()).toContainEqual({ type: 'toggleFoldAt', line: 0 })
   })
 
   it('sends pasted text as a paste', async () => {

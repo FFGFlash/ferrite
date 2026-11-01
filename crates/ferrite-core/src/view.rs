@@ -1,10 +1,14 @@
 //! Incremental viewport updates.
 //!
-//! A client tells the document which lines it holds (a range at some
+//! A client tells the document which lines it holds (ranges at some
 //! version). The update replays the line splices since that version so the
 //! client can keep its still-valid lines, and carries text only for the
 //! requested lines it is missing. A typical keystroke therefore transfers one
 //! line, and scrolling transfers only newly exposed lines.
+//!
+//! Viewports are display rows, which skip the hidden lines of folded
+//! regions (see [`crate::folds`]), so a client holds the visible lines of
+//! its viewport: one range per run of visible lines.
 
 use std::ops::Range;
 
@@ -16,12 +20,11 @@ use crate::document::Document;
 /// marked as cut); the document itself is never changed.
 pub const MAX_DISPLAY_LINE_BYTES: usize = 16 * 1024;
 
-/// Lines a client holds: `start..end` as of `version`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// Lines a client holds as of `version`: sorted, separate ranges.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct KnownLines {
   pub version: Version,
-  pub start: usize,
-  pub end: usize,
+  pub ranges: Vec<Range<usize>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -43,27 +46,31 @@ pub struct ViewportUpdate {
   /// must discard what it holds (unknown or too old).
   pub base: Option<Version>,
   pub splices: Vec<LineSplice>,
-  /// The (clamped) viewport the client will hold afterwards.
-  pub lines: Range<usize>,
+  /// The lines the client holds afterwards: the visible lines of the
+  /// (clamped) viewport, as sorted ranges.
+  pub lines: Vec<Range<usize>>,
+  /// The display row of the first line.
+  pub start_row: usize,
   /// Text for viewport lines the client is missing.
   pub chunks: Vec<LineChunk>,
 }
 
 impl Document {
-  /// What a client holding `known` needs to show lines `wanted` (clamped
-  /// to the document and to `max_lines`).
+  /// What a client holding `known` needs to show display rows `rows`
+  /// (clamped to the document and to `max_rows`).
   pub fn viewport_update(
     &self,
-    known: Option<KnownLines>,
-    wanted: Range<usize>,
-    max_lines: usize,
+    known: Option<&KnownLines>,
+    rows: Range<usize>,
+    max_rows: usize,
   ) -> ViewportUpdate {
-    let line_count = self.buffer.line_count();
-    let start = wanted.start.min(line_count - 1);
-    let end = wanted
+    let row_count = self.row_count();
+    let start = rows.start.min(row_count - 1);
+    let end = rows
       .end
-      .clamp(start + 1, line_count)
-      .min(start + max_lines.max(1));
+      .clamp(start + 1, row_count)
+      .min(start + max_rows.max(1));
+    let lines = self.visible_lines(self.line_at_row(start)..self.line_at_row(end - 1) + 1);
 
     let replay = known.and_then(|known| {
       let splices = self.buffer.line_changes_since(known.version)?;
@@ -71,11 +78,19 @@ impl Document {
     });
     let (base, splices, missing) = match replay {
       Some((known, splices)) => {
-        let have = map_line_range(known.start..known.end, &splices);
-        let missing = missing_ranges(start..end, &have);
+        let mut have: Vec<Range<usize>> = known
+          .ranges
+          .iter()
+          .flat_map(|range| map_line_range(range.clone(), &splices))
+          .collect();
+        have.sort_by_key(|range| range.start);
+        let missing = lines
+          .iter()
+          .flat_map(|range| missing_ranges(range.clone(), &have))
+          .collect();
         (Some(known.version), splices, missing)
       }
-      None => (None, Vec::new(), std::iter::once(start..end).collect()),
+      None => (None, Vec::new(), lines.clone()),
     };
     let chunks = missing
       .into_iter()
@@ -87,7 +102,8 @@ impl Document {
     ViewportUpdate {
       base,
       splices,
-      lines: start..end,
+      lines,
+      start_row: start,
       chunks,
     }
   }
@@ -102,6 +118,8 @@ impl Document {
 }
 
 #[cfg(test)]
+// Line ranges are naturally single-element arrays here.
+#[allow(clippy::single_range_in_vec_init)]
 mod tests {
   use super::*;
   use crate::document::{DocumentId, EditorConfig};
@@ -130,8 +148,7 @@ mod tests {
   fn known(document: &Document, update: &ViewportUpdate) -> KnownLines {
     KnownLines {
       version: document.version(),
-      start: update.lines.start,
-      end: update.lines.end,
+      ranges: update.lines.clone(),
     }
   }
 
@@ -140,7 +157,7 @@ mod tests {
     let document = doc(100);
     let update = document.viewport_update(None, 10..13, 1000);
     assert_eq!(update.base, None);
-    assert_eq!(update.lines, 10..13);
+    assert_eq!(update.lines, [10..13]);
     assert_eq!(
       texts(&update),
       vec![
@@ -155,7 +172,7 @@ mod tests {
   fn an_unchanged_document_sends_nothing() {
     let document = doc(100);
     let first = document.viewport_update(None, 0..20, 1000);
-    let second = document.viewport_update(Some(known(&document, &first)), 0..20, 1000);
+    let second = document.viewport_update(Some(&known(&document, &first)), 0..20, 1000);
     assert_eq!(second.base, Some(document.version()));
     assert!(second.chunks.is_empty());
   }
@@ -164,7 +181,7 @@ mod tests {
   fn scrolling_sends_only_newly_exposed_lines() {
     let document = doc(100);
     let first = document.viewport_update(None, 0..20, 1000);
-    let scrolled = document.viewport_update(Some(known(&document, &first)), 15..35, 1000);
+    let scrolled = document.viewport_update(Some(&known(&document, &first)), 15..35, 1000);
     let lines: Vec<usize> = texts(&scrolled).into_iter().map(|(line, _)| line).collect();
     assert_eq!(lines, (20..35).collect::<Vec<_>>());
   }
@@ -178,7 +195,7 @@ mod tests {
     document
       .apply(EditorOp::Insert("x".into()))
       .expect("applies");
-    let update = document.viewport_update(Some(before), 0..20, 1000);
+    let update = document.viewport_update(Some(&before), 0..20, 1000);
     assert_eq!(update.base, Some(before.version));
     assert_eq!(texts(&update), vec![(5, "xline 5".into())]);
   }
@@ -190,7 +207,7 @@ mod tests {
     let before = known(&document, &first);
     document.selections = Selections::cursor(document.buffer().line_end(3));
     document.apply(EditorOp::Newline).expect("applies");
-    let update = document.viewport_update(Some(before), 0..20, 1000);
+    let update = document.viewport_update(Some(&before), 0..20, 1000);
     // Line 3 is rewritten, line 4 is new; old lines 4..18 are now 5..19 and reused.
     assert_eq!(
       texts(&update),
@@ -219,8 +236,30 @@ mod tests {
   fn viewports_are_clamped() {
     let document = doc(5);
     let update = document.viewport_update(None, 50..10, 1000);
-    assert_eq!(update.lines, 5..6);
+    assert_eq!(update.lines, [5..6]);
     let update = document.viewport_update(None, 0..1000, 10);
-    assert_eq!(update.lines, 0..6, "five lines plus the empty last line");
+    assert_eq!(update.lines, [0..6], "five lines plus the empty last line");
+  }
+
+  #[test]
+  fn viewports_count_rows_and_skip_folded_lines() {
+    let mut document = doc(100);
+    document.set_folded([2..10]);
+    let update = document.viewport_update(None, 1..4, 1000);
+    assert_eq!(update.start_row, 1);
+    assert_eq!(
+      update.lines,
+      [1..3, 10..11],
+      "rows 1 to 3 are lines 1, 2, and 10"
+    );
+    let lines: Vec<usize> = texts(&update).into_iter().map(|(line, _)| line).collect();
+    assert_eq!(lines, [1, 2, 10]);
+
+    // Unfolding shows lines the client doesn't have yet.
+    let before = known(&document, &update);
+    document.apply(EditorOp::UnfoldAll).expect("applies");
+    let update = document.viewport_update(Some(&before), 1..4, 1000);
+    assert_eq!(update.lines, [1..4]);
+    assert_eq!(texts(&update), vec![(3, "line 3".into())]);
   }
 }

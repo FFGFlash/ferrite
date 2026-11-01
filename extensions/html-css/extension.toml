@@ -23,6 +23,7 @@ file_extensions = ["html", "htm", "xhtml"]
 # Built with `tree-sitter build --wasm`; exports `tree_sitter_html`.
 grammar = "grammars/tree-sitter-html.wasm"
 highlights = "queries/html/highlights.scm"
+folds = "queries/html/folds.scm"
 # Highlights <style> as CSS and <script> as JavaScript.
 injections = "queries/html/injections.scm"
 # No line comments: Toggle Line Comment wraps lines in a block comment.
@@ -34,6 +35,7 @@ name = "CSS"
 file_extensions = ["css"]
 grammar = "grammars/tree-sitter-css.wasm"
 highlights = "queries/css/highlights.scm"
+folds = "queries/css/folds.scm"
 block_comment = ["/*", "*/"]
 
 # `npm install -g vscode-langservers-extracted` provides both servers. Ferrite

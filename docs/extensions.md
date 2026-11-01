@@ -508,7 +508,9 @@ html-css/
   queries/
     html/highlights.scm           what to color
     html/injections.scm           where CSS and JavaScript are embedded
+    html/folds.scm                what folds
     css/highlights.scm
+    css/folds.scm
 ```
 
 ```toml
@@ -521,6 +523,7 @@ grammar = "grammars/tree-sitter-html.wasm"
 grammar_name = "html"             # optional: the id, with '-' as '_'
 highlights = "queries/html/highlights.scm"
 injections = "queries/html/injections.scm"   # optional
+folds = "queries/html/folds.scm"  # optional; without it, the language folds by indentation
 block_comment = ["<!--", "-->"]   # optional; for Toggle Line Comment
 # line_comment = "//"             # optional; preferred over block_comment when both are set
 ```
@@ -587,6 +590,27 @@ capture by the first part of its name, using the theme's `syntax-*` colors:
 Other captures, including plain `@variable`, are left uncolored. Where captures overlap, the
 narrower one wins, and for the same node the earlier pattern wins, as highlight queries
 expect. Predicates such as `#eq?` and `#match?` work.
+
+### Folding
+
+`folds.scm` captures foldable nodes as `@fold`:
+
+```scheme
+[
+  (block)
+  (declaration_list)
+  (arguments)
+  (block_comment)
+] @fold
+```
+
+A region is the captured node's lines. Its first line stays visible when it is folded, and the
+rest are hidden. The exception is a last line that closes the first: it starts with `}`, `)`,
+`]`, or `</`, the first line ends with an opening bracket or `>`, and it is indented no deeper.
+That line stays visible too, so folded code reads `fn main() {⋯` followed by `}`. Capturing
+either a body or the whole item gives this shape. Regions that would hide nothing are skipped,
+and injected languages fold by their own queries. A language without `folds.scm` folds by
+indentation.
 
 ### Injections
 

@@ -7,6 +7,7 @@ function view(texts: string[], selection: Omit<SelectionView, 'primary'>, startL
     startLine,
     endLine: startLine + texts.length,
     lines: texts.map(text => ({ text, fullLength: null, spans: [] })),
+    lineNumbers: texts.map((_, index) => startLine + index),
     selections: [{ ...selection, primary: true }],
   } as unknown as EditorView
 }
@@ -51,6 +52,12 @@ describe('inputMirror', () => {
     // Only lines the view holds are mirrored.
     const partial = inputMirror(view(['a', 'b'], { anchor: at(0, 0), head: at(11, 1) }, 10))!
     expect(partial).toMatchObject({ line: 10, value: 'a\nb', selectionStart: 0, selectionEnd: 3 })
+  })
+
+  it("mirrors only the cursor's line when a selection crosses a folded region", () => {
+    const folded = view(['fn a() {', '}'], { anchor: at(0, 0), head: at(5, 1) })
+    folded.lineNumbers = [0, 5]
+    expect(inputMirror(folded)).toMatchObject({ line: 5, value: '}', selectionEnd: 1 })
   })
 
   it('mirrors nothing when the cursor is out of view or on a shortened line', () => {

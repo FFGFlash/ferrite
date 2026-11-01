@@ -56,14 +56,14 @@ function textStyle(type: DecorationType, kind: ThemeKind): CSSProperties | null 
 }
 
 /**
- * Text overlays per line for decorations that style text, for lines
- * `startLine..startLine + lineLengths.length` (lengths in UTF-16 units).
+ * Text overlays per line for decorations that style text, for the lines
+ * `lineNumbers` (with lengths `lineLengths`, in UTF-16 units).
  */
 export function textOverlays(
   decorations: readonly DecorationView[],
   types: ReadonlyMap<string, DecorationType>,
   kind: ThemeKind,
-  startLine: number,
+  lineNumbers: readonly number[],
   lineLengths: readonly number[],
 ): Map<number, TextOverlay[]> {
   const byLine = new Map<number, TextOverlay[]>()
@@ -73,10 +73,11 @@ export function textOverlays(
     if (!style) {
       continue
     }
-    const first = Math.max(decoration.start.line, startLine)
-    const last = Math.min(decoration.end.line, startLine + lineLengths.length - 1)
-    for (let line = first; line <= last; line++) {
-      const length = lineLengths[line - startLine] ?? 0
+    lineNumbers.forEach((line, index) => {
+      if (line < decoration.start.line || line > decoration.end.line) {
+        return
+      }
+      const length = lineLengths[index] ?? 0
       const from = line === decoration.start.line ? decoration.start.column : 0
       const to = line === decoration.end.line ? decoration.end.column : length
       if (to > from) {
@@ -84,7 +85,7 @@ export function textOverlays(
         overlays.push({ from, to, style })
         byLine.set(line, overlays)
       }
-    }
+    })
   }
   return byLine
 }

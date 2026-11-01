@@ -177,6 +177,7 @@ fn definition(language: LanguageContribution) -> LanguageDefinition {
     grammar_name: language.grammar_name,
     highlights: language.highlights,
     injections: language.injections,
+    folds: language.folds,
   }
 }
 
@@ -185,6 +186,7 @@ fn stamps(definition: &LanguageDefinition) -> Vec<Option<SystemTime>> {
   [&definition.grammar, &definition.highlights]
     .into_iter()
     .chain(&definition.injections)
+    .chain(&definition.folds)
     .map(|path| std::fs::metadata(path).and_then(|m| m.modified()).ok())
     .collect()
 }
@@ -219,6 +221,7 @@ pub fn examples(folders: &[&str]) -> Registry {
         grammar: dir.join(&language.grammar),
         highlights: dir.join(&language.highlights),
         injections: language.injections.as_ref().map(|path| dir.join(path)),
+        folds: language.folds.as_ref().map(|path| dir.join(path)),
         ..language
       })
       .map(definition)
