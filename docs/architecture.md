@@ -210,6 +210,17 @@ timestamp granularity and with the same length isn't detected.
   store (on Windows: `<>:"|?*`, trailing periods or spaces, device names like `nul`) are refused,
   and nothing existing is ever replaced. The frontend re-lists the changed folders right away
   instead of waiting for the watcher.
+- **Renaming, moving, copying, and deleting** ([ADR 0019](adr/0019-explorer-file-operations.md),
+  `src-tauri/src/entries.rs`, `ferrite-workspace/src/entries.rs`) take paths inside the open
+  folder (not the folder itself, and no `..`). Nothing existing is replaced: a rename or move onto a taken name fails, and a
+  copy takes the first free `name copy.ext`, `name copy 2.ext`, …. A move across drives copies,
+  then deletes. Deleting asks with a native dialog, then moves to the system's trash (the
+  `trash` crate) or, with Shift, deletes permanently; what can't go to the trash can be deleted
+  permanently after asking again. Renamed or moved open documents follow
+  (`Editor::follow_move`): they're synced with their language servers and extensions under the
+  new path, and the frontend gets `documentMoved`. Documents of deleted files stay open.
+  **Reveal** runs `explorer /select,` on Windows and `open -R` on macOS, and opens the folder
+  elsewhere.
 - **The Go to File index** is built on the scheduler (`workspace-index`) and is cancelled if
   the workspace changes. It holds relative paths only, up to 200,000 files (beyond that it's
   marked truncated). Queries are fuzzy-matched with `nucleo-matcher` and return the best 100,
@@ -436,6 +447,10 @@ EditorView = { version, lineCount, rowCount, startRow, startLine, endLine,
 | `workspace_get`, `workspace_open[_dialog]`, `workspace_close` | The open folder                                        |
 | `workspace_list_dir`                                          | One explorer directory listing                         |
 | `workspace_create`                                            | New empty file or folder from the explorer             |
+| `workspace_rename`, `workspace_move`, `workspace_copy`        | Rename, move, or copy files and folders                |
+| `workspace_delete`                                            | Ask, then delete to the trash or permanently           |
+| `workspace_reveal`                                            | Show a file or folder in the system's file manager     |
+| `clipboard_write_text`                                        | Put text on the clipboard (Copy Path)                  |
 | `workspace_find_files`                                        | Fuzzy Go to File over the index                        |
 | `workspace_search`, `workspace_search_cancel`                 | Streaming find in files                                |
 | `settings_get`, `settings_file`, `settings_set_theme`         | Frontend settings, the settings file path, theme       |
@@ -640,7 +655,16 @@ connects it to the editor, settings, and frontend. The developer guide is
   normalized, selections mapped. A successful edit syncs the document (so extensions see it) and
   tells the frontend to refresh.
 - **Diagnostics** from extensions are stored per extension and document, like LSP diagnostics,
-  and merged into views, hover cards, and the status bar's counts.
+  and merged into views, hover cards, Problems, and the status bar's counts.
+- **Renamed documents.** When a document's path changes (renamed or moved from the explorer, or
+  saved under another name), extensions get `document-closed` and then `document-opened` with
+  the new path and language, and its extension diagnostics are dropped until they publish again.
+- **Files** (API 1.3, `files.rs`). The `files` interface reads, lists, and writes files in the
+  open folder, which the app provides with its `files.exclude` filter
+  (`Embedder::open_folder`). Paths are resolved and must be inside the folder, not excluded, and
+  not in `.git`. A file open in the editor goes through its document: reads include unsaved
+  changes, and writes become one undoable change, saved (`Embedder::save`, which never asks or
+  overwrites a file changed on disk) only if the document had no unsaved changes.
 - **Limits and failures:**
   - Memory, stack, and table limits come from a `ResourceLimiter`. Besides each instance's limit
     (128 MiB), all running extensions together may use 512 MiB: instances reserve what their
@@ -668,7 +692,7 @@ them. Extensions fill in content through the `workbench` interface (API 1.1; pre
 | Themes           | base kind + theme file of token colors | (nothing: no code needed)                         | `themes/theme.ts`, `appearance.ts` |
 | File icon themes | theme file of icons and associations   | (nothing: no code needed)                         | `components/fileIcons.ts`          |
 | Keybindings      | key, macOS key, `editorFocus`          | —                                                 | the command registry               |
-| Menu items       | location, command, group               | — (explorer items get the path as argument)       | `components/ContextMenu`           |
+| Menu items       | location, command, group, targets      | — (explorer items get the path as argument)       | `components/ContextMenu`           |
 | Status bar items | alignment, priority, initial text      | `set-status-item`                                 | `StatusBar`                        |
 | Side bar views   | title, icon                            | `set-view-items`, `set-view-message`, `show-view` | `panels/ExtensionViewPanel`        |
 | Decorations      | colors (dark/light), underline, weight | `set-decorations` (ranges per document)           | `EditorView` overlay and line runs |

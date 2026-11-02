@@ -14,8 +14,14 @@ const workspaceIpc = await import('../ipc/workspace')
 const { getCommand, executeCommand } = await import('../commands/registry')
 const { activeEditor } = await import('../editor/activeEditor')
 const { notifications } = await import('./notifications')
-const { applyStatuses, extensionsStore, showExtensionFailure, showExtensionMessage } =
-  await import('./extensions')
+const {
+  applyStatuses,
+  contributedMenuItems,
+  extensionsStore,
+  patternMatcher,
+  showExtensionFailure,
+  showExtensionMessage,
+} = await import('./extensions')
 const { reportedProblems } = await import('./problems')
 
 function extension(overrides: Partial<ExtensionStatus> = {}): ExtensionStatus {
@@ -83,6 +89,58 @@ describe('extensions state', () => {
 
     applyStatuses([extension({ state: 'disabled' })])
     expect(getCommand('example.tidy.trim')).toBeUndefined()
+  })
+
+  it('offers menu items for the files and folders they declare', () => {
+    const menu = (command: string, forFiles: boolean, forFolders: boolean, patterns: string[]) => ({
+      location: 'explorer/context' as const,
+      command,
+      group: '',
+      forFiles,
+      forFolders,
+      patterns,
+    })
+    applyStatuses([
+      extension({
+        commands: ['any', 'folder', 'markdown'].map(id => ({
+          id: `example.tidy.${id}`,
+          title: id,
+          category: 'Tidy',
+          hidden: false,
+        })),
+        contributions: {
+          ...extension().contributions,
+          menus: [
+            menu('example.tidy.any', true, true, []),
+            menu('example.tidy.folder', false, true, []),
+            menu('example.tidy.markdown', true, false, ['*.{md,markdown}', 'README']),
+          ],
+        },
+      }),
+    ])
+    const titles = (path: string | null, directory: boolean) =>
+      contributedMenuItems('explorer/context', { path, directory }).map(item => item.title)
+    expect(titles('/w/src', true)).toEqual(['any', 'folder'])
+    expect(titles('/w/notes.MD', false)).toEqual(['any', 'markdown'])
+    expect(titles('C:\\w\\README', false)).toEqual(['any', 'markdown'])
+    expect(titles('/w/main.rs', false)).toEqual(['any'])
+    expect(titles(null, false)).toEqual(['any'])
+    expect(contributedMenuItems('editor/context', { path: '/w/a.md', directory: false })).toEqual(
+      [],
+    )
+  })
+
+  it('matches file names against patterns', () => {
+    const matches = (pattern: string, name: string) => patternMatcher(pattern).test(name)
+    expect(matches('*.ts', 'index.ts')).toBe(true)
+    expect(matches('*.ts', 'index.tsx')).toBe(false)
+    expect(matches('*.{ts,tsx}', 'App.TSX')).toBe(true)
+    expect(matches('?.txt', 'a.txt')).toBe(true)
+    expect(matches('?.txt', 'ab.txt')).toBe(false)
+    // Other characters are literal.
+    expect(matches('a+b(1).txt', 'a+b(1).txt')).toBe(true)
+    expect(matches('a.b', 'axb')).toBe(false)
+    expect(matches('x,y', 'x,y')).toBe(true)
   })
 
   it('offers contributed icon themes in the palette', async () => {

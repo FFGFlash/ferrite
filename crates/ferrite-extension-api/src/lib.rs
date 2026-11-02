@@ -44,7 +44,7 @@ pub mod bindings {
   });
 }
 
-pub use bindings::ferrite::extension::{host, types, workbench};
+pub use bindings::ferrite::extension::{files, host, types, workbench};
 pub use bindings::{Guest, export_extension};
 
 /// The API version this crate implements, as written in `api_version` in

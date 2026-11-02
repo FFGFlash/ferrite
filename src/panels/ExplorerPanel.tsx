@@ -1,8 +1,17 @@
-import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type RefObject } from 'react'
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type DragEvent,
+  type KeyboardEvent,
+  type RefObject,
+} from 'react'
 import { CopyMinus, FilePlus, FolderOpen, FolderPlus } from 'lucide-react'
 import { executeCommand, primaryKeybinding, getCommand } from '../commands/registry'
 import type { DirectoryEntry } from '../ipc/workspace'
 import { openContextMenu, type MenuEntry } from '../components/contextMenuState'
+import { isMac } from '../editor/keymap'
 import { documentsStore, openPath } from '../state/documents'
 import { iconThemeStore, type LoadedIconTheme } from '../state/iconTheme'
 import { contributedMenuItems, runContributed } from '../state/extensions'
@@ -13,7 +22,9 @@ import { useStore } from '../state/store'
 import { themeKind } from '../themes/theme'
 import {
   createEntry,
+  isWithin,
   openFolder,
+  parentOf,
   toggleFolder,
   workspaceStore,
   type Listing,
@@ -21,8 +32,21 @@ import {
 import {
   EXPLORER_TREE_ID,
   beginCreate,
+  beginRename,
+  canMoveInto,
+  canPaste,
   cancelCreate,
+  cancelRename,
+  copyEntry,
+  copyPath,
+  cutEntry,
+  deleteEntry,
   explorerStore,
+  moveOrCopy,
+  paste,
+  rename,
+  revealInSystem,
+  revealLabel,
   setFocused,
   type PendingCreate,
 } from './explorerState'
@@ -35,26 +59,86 @@ const createEntries = (target: string): MenuEntry[] => [
   { label: 'New Folder…', run: () => beginCreate(true, target) },
 ]
 
-/**
- * The context menu of a row. A file's menu opens it and has extensions'
- * items, which get its path.
- */
-function openRowMenu(x: number, y: number, entry: DirectoryEntry): void {
-  if (entry.directory) {
-    openContextMenu(x, y, createEntries(entry.path))
-    return
+/** The keys the tree handles, as menus show them. */
+function keyHints() {
+  const mac = isMac()
+  return {
+    cut: mac ? '⌘X' : 'Ctrl+X',
+    copy: mac ? '⌘C' : 'Ctrl+C',
+    paste: mac ? '⌘V' : 'Ctrl+V',
+    copyPath: mac ? '⌥⌘C' : 'Shift+Alt+C',
+    copyRelativePath: mac ? '⌥⇧⌘C' : 'Ctrl+Shift+Alt+C',
+    reveal: mac ? '⌥⌘R' : 'Shift+Alt+R',
+    rename: mac ? '↩' : 'F2',
+    delete: mac ? '⌘⌫' : 'Delete',
   }
+}
+
+/**
+ * The context menu of a row: opening, creating, cut, copy, and paste,
+ * copying its path, renaming, deleting, and extensions' items, which get
+ * its path.
+ */
+function openRowMenu(
+  x: number,
+  y: number,
+  entry: DirectoryEntry,
+  focusAfterDelete: string | null,
+): void {
+  const keys = keyHints()
+  const target = { path: entry.path, directory: entry.directory }
   openContextMenu(x, y, [
-    { label: 'Open', run: () => openPath(entry.path) },
-    null,
+    ...(entry.directory ? [] : [{ label: 'Open', run: () => openPath(entry.path) }, null]),
     ...createEntries(entry.path),
+    { label: revealLabel(), hint: keys.reveal, run: () => revealInSystem(entry.path) },
     null,
-    ...contributedMenuItems('explorer/context').map(item => ({
+    { label: 'Cut', hint: keys.cut, run: () => cutEntry(entry.path) },
+    { label: 'Copy', hint: keys.copy, run: () => copyEntry(entry.path) },
+    { label: 'Paste', hint: keys.paste, disabled: !canPaste(), run: () => paste(entry.path) },
+    null,
+    { label: 'Copy Path', hint: keys.copyPath, run: () => copyPath(entry.path, false) },
+    {
+      label: 'Copy Relative Path',
+      hint: keys.copyRelativePath,
+      run: () => copyPath(entry.path, true),
+    },
+    null,
+    { label: 'Rename…', hint: keys.rename, run: () => beginRename(entry.path) },
+    {
+      label: 'Delete',
+      hint: keys.delete,
+      run: () => deleteEntry(entry.path, false, focusAfterDelete),
+    },
+    null,
+    ...contributedMenuItems('explorer/context', target).map(item => ({
       label: item.title,
       run: () => runContributed(item.command, entry.path),
     })),
   ])
 }
+
+/** The menu of the space below the rows, for the open folder itself. */
+function openFolderMenu(x: number, y: number, root: string): void {
+  const keys = keyHints()
+  openContextMenu(x, y, [
+    ...createEntries(root),
+    { label: revealLabel(), hint: keys.reveal, run: () => revealInSystem(root) },
+    null,
+    { label: 'Paste', hint: keys.paste, disabled: !canPaste(), run: () => paste(root) },
+    null,
+    ...contributedMenuItems('explorer/context', { path: root, directory: true }).map(item => ({
+      label: item.title,
+      run: () => runContributed(item.command, root),
+    })),
+  ])
+}
+
+/** The files and folders being dragged in the explorer. */
+let dragged: string[] = []
+/** Dragging with this key held copies instead of moving, as in the system's file manager. */
+const copyKeyHeld = (event: DragEvent) => (isMac() ? event.altKey : event.ctrlKey)
+/** How long a dragged item hovers over a closed folder before it opens. */
+const OPEN_ON_HOVER_MS = 600
 
 interface Row {
   entry: DirectoryEntry
@@ -73,13 +157,17 @@ export function ExplorerPanel() {
   const { info, listings } = useStore(workspaceStore)
   const { expanded } = useStore(layoutStore)
   const { documents, activeId } = useStore(documentsStore)
-  const { focused, creating, revealed } = useStore(explorerStore)
+  const { focused, creating, renaming, clipboard, revealed } = useStore(explorerStore)
   const iconTheme = useStore(iconThemeStore)
   const light = useStore(themeKind) === 'light'
   const fileProblems = useStore(fileProblemsStore)
   const problems = useMemo(() => problemsByPath(fileProblems), [fileProblems])
   const treeRef = useRef<HTMLUListElement>(null)
   const activePath = documents.find(document => document.id === activeId)?.path ?? null
+  /** The folder a drag would drop into. */
+  const [dropTarget, setDropTarget] = useState<string | null>(null)
+  const hoverTimer = useRef<{ path: string; timer: ReturnType<typeof setTimeout> } | null>(null)
+  useEffect(() => () => clearTimeout(hoverTimer.current?.timer), [])
 
   const rows = useMemo(
     () => (info ? flatten(info.root, listings, new Set(expanded), 0, false) : []),
@@ -152,7 +240,11 @@ export function ExplorerPanel() {
 
   const onKeyDown = (event: KeyboardEvent<HTMLUListElement>) => {
     const row = rows[focusIndex]
-    if (!row) {
+    if (!row || event.target !== event.currentTarget) {
+      return
+    }
+    if (onFileKey(event, row.entry, info.root, rowAfterDeleting(rows, focusIndex))) {
+      event.preventDefault()
       return
     }
     const move = (index: number) => {
@@ -196,6 +288,13 @@ export function ExplorerPanel() {
         }
         break
       case 'Enter':
+        // As in Finder, Return renames on macOS.
+        if (isMac()) {
+          beginRename(row.entry.path)
+        } else {
+          activate(row)
+        }
+        break
       case ' ':
         activate(row)
         break
@@ -205,12 +304,59 @@ export function ExplorerPanel() {
     event.preventDefault()
   }
 
+  const endDrag = () => {
+    dragged = []
+    setDropTarget(null)
+    clearTimeout(hoverTimer.current?.timer)
+    hoverTimer.current = null
+  }
+  /**
+   * Accepts a drag over `folder` (or, for a closed folder's row, opens it
+   * after a moment). Moving needs a new place; copying can go anywhere.
+   */
+  const dragOver = (event: DragEvent, folder: string, closedFolder: string | null) => {
+    const copy = copyKeyHeld(event)
+    if (dragged.length === 0 || (!copy && !canMoveInto(dragged, folder))) {
+      setDropTarget(null)
+      return
+    }
+    if (copy && dragged.some(path => isWithin(folder, path) && path !== folder)) {
+      return
+    }
+    event.preventDefault()
+    event.stopPropagation()
+    event.dataTransfer.dropEffect = copy ? 'copy' : 'move'
+    setDropTarget(folder)
+    if (hoverTimer.current?.path !== closedFolder) {
+      clearTimeout(hoverTimer.current?.timer)
+      hoverTimer.current = closedFolder
+        ? {
+            path: closedFolder,
+            timer: setTimeout(() => toggleFolder(closedFolder), OPEN_ON_HOVER_MS),
+          }
+        : null
+    }
+  }
+  const drop = (event: DragEvent, folder: string) => {
+    event.preventDefault()
+    event.stopPropagation()
+    const paths = dragged
+    const copy = copyKeyHeld(event)
+    endDrag()
+    if (copy || canMoveInto(paths, folder)) {
+      void moveOrCopy(paths, folder, copy)
+    }
+  }
+
   return (
     <div className="explorer">
       <ul
         ref={treeRef}
         id={EXPLORER_TREE_ID}
         className="explorer-tree"
+        data-drop-target={dropTarget === info.root || undefined}
+        onDragOver={event => dragOver(event, info.root, null)}
+        onDrop={event => drop(event, info.root)}
         role="tree"
         aria-label={info.name}
         tabIndex={0}
@@ -225,7 +371,8 @@ export function ExplorerPanel() {
           event.preventDefault()
           const rect = document.getElementById(rowId(row.entry.path))?.getBoundingClientRect()
           if (rect) {
-            openRowMenu(rect.left + rect.width / 3, rect.bottom, row.entry)
+            const after = rowAfterDeleting(rows, focusIndex)
+            openRowMenu(rect.left + rect.width / 3, rect.bottom, row.entry, after)
           }
         }}
       >
@@ -235,12 +382,36 @@ export function ExplorerPanel() {
           const icon = entryIcon(row.entry.name, folder, iconTheme, light)
           const counts = problems.get(row.entry.path)
           const described = counts && describeProblems(counts, row.entry.directory)
+          const isRenaming = renaming === row.entry.path
+          const folderPath = row.entry.directory ? row.entry.path : parentOf(row.entry.path)
           return [
             <li
               key={row.entry.path}
               id={rowId(row.entry.path)}
-              className="explorer-tree__row"
+              className={`explorer-tree__row${isRenaming ? ' explorer-tree__row--input' : ''}`}
               role="treeitem"
+              draggable={!isRenaming}
+              data-cut={(clipboard?.cut && clipboard.paths.includes(row.entry.path)) || undefined}
+              data-drop-target={
+                (dropTarget !== null &&
+                  dropTarget !== info.root &&
+                  isWithin(row.entry.path, dropTarget)) ||
+                undefined
+              }
+              onDragStart={event => {
+                dragged = [row.entry.path]
+                event.dataTransfer.effectAllowed = 'copyMove'
+                event.dataTransfer.setData('application/x-ferrite-explorer', row.entry.path)
+              }}
+              onDragEnd={endDrag}
+              onDragOver={event =>
+                dragOver(
+                  event,
+                  folderPath,
+                  row.entry.directory && !row.expanded ? row.entry.path : null,
+                )
+              }
+              onDrop={event => drop(event, folderPath)}
               aria-level={row.depth + 1}
               aria-expanded={row.entry.directory ? row.expanded : undefined}
               aria-selected={row.entry.path === activePath}
@@ -250,11 +421,12 @@ export function ExplorerPanel() {
               aria-description={described}
               style={indent(row.depth)}
               title={described ? `${row.entry.path}\n${described}` : row.entry.path}
-              onClick={() => activate(row)}
+              onClick={() => !isRenaming && activate(row)}
               onContextMenu={event => {
                 event.preventDefault()
                 setFocused(row.entry.path)
-                openRowMenu(event.clientX, event.clientY, row.entry)
+                const after = rowAfterDeleting(rows, index)
+                openRowMenu(event.clientX, event.clientY, row.entry, after)
               }}
             >
               <span className="explorer-tree__chevron" aria-hidden="true">
@@ -265,8 +437,16 @@ export function ExplorerPanel() {
                 kind={folder ? 'folder' : 'file'}
                 className="explorer-tree__icon"
               />
-              <span className="explorer-tree__name">{row.entry.name}</span>
-              {counts && (
+              {isRenaming ? (
+                <RenameInput
+                  entry={row.entry}
+                  siblings={listings.get(parentOf(row.entry.path))}
+                  treeRef={treeRef}
+                />
+              ) : (
+                <span className="explorer-tree__name">{row.entry.name}</span>
+              )}
+              {counts && !isRenaming && (
                 // A file's count; a folder's dot says something inside has problems.
                 <span className="explorer-tree__problems" aria-hidden="true">
                   {row.entry.directory ? '●' : counts.errors + counts.warnings}
@@ -287,9 +467,11 @@ export function ExplorerPanel() {
       <div
         className="explorer__blank"
         aria-hidden="true"
+        onDragOver={event => dragOver(event, info.root, null)}
+        onDrop={event => drop(event, info.root)}
         onContextMenu={event => {
           event.preventDefault()
-          openContextMenu(event.clientX, event.clientY, createEntries(info.root))
+          openFolderMenu(event.clientX, event.clientY, info.root)
         }}
       />
     </div>
@@ -405,6 +587,159 @@ function NameInput({ pending, depth, siblings, treeRef, iconTheme, light }: Name
   )
 }
 
+/**
+ * Handles the tree's keys for the focused file or folder: rename, delete,
+ * cut, copy, paste, copy path, and reveal. Returns whether it did.
+ */
+function onFileKey(
+  event: KeyboardEvent,
+  entry: DirectoryEntry,
+  root: string,
+  focusAfterDelete: string | null,
+): boolean {
+  const mac = isMac()
+  const mod = mac ? event.metaKey : event.ctrlKey
+  const key = event.key.toLowerCase()
+  const only = (wanted: { mod?: boolean; shift?: boolean; alt?: boolean }) =>
+    mod === Boolean(wanted.mod) &&
+    event.shiftKey === Boolean(wanted.shift) &&
+    event.altKey === Boolean(wanted.alt)
+  // Shortcuts with Alt give other characters on some layouts; use the key's code.
+  const code = event.code.replace(/^Key/, '').toLowerCase()
+  if (!mac && key === 'f2' && only({})) {
+    beginRename(entry.path)
+  } else if (
+    (!mac && key === 'delete' && (only({}) || only({ shift: true }))) ||
+    (mac && key === 'backspace' && (only({ mod: true }) || only({ mod: true, alt: true })))
+  ) {
+    void deleteEntry(entry.path, mac ? event.altKey : event.shiftKey, focusAfterDelete)
+  } else if (only({ mod: true }) && key === 'x') {
+    cutEntry(entry.path)
+  } else if (only({ mod: true }) && key === 'c') {
+    copyEntry(entry.path)
+  } else if (only({ mod: true }) && key === 'v') {
+    void paste(entry.path)
+  } else if (
+    code === 'c' &&
+    (mac ? only({ mod: true, alt: true }) : only({ shift: true, alt: true }))
+  ) {
+    void copyPath(entry.path, false)
+  } else if (
+    code === 'c' &&
+    (mac
+      ? only({ mod: true, alt: true, shift: true })
+      : only({ mod: true, shift: true, alt: true }))
+  ) {
+    void copyPath(entry.path, true)
+  } else if (
+    code === 'r' &&
+    (mac ? only({ mod: true, alt: true }) : only({ shift: true, alt: true }))
+  ) {
+    void revealInSystem(entry.path === root ? root : entry.path)
+  } else {
+    return false
+  }
+  return true
+}
+
+/**
+ * The field for renaming a file or folder, in place of its name. The name
+ * without its extension is selected at first. Enter renames it, keeping
+ * the field open if that fails; Escape cancels, as does leaving the field
+ * unchanged or with a problem.
+ */
+function RenameInput({
+  entry,
+  siblings,
+  treeRef,
+}: {
+  entry: DirectoryEntry
+  siblings: Listing | undefined
+  treeRef: RefObject<HTMLUListElement | null>
+}) {
+  const [name, setName] = useState(entry.name)
+  const [error, setError] = useState<string | null>(null)
+  const inputRef = useRef<HTMLInputElement>(null)
+  const done = useRef(false)
+  useEffect(() => {
+    const input = inputRef.current
+    if (input) {
+      input.focus()
+      const dot = entry.directory ? -1 : entry.name.lastIndexOf('.')
+      input.setSelectionRange(0, dot > 0 ? dot : entry.name.length)
+    }
+  }, [entry])
+
+  // Renaming to the same name in another case is allowed.
+  const taken =
+    name.trim().toLowerCase() === entry.name.toLowerCase() ? null : takenName(name, siblings)
+  const message = error ?? (taken ? `A file or folder named ${taken} already exists here.` : null)
+
+  const finish = () => {
+    done.current = true
+    cancelRename()
+    treeRef.current?.focus()
+  }
+  const submit = async (fromBlur: boolean) => {
+    if (done.current) {
+      return
+    }
+    if (!name.trim() || name.trim() === entry.name || (fromBlur && message)) {
+      finish()
+      return
+    }
+    done.current = true
+    try {
+      await rename(entry.path, name)
+      treeRef.current?.focus()
+    } catch (failure) {
+      if (fromBlur) {
+        cancelRename()
+        reportError('Renaming', failure)
+      } else {
+        done.current = false
+        setError(failure instanceof Error ? failure.message : String(failure))
+      }
+    }
+  }
+  return (
+    <>
+      <input
+        ref={inputRef}
+        className="explorer-tree__input"
+        aria-label={`Rename ${entry.name}`}
+        aria-invalid={message ? true : undefined}
+        aria-describedby={message ? 'explorer-rename-message' : undefined}
+        spellCheck={false}
+        autoComplete="off"
+        value={name}
+        onClick={event => event.stopPropagation()}
+        onChange={event => {
+          setName(event.target.value)
+          setError(null)
+        }}
+        onKeyDown={event => {
+          // Keep the tree's keys away from the field.
+          event.stopPropagation()
+          if (event.key === 'Enter') {
+            event.preventDefault()
+            void submit(false)
+          } else if (event.key === 'Escape') {
+            event.preventDefault()
+            finish()
+          }
+        }}
+        onBlur={() => void submit(true)}
+      />
+      {message && (
+        <div id="explorer-rename-message" className="explorer-tree__message" role="alert">
+          {message}
+        </div>
+      )}
+    </>
+  )
+}
+
 /** The existing sibling that `name` would clash with, if it names one directly. */
 function takenName(name: string, siblings: Listing | undefined): string | null {
   const trimmed = name.trim().toLowerCase()
@@ -465,6 +800,16 @@ export function ExplorerActions() {
       )}
     </>
   )
+}
+
+/** The row to focus after deleting `rows[index]`: the next one outside it, or the one before. */
+function rowAfterDeleting(rows: readonly Row[], index: number): string | null {
+  const deleted = rows[index]?.entry.path
+  if (deleted === undefined) {
+    return null
+  }
+  const next = rows.slice(index + 1).find(row => !isWithin(row.entry.path, deleted))
+  return (next ?? rows[index - 1])?.entry.path ?? null
 }
 
 function flatten(

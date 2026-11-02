@@ -42,6 +42,35 @@ pub fn scan_files(root: &Path, exclude: &ExcludeFilter, cancel: &AtomicBool) -> 
   index
 }
 
+/// The files in `folder` (inside `root`) and its subfolders that the
+/// exclusions and ignore rules leave in, as Go to File lists them: sorted, at
+/// most `limit`, and whether more were left out.
+pub fn files_in(
+  root: &Path,
+  folder: &Path,
+  exclude: &ExcludeFilter,
+  limit: usize,
+) -> (Vec<PathBuf>, bool) {
+  let (root, filter) = (root.to_path_buf(), exclude.clone());
+  let mut files = Vec::new();
+  let mut truncated = false;
+  let walker = WalkBuilder::new(folder)
+    .hidden(false)
+    .filter_entry(move |entry| !filter.is_excluded(&root, entry.path()))
+    .build();
+  for entry in walker.filter_map(Result::ok) {
+    if entry.file_type().is_some_and(|kind| kind.is_file()) {
+      if files.len() == limit {
+        truncated = true;
+        break;
+      }
+      files.push(entry.into_path());
+    }
+  }
+  files.sort();
+  (files, truncated)
+}
+
 impl FileIndex {
   /// An index of the given relative paths (`/`-separated) without touching
   /// the disk, for tests and benchmarks.
@@ -255,6 +284,29 @@ mod tests {
         "src/editor/view.rs",
         "src/main.rs"
       ]
+    );
+  }
+
+  #[test]
+  fn lists_a_folders_files_like_the_index() {
+    let dir = workspace();
+    let root = dir.path();
+    let exclude = ExcludeFilter::new(&[".git"]).expect("valid");
+    fs::write(root.join(".git/config"), "").expect("write");
+    let (all, truncated) = files_in(root, root, &exclude, 10);
+    assert!(!truncated);
+    assert_eq!(
+      all,
+      vec![
+        root.join(".gitignore"),
+        root.join("README.md"),
+        root.join("src/editor/view.rs"),
+        root.join("src/main.rs"),
+      ]
+    );
+    assert_eq!(
+      files_in(root, &root.join("src"), &exclude, 1),
+      (vec![root.join("src/editor/view.rs")], true)
     );
   }
 

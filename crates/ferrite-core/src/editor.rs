@@ -60,6 +60,29 @@ impl Editor {
       .map(Document::id)
   }
 
+  /// Follows a file or folder that was renamed or moved from `from` to `to`:
+  /// documents of that file, or of files in that folder, get their new
+  /// paths. Returns the documents that moved.
+  pub fn follow_move(&mut self, from: &Path, to: &Path) -> Vec<DocumentId> {
+    let mut moved = Vec::new();
+    for document in self.documents.values_mut() {
+      let Some(rest) = document
+        .path()
+        .and_then(|path| path.strip_prefix(from).ok())
+      else {
+        continue;
+      };
+      let path = if rest.as_os_str().is_empty() {
+        to.to_path_buf()
+      } else {
+        to.join(rest)
+      };
+      document.moved_to(path);
+      moved.push(document.id());
+    }
+    moved
+  }
+
   pub fn document(&self, id: DocumentId) -> Result<&Document, CoreError> {
     self
       .documents
@@ -137,5 +160,41 @@ mod tests {
     assert!(!document.is_dirty());
     assert_eq!(document.buffer().contents(), "");
     assert_eq!(editor.documents().count(), 1);
+  }
+
+  #[test]
+  fn documents_follow_their_files_when_moved() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let open = |editor: &mut Editor, path: PathBuf| {
+      std::fs::write(&path, "x").expect("write");
+      let loaded = ferrite_workspace::load_text_file(&path).expect("loads");
+      editor.open(path, loaded)
+    };
+    let mut editor = Editor::default();
+    std::fs::create_dir(dir.path().join("src")).expect("mkdir");
+    let lib = open(&mut editor, dir.path().join("src").join("lib.rs"));
+    let srcs = open(&mut editor, dir.path().join("srcs.rs"));
+    let untitled = editor.create_untitled();
+
+    let to = dir.path().join("crate");
+    assert_eq!(editor.follow_move(&dir.path().join("src"), &to), vec![lib]);
+    let path = |id| {
+      editor
+        .document(id)
+        .expect("open")
+        .path()
+        .map(Path::to_path_buf)
+    };
+    assert_eq!(path(lib), Some(to.join("lib.rs")));
+    // A sibling whose name starts the same isn't inside the folder.
+    assert_eq!(path(srcs), Some(dir.path().join("srcs.rs")));
+    assert_eq!(path(untitled), None);
+
+    let main = dir.path().join("main.rs");
+    assert_eq!(
+      editor.follow_move(&dir.path().join("srcs.rs"), &main),
+      vec![srcs]
+    );
+    assert_eq!(editor.document(srcs).expect("open").title(), "main.rs");
   }
 }

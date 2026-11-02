@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, within } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { DirectoryEntry } from '../ipc/workspace'
@@ -6,6 +6,12 @@ import type { DirectoryEntry } from '../ipc/workspace'
 vi.mock('../ipc/workspace', () => ({
   listDirectory: vi.fn(),
   createEntry: vi.fn(),
+  renameEntry: vi.fn(),
+  moveEntries: vi.fn(),
+  copyEntries: vi.fn(),
+  deleteEntries: vi.fn(),
+  revealEntry: vi.fn(),
+  writeClipboardText: vi.fn(),
   getWorkspace: vi.fn(),
   openWorkspaceDialog: vi.fn(),
   closeWorkspace: vi.fn(),
@@ -25,6 +31,7 @@ const { ExplorerActions, ExplorerPanel } = await import('./ExplorerPanel')
 const { explorerStore } = await import('./explorerState')
 const { contextMenuStore } = await import('../components/contextMenuState')
 const { fileProblemsStore } = await import('../state/problems')
+const { applyStatuses } = await import('../state/extensions')
 
 const entry = (path: string, directory = false, ignored = false): DirectoryEntry => ({
   name: path.split('/').pop() ?? path,
@@ -39,7 +46,13 @@ describe('ExplorerPanel', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     layoutStore.set(DEFAULT_LAYOUT)
-    explorerStore.set({ focused: null, creating: null, revealed: null })
+    explorerStore.set({
+      focused: null,
+      creating: null,
+      renaming: null,
+      clipboard: null,
+      revealed: null,
+    })
     notifications.set([])
     listings = {
       '/w': [entry('/w/src', true), entry('/w/target', true, true), entry('/w/README.md')],
@@ -61,7 +74,43 @@ describe('ExplorerPanel', () => {
     }))
     documentsStore.set({ documents: [], activeId: null })
     fileProblemsStore.set({ files: [], leftOut: 0 })
+    vi.mocked(ipc.renameEntry).mockImplementation(async (path, name) => {
+      const parent = path.slice(0, path.lastIndexOf('/'))
+      const renamed = `${parent}/${name}`
+      listings[parent] = (listings[parent] ?? []).map(e =>
+        e.path === path ? entry(renamed, e.directory) : e,
+      )
+      return { path: renamed, directories: [parent] }
+    })
+    vi.mocked(ipc.moveEntries).mockImplementation(async (paths, target) =>
+      paths.map(path => `${target}/${path.split('/').pop()}`),
+    )
+    vi.mocked(ipc.copyEntries).mockImplementation(async (paths, target) =>
+      paths.map(path => `${target}/${path.split('/').pop()} copy`),
+    )
+    vi.mocked(ipc.deleteEntries).mockImplementation(async paths => {
+      for (const [folder, entries] of Object.entries(listings)) {
+        listings[folder] = entries.filter(e => !paths.includes(e.path))
+      }
+      return true
+    })
   })
+
+  /** The menu of a row, opened by right-clicking it. */
+  function menuOf(row: HTMLElement) {
+    fireEvent.contextMenu(row)
+    const menu = contextMenuStore.get()
+    act(() => contextMenuStore.set(null))
+    return menu?.entries ?? []
+  }
+  const labels = (entries: ReturnType<typeof menuOf>) => entries.map(item => item?.label ?? null)
+  const action = (entries: ReturnType<typeof menuOf>, label: string) => {
+    const found = entries.find(item => item?.label === label)
+    if (!found) {
+      throw new Error(`no ${label} in ${labels(entries).join(', ')}`)
+    }
+    return found
+  }
 
   async function renderTree() {
     render(
@@ -287,7 +336,7 @@ describe('ExplorerPanel', () => {
     const tree = await renderTree()
     fireEvent.contextMenu(within(tree).getByText('src'))
     const menu = contextMenuStore.get()
-    expect(menu?.entries.map(item => item?.label)).toEqual(['New File…', 'New Folder…'])
+    expect(menu?.entries.map(item => item?.label).slice(0, 2)).toEqual(['New File…', 'New Folder…'])
     await act(async () => menu?.entries[1]?.run())
 
     expect(layoutStore.get().expanded).toEqual(['/w/src'])
@@ -304,14 +353,23 @@ describe('ExplorerPanel', () => {
     const user = userEvent.setup()
     const tree = await renderTree()
     await user.click(within(tree).getByText('src'))
-    fireEvent.contextMenu(await within(tree).findByText('main.rs'))
-    expect(contextMenuStore.get()?.entries.map(item => item?.label ?? null)).toEqual([
+    expect(labels(menuOf(await within(tree).findByText('main.rs')))).toEqual([
       'Open',
       null,
       'New File…',
       'New Folder…',
+      'Open Containing Folder',
+      null,
+      'Cut',
+      'Copy',
+      'Paste',
+      null,
+      'Copy Path',
+      'Copy Relative Path',
+      null,
+      'Rename…',
+      'Delete',
     ])
-    act(() => contextMenuStore.set(null))
 
     await user.click(screen.getByRole('button', { name: 'New File' }))
     await user.type(within(tree).getByRole('textbox'), 'lib.rs{Enter}')
@@ -327,7 +385,13 @@ describe('ExplorerPanel', () => {
     expect(blank).not.toBeNull()
     fireEvent.contextMenu(blank as Element)
     const menu = contextMenuStore.get()
-    expect(menu?.entries.map(item => item?.label)).toEqual(['New File…', 'New Folder…'])
+    expect(menu?.entries.map(item => item?.label ?? null)).toEqual([
+      'New File…',
+      'New Folder…',
+      'Open Containing Folder',
+      null,
+      'Paste',
+    ])
     await act(async () => menu?.entries[0]?.run())
 
     const input = within(tree).getByRole('textbox', { name: 'File name' })
@@ -366,6 +430,197 @@ describe('ExplorerPanel', () => {
     await user.click(document.body)
     expect(within(tree).queryByRole('textbox')).not.toBeInTheDocument()
     expect(ipc.createEntry).not.toHaveBeenCalled()
+  })
+
+  it('renames in place with F2, selecting the name without its extension', async () => {
+    const user = userEvent.setup()
+    const tree = await renderTree()
+    tree.focus()
+    await user.keyboard('{End}{F2}')
+    const input = within(tree).getByRole<HTMLInputElement>('textbox', {
+      name: 'Rename README.md',
+    })
+    expect(input).toHaveFocus()
+    expect([input.selectionStart, input.selectionEnd]).toEqual([0, 'README'.length])
+
+    // Another entry's name is taken, but its own in another case isn't.
+    await user.clear(input)
+    await user.type(input, 'SRC')
+    expect(within(tree).getByRole('alert')).toHaveTextContent('named src already exists')
+    await user.clear(input)
+    await user.type(input, 'readme.md{Enter}')
+    expect(ipc.renameEntry).toHaveBeenCalledWith('/w/README.md', 'readme.md')
+    const renamed = (await within(tree).findByText('readme.md')).closest('li')
+    expect(renamed).toHaveAttribute('data-focused')
+    expect(tree).toHaveFocus()
+  })
+
+  it('keeps a renamed folder expanded and cancels renaming with Escape', async () => {
+    const user = userEvent.setup()
+    const tree = await renderTree()
+    await user.click(within(tree).getByText('src'))
+    await within(tree).findByText('main.rs')
+    listings['/w/lib'] = listings['/w/src'] ?? []
+    act(() => action(menuOf(within(tree).getByText('src')), 'Rename…').run())
+    const input = within(tree).getByRole<HTMLInputElement>('textbox', { name: 'Rename src' })
+    expect([input.selectionStart, input.selectionEnd]).toEqual([0, 3])
+    await user.keyboard('{Escape}')
+    expect(within(tree).queryByRole('textbox')).not.toBeInTheDocument()
+    expect(ipc.renameEntry).not.toHaveBeenCalled()
+
+    act(() => action(menuOf(within(tree).getByText('src')), 'Rename…').run())
+    await user.keyboard('{Control>}a{/Control}lib{Enter}')
+    expect(ipc.renameEntry).toHaveBeenCalledWith('/w/src', 'lib')
+    await within(tree).findByText('lib')
+    expect(layoutStore.get().expanded).toEqual(['/w/lib'])
+    expect(await within(tree).findByText('main.rs')).toBeInTheDocument()
+  })
+
+  it('deletes with Delete, or permanently with Shift+Delete', async () => {
+    const user = userEvent.setup()
+    const tree = await renderTree()
+    tree.focus()
+    await user.keyboard('{End}{Delete}')
+    expect(ipc.deleteEntries).toHaveBeenCalledWith(['/w/README.md'], false)
+    // The row before takes the focus.
+    await waitFor(() =>
+      expect(within(tree).getByText('target').closest('li')).toHaveAttribute('data-focused'),
+    )
+    await user.keyboard('{Shift>}{Delete}{/Shift}')
+    expect(ipc.deleteEntries).toHaveBeenLastCalledWith(['/w/target'], true)
+
+    // From the menu; cancelling in the dialog changes nothing.
+    vi.mocked(ipc.deleteEntries).mockResolvedValueOnce(false)
+    await act(async () => action(menuOf(within(tree).getByText('src')), 'Delete').run())
+    expect(ipc.deleteEntries).toHaveBeenLastCalledWith(['/w/src'], false)
+  })
+
+  it('cuts and pastes to move, and copies and pastes to copy', async () => {
+    const user = userEvent.setup()
+    const tree = await renderTree()
+    await user.click(within(tree).getByText('src'))
+    const main = (await within(tree).findByText('main.rs')).closest('li') as HTMLElement
+    expect(action(menuOf(main), 'Paste').disabled).toBe(true)
+
+    tree.focus()
+    await user.keyboard('{Control>}x{/Control}')
+    expect(main).toHaveAttribute('data-cut')
+    // Pasting into the open folder, from the menu below the rows.
+    fireEvent.contextMenu(document.querySelector('.explorer__blank') as Element)
+    const paste = contextMenuStore.get()?.entries.find(item => item?.label === 'Paste')
+    expect(paste?.disabled).toBe(false)
+    await act(async () => paste?.run())
+    expect(ipc.moveEntries).toHaveBeenCalledWith(['/w/src/main.rs'], '/w')
+    expect(main).not.toHaveAttribute('data-cut')
+
+    // Copying and pasting beside the original makes a copy.
+    await act(async () => action(menuOf(within(tree).getByText('README.md')), 'Copy').run())
+    await act(async () => action(menuOf(within(tree).getByText('README.md')), 'Paste').run())
+    expect(ipc.copyEntries).toHaveBeenCalledWith(['/w/README.md'], '/w')
+  })
+
+  it('copies paths and shows entries in the file manager', async () => {
+    const user = userEvent.setup()
+    const tree = await renderTree()
+    await user.click(within(tree).getByText('src'))
+    const main = await within(tree).findByText('main.rs')
+    await act(async () => action(menuOf(main), 'Copy Path').run())
+    expect(ipc.writeClipboardText).toHaveBeenLastCalledWith('/w/src/main.rs')
+    await act(async () => action(menuOf(main), 'Copy Relative Path').run())
+    expect(ipc.writeClipboardText).toHaveBeenLastCalledWith('src/main.rs')
+    await act(async () => action(menuOf(main), 'Open Containing Folder').run())
+    expect(ipc.revealEntry).toHaveBeenCalledWith('/w/src/main.rs')
+
+    // The same from the keyboard.
+    tree.focus()
+    await user.keyboard('{Shift>}{Alt>}c{/Alt}{/Shift}')
+    expect(ipc.writeClipboardText).toHaveBeenLastCalledWith('/w/src/main.rs')
+  })
+
+  it('moves by dragging onto a folder, and copies with Ctrl held', async () => {
+    const tree = await renderTree()
+    const transfer = () => ({ setData: vi.fn(), effectAllowed: '', dropEffect: '' })
+    // jsdom's drag events carry no modifier keys; a mouse event does.
+    const withCtrl = (type: string) => {
+      const event = new MouseEvent(type, { bubbles: true, cancelable: true, ctrlKey: true })
+      Object.defineProperty(event, 'dataTransfer', { value: transfer() })
+      return event
+    }
+    let readme = within(tree).getByText('README.md').closest('li') as HTMLElement
+    const src = within(tree).getByText('src').closest('li') as HTMLElement
+
+    fireEvent.dragStart(readme, { dataTransfer: transfer() })
+    fireEvent.dragOver(src, { dataTransfer: transfer() })
+    expect(src).toHaveAttribute('data-drop-target')
+    // Dropping where it already is does nothing: no target there.
+    fireEvent.dragOver(readme, { dataTransfer: transfer() })
+    expect(readme).not.toHaveAttribute('data-drop-target')
+    fireEvent.dragOver(src, { dataTransfer: transfer() })
+    await act(async () => {
+      fireEvent.drop(src, { dataTransfer: transfer() })
+    })
+    expect(ipc.moveEntries).toHaveBeenCalledWith(['/w/README.md'], '/w/src')
+    expect(src).not.toHaveAttribute('data-drop-target')
+
+    // Without Ctrl, dropping where it is does nothing. (Moving it expanded
+    // src, so its row is a new element.)
+    readme = within(tree).getAllByText('README.md')[0]!.closest('li') as HTMLElement
+    fireEvent.dragStart(readme, { dataTransfer: transfer() })
+    await act(async () => {
+      fireEvent.drop(readme, { dataTransfer: transfer() })
+    })
+    expect(ipc.moveEntries).toHaveBeenCalledTimes(1)
+    fireEvent.dragStart(readme, { dataTransfer: transfer() })
+    fireEvent(readme, withCtrl('dragover'))
+    expect(tree).toHaveAttribute('data-drop-target')
+    await act(async () => {
+      fireEvent(readme, withCtrl('drop'))
+    })
+    expect(ipc.copyEntries).toHaveBeenCalledWith(['/w/README.md'], '/w')
+  })
+
+  it("offers extensions' items for the files and folders they're for", async () => {
+    const menu = (command: string, forFolders: boolean, patterns: string[]) => ({
+      location: 'explorer/context' as const,
+      command,
+      group: '',
+      forFiles: !forFolders,
+      forFolders,
+      patterns,
+    })
+    applyStatuses([
+      {
+        id: 'example.fmt',
+        name: 'Fmt',
+        state: 'active',
+        permissions: [],
+        commands: [
+          { id: 'example.fmt.all', title: 'Format All', category: 'Fmt', hidden: false },
+          { id: 'example.fmt.md', title: 'Format Markdown', category: 'Fmt', hidden: false },
+        ],
+        contributions: {
+          themes: [],
+          iconThemes: [],
+          keybindings: [],
+          menus: [menu('example.fmt.all', true, []), menu('example.fmt.md', false, ['*.md'])],
+          views: [],
+          decorations: [],
+          previews: [],
+          languages: [],
+          languageServers: [],
+        },
+      } as never,
+    ])
+    try {
+      const tree = await renderTree()
+      const extensionItems = (name: string) =>
+        labels(menuOf(within(tree).getByText(name))).filter(label => label?.startsWith('Format'))
+      expect(extensionItems('src')).toEqual(['Format All'])
+      expect(extensionItems('README.md')).toEqual(['Format Markdown'])
+      expect(extensionItems('target')).toEqual(['Format All'])
+    } finally {
+      applyStatuses([])
+    }
   })
 
   it('creates the entry when the field is left with a new name', async () => {

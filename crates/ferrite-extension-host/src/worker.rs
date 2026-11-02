@@ -318,13 +318,14 @@ pub struct Budgets {
   pub memory: usize,
 }
 
-/// The permission as the extension sees it; `None` for permissions that
-/// concern the editor, not the extension's code.
+/// The permission as the extension sees it in `activation.granted`; `None`
+/// for permissions that concern the editor, not the extension's code, and
+/// those added after API 1.0 (which the `permission` type can't name).
 fn wit_permission(permission: Permission) -> Option<WitPermission> {
   match permission {
     Permission::DocumentsRead => Some(WitPermission::DocumentsRead),
     Permission::DocumentsWrite => Some(WitPermission::DocumentsWrite),
-    Permission::LanguageServers => None,
+    Permission::FilesRead | Permission::FilesWrite | Permission::LanguageServers => None,
   }
 }
 

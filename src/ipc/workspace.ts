@@ -137,6 +137,10 @@ export type AppEvent =
   | { type: 'filesChanged'; directories: string[] }
   | { type: 'documentReloaded'; document: DocumentSummary }
   | { type: 'documentChangedOnDisk'; document: DocumentSummary }
+  /** Its file was renamed or moved from the explorer. */
+  | { type: 'documentMoved'; document: DocumentSummary }
+  /** Saved because an extension changed its file. */
+  | { type: 'documentSaved'; document: DocumentSummary }
   /** `announce`: tell the user (not when they changed one setting in the settings editor). */
   | { type: 'settingsChanged'; settings: FrontendSettings; announce: boolean }
   | { type: 'searchCounted'; documentId: number }
@@ -177,6 +181,25 @@ export const listDirectory = (path: string) =>
 /** Creates an empty file or a folder; `name` may include subfolders (`src/lib.rs`). */
 export const createEntry = (parent: string, name: string, directory: boolean) =>
   call<CreatedEntry>('workspace_create', { parent, name, directory })
+/** Renames a file or folder; `name` may name new subfolders to move it into. */
+export const renameEntry = (path: string, name: string) =>
+  call<CreatedEntry>('workspace_rename', { path, name })
+/** Moves files and folders into `target`, returning their new paths. */
+export const moveEntries = (paths: string[], target: string) =>
+  call<string[]>('workspace_move', { paths, target })
+/** Copies files and folders into `target` (as `name copy.ext` if taken), returning the copies. */
+export const copyEntries = (paths: string[], target: string) =>
+  call<string[]>('workspace_copy', { paths, target })
+/**
+ * Asks, then deletes files and folders: to the system's trash, or
+ * permanently. Resolves to false if the user cancelled.
+ */
+export const deleteEntries = (paths: string[], permanent: boolean) =>
+  call<boolean>('workspace_delete', { paths, permanent })
+/** Shows a file or folder in the system's file manager. */
+export const revealEntry = (path: string) => call<void>('workspace_reveal', { path })
+/** Puts text on the system clipboard. */
+export const writeClipboardText = (text: string) => call<void>('clipboard_write_text', { text })
 export const findFiles = (query: string) => call<FindFilesResult>('workspace_find_files', { query })
 export const cancelSearch = () => call<void>('workspace_search_cancel')
 

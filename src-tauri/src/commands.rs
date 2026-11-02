@@ -11,6 +11,7 @@ use std::time::{Duration, Instant};
 use ferrite_extension_host::preview::{LinkTarget, link_target};
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, State};
+use tauri_plugin_clipboard_manager::ClipboardExt;
 
 use crate::error::CommandError;
 
@@ -40,6 +41,24 @@ pub fn open_external(url: String) -> Result<(), CommandError> {
   }
   tracing::info!("opening a link with the system");
   open::that_detached(&url).map_err(|error| CommandError::new("openLink", error.to_string()))
+}
+
+/// Largest text written to the clipboard, in bytes.
+const MAX_CLIPBOARD_BYTES: usize = 1024 * 1024;
+
+/// Puts text on the system clipboard, e.g. a file's path from the explorer.
+#[tauri::command]
+pub fn clipboard_write_text(app: AppHandle, text: String) -> Result<(), CommandError> {
+  if text.len() > MAX_CLIPBOARD_BYTES {
+    return Err(CommandError::new(
+      "tooLarge",
+      "That's too much text to copy.",
+    ));
+  }
+  app
+    .clipboard()
+    .write_text(text)
+    .map_err(|error| CommandError::new("clipboard", error.to_string()))
 }
 
 #[tauri::command]

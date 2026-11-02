@@ -4,6 +4,7 @@ use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 
+use crate::entries::EntryError;
 use crate::file::FileError;
 use crate::tree::EntryKind;
 
@@ -17,46 +18,11 @@ pub struct Created {
   pub directories: Vec<PathBuf>,
 }
 
-#[derive(Debug, thiserror::Error)]
-pub enum CreateError {
-  #[error("{0}")]
-  InvalidName(String),
-  #[error("{} is not a folder", .0.display())]
-  NotADirectory(PathBuf),
-  #[error(transparent)]
-  File(#[from] FileError),
-}
-
 /// Creates an empty file or a folder called `name` in `parent`. Names may
 /// contain `/` or `\` to create it in subfolders, which are created as needed
 /// (`src/lib.rs`). Existing files and folders are never replaced.
-pub fn create_entry(parent: &Path, name: &str, kind: EntryKind) -> Result<Created, CreateError> {
-  let segments = parse_name(name)?;
-  let Some((last, folders)) = segments.split_last() else {
-    return Err(CreateError::InvalidName("Enter a name.".into()));
-  };
-  let metadata = fs::metadata(parent).map_err(|error| FileError::from_io(parent, error))?;
-  if !metadata.is_dir() {
-    return Err(CreateError::NotADirectory(parent.to_path_buf()));
-  }
-
-  let mut directories = vec![parent.to_path_buf()];
-  let mut dir = parent.to_path_buf();
-  for folder in folders {
-    dir.push(folder);
-    match fs::create_dir(&dir) {
-      Ok(()) => {}
-      Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {
-        if !dir.is_dir() {
-          return Err(CreateError::NotADirectory(dir));
-        }
-      }
-      Err(error) => return Err(FileError::from_io(&dir, error).into()),
-    }
-    directories.push(dir.clone());
-  }
-
-  let path = dir.join(last);
+pub fn create_entry(parent: &Path, name: &str, kind: EntryKind) -> Result<Created, EntryError> {
+  let Created { path, directories } = prepare(parent, name)?;
   // Windows reports some name clashes (a file over a folder) as access
   // denied, so check first; `create_new` still guards against races.
   if fs::symlink_metadata(&path).is_ok() {
@@ -74,10 +40,43 @@ pub fn create_entry(parent: &Path, name: &str, kind: EntryKind) -> Result<Create
   Ok(Created { path, directories })
 }
 
+/// Checks `name` (see [`create_entry`]) and creates the subfolders it names
+/// in `parent`, returning the path it names. Nothing is created at that path.
+pub(crate) fn prepare(parent: &Path, name: &str) -> Result<Created, EntryError> {
+  let segments = parse_name(name)?;
+  let Some((last, folders)) = segments.split_last() else {
+    return Err(EntryError::InvalidName("Enter a name.".into()));
+  };
+  let metadata = fs::metadata(parent).map_err(|error| FileError::from_io(parent, error))?;
+  if !metadata.is_dir() {
+    return Err(EntryError::NotADirectory(parent.to_path_buf()));
+  }
+
+  let mut directories = vec![parent.to_path_buf()];
+  let mut dir = parent.to_path_buf();
+  for folder in folders {
+    dir.push(folder);
+    match fs::create_dir(&dir) {
+      Ok(()) => {}
+      Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {
+        if !dir.is_dir() {
+          return Err(EntryError::NotADirectory(dir));
+        }
+      }
+      Err(error) => return Err(FileError::from_io(&dir, error).into()),
+    }
+    directories.push(dir.clone());
+  }
+  Ok(Created {
+    path: dir.join(last),
+    directories,
+  })
+}
+
 /// Splits a name typed in the explorer into path segments, refusing ones
 /// that would leave the parent folder or that the platform can't store.
-fn parse_name(name: &str) -> Result<Vec<&str>, CreateError> {
-  let invalid = |message: String| Err(CreateError::InvalidName(message));
+fn parse_name(name: &str) -> Result<Vec<&str>, EntryError> {
+  let invalid = |message: String| Err(EntryError::InvalidName(message));
   let segments: Vec<&str> = name
     .trim()
     .split(['/', '\\'])
@@ -169,7 +168,7 @@ mod tests {
       assert!(
         matches!(
           create_entry(dir.path(), name, kind),
-          Err(CreateError::File(FileError::AlreadyExists { .. }))
+          Err(EntryError::File(FileError::AlreadyExists { .. }))
         ),
         "{name} as {kind:?}"
       );
@@ -180,7 +179,7 @@ mod tests {
     );
     assert!(matches!(
       create_entry(dir.path(), "a.txt/b.txt", EntryKind::File),
-      Err(CreateError::NotADirectory(_))
+      Err(EntryError::NotADirectory(_))
     ));
   }
 
@@ -201,7 +200,7 @@ mod tests {
       assert!(
         matches!(
           create_entry(&inner, name, EntryKind::File),
-          Err(CreateError::InvalidName(_))
+          Err(EntryError::InvalidName(_))
         ),
         "{name:?}"
       );
@@ -229,7 +228,7 @@ mod tests {
       assert!(
         matches!(
           create_entry(dir.path(), name, EntryKind::File),
-          Err(CreateError::InvalidName(_))
+          Err(EntryError::InvalidName(_))
         ),
         "{name:?}"
       );
@@ -243,7 +242,7 @@ mod tests {
     let dir = tempfile::tempdir().expect("temp dir");
     assert!(matches!(
       create_entry(&dir.path().join("gone"), "a.txt", EntryKind::File),
-      Err(CreateError::File(FileError::NotFound { .. }))
+      Err(EntryError::File(FileError::NotFound { .. }))
     ));
   }
 }

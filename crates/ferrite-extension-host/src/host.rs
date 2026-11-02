@@ -529,6 +529,21 @@ impl Shared {
       {
         return;
       }
+      // Renamed, moved, or saved under another name: to extensions, the
+      // document at the old path closed and one at the new path opened (its
+      // language may differ), so their diagnostics for it are dropped.
+      if let Some(record) = state.documents.get(&id)
+        && record.path.as_deref() != document.path()
+      {
+        state.documents.remove(&id);
+        for entry in &state.extensions {
+          if let Run::Running { worker, .. } = &entry.run
+            && worker.reads_documents()
+          {
+            worker.queue.push_document(Event::Closed(id.get()));
+          }
+        }
+      }
       let info = document_info(self, document);
       match state.documents.get_mut(&id) {
         None => {

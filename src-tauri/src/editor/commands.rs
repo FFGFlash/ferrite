@@ -25,6 +25,7 @@ use super::{fold_memory, folding};
 use crate::backups::BackupState;
 use crate::dialogs::{self, UnsavedChoice};
 use crate::error::CommandError;
+use crate::events::{self, AppEvent};
 use crate::extensions::ExtensionsState;
 use crate::languages::LanguagesState;
 use crate::lsp::LspState;
@@ -522,6 +523,42 @@ async fn save(
     settings::reload(app)?;
   }
   Ok(Some(summary))
+}
+
+/// Saves a document to its file without asking anything, for an extension
+/// that changed the file: a file changed on disk since it was read isn't
+/// overwritten.
+pub fn save_quietly(app: &AppHandle, id: DocumentId) -> Result<(), String> {
+  let state = app.state::<EditorState>();
+  let (point, path) = {
+    let editor = state.lock();
+    let document = editor.document(id).map_err(|error| error.to_string())?;
+    let path = document.path().ok_or("it has no file")?.to_path_buf();
+    (document.save_point(), path)
+  };
+  let stamp = save_text_file(
+    &path,
+    &point.snapshot,
+    point.has_bom,
+    point.expected_stamp.as_ref(),
+  )
+  .map_err(|error| error.to_string())?;
+  let summary = {
+    let mut editor = state.lock();
+    let document = editor.document_mut(id).map_err(|error| error.to_string())?;
+    document.mark_saved(&point, path.clone(), stamp);
+    app.state::<LspState>().saved(document);
+    DocumentSummary::of(document)
+  };
+  app.state::<BackupState>().touch();
+  tracing::info!(document = %id, path = %path.display(), "saved a file an extension changed");
+  events::emit(app, AppEvent::DocumentSaved { document: summary });
+  if settings::is_settings_file(app, &path)
+    && let Err(error) = settings::reload(app)
+  {
+    tracing::warn!(message = %error.message, "settings an extension changed are invalid");
+  }
+  Ok(())
 }
 
 async fn blocking<T: Send + 'static>(

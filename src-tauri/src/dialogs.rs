@@ -100,6 +100,26 @@ pub async fn confirm_overwrite(window: &WebviewWindow, title: &str) -> bool {
   }
 }
 
+/// Asks to go ahead with something that can't easily be undone: true if
+/// the user chose `action`.
+pub async fn confirm(window: &WebviewWindow, message: String, action: &str) -> bool {
+  let action = action.to_owned();
+  let dialog = window
+    .dialog()
+    .message(message)
+    .kind(MessageDialogKind::Warning)
+    .buttons(MessageDialogButtons::OkCancelCustom(
+      action.clone(),
+      "Cancel".into(),
+    ))
+    .parent(window);
+  match run_blocking(move || dialog.blocking_show_with_result()).await {
+    Some(MessageDialogResult::Ok) => true,
+    Some(MessageDialogResult::Custom(label)) => label == action,
+    _ => false,
+  }
+}
+
 async fn run_blocking<T: Send + 'static>(f: impl FnOnce() -> T + Send + 'static) -> Option<T> {
   match tauri::async_runtime::spawn_blocking(f).await {
     Ok(value) => Some(value),

@@ -84,6 +84,17 @@
   opacity: 0.6;
 }
 
+/* Cut, waiting to be pasted. */
+.explorer-tree__row[data-cut] {
+  opacity: 0.55;
+}
+
+/* Where a dragged file or folder would go: the folder and what's in it. */
+.explorer-tree__row[data-drop-target],
+.explorer-tree[data-drop-target] .explorer-tree__row {
+  background: var(--color-list-drop-background);
+}
+
 /* After the ignored color: a problem shows even in an ignored file. */
 .explorer-tree__row[data-problems='error'] {
   color: var(--color-list-error-foreground);

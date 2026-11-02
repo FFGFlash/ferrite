@@ -24,6 +24,7 @@ import * as lsp from '../ipc/lsp'
 import { appearance } from '../state/appearance'
 import {
   clearPendingSelection,
+  documentsStore,
   openPath,
   pendingSelection,
   registerBeforeSave,
@@ -802,7 +803,10 @@ export function EditorView({ documentId, title, transport = ipcTransport }: Edit
       { label: 'Copy', hint: isMac() ? '⌘C' : 'Ctrl+C', run: clipboard('copy') },
       { label: 'Paste', hint: isMac() ? '⌘V' : 'Ctrl+V', run: clipboard('paste') },
       null,
-      ...contributedMenuItems('editor/context').map(item => ({
+      ...contributedMenuItems('editor/context', {
+        path: documentsStore.get().documents.find(d => d.id === documentId)?.path ?? null,
+        directory: false,
+      }).map(item => ({
         label: item.title,
         hint: hint(item.command),
         run: () => runContributed(item.command),

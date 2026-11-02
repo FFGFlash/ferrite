@@ -5,8 +5,9 @@
 //! WebAssembly component (or a core module built with wit-bindgen, which
 //! is turned into a component on load) implementing the `extension` world
 //! of `ferrite-extension-api`. Its only capabilities are the functions of
-//! that interface: there is no WASI, so no filesystem, network,
-//! environment, or clock access.
+//! that interface: there is no WASI, so no network, environment, or clock
+//! access, and files only through the `files` interface (the open folder's,
+//! with the user's permission).
 //!
 //! - **Permissions** requested in the manifest must be granted by the user
 //!   before the extension starts, and are checked on every call.
@@ -24,6 +25,7 @@
 mod api;
 mod config;
 pub mod contributions;
+mod files;
 mod host;
 pub mod icons;
 pub mod keys;
@@ -53,6 +55,7 @@ use serde::Serialize;
 pub use api::{MAX_DIAGNOSTICS, MAX_EDITS, MAX_READ_BYTES, MAX_READ_LINES};
 pub use config::{ConfigProperty, ConfigType, ConfigValue};
 pub use contributions::Contributions;
+pub use files::{MAX_FILE_BYTES, MAX_LISTED_FILES};
 pub use host::{CommandTicket, ExtensionHost};
 pub use manifest::{MANIFEST_FILE, Manifest, ManifestError};
 pub use permissions::{Decision, Permission};
@@ -67,6 +70,26 @@ pub trait Embedder: Send + Sync + 'static {
   fn language_of(&self, path: &Path) -> Option<String>;
   /// Receives notifications. Must not block or call back into the host.
   fn notify(&self, notification: Notification);
+  /// The folder open in the editor, for the `files` interface.
+  fn open_folder(&self) -> Option<OpenFolder> {
+    None
+  }
+  /// Saves an open document to its file, as the user's Save does but
+  /// without asking anything. Called from extension threads, without the
+  /// editor locked.
+  fn save(&self, document: ferrite_core::DocumentId) -> Result<(), String> {
+    let _ = document;
+    Err("documents can't be saved here".into())
+  }
+}
+
+/// The folder open in the editor.
+#[derive(Debug, Clone)]
+pub struct OpenFolder {
+  /// As [`ferrite_workspace::normalize_path`] gives it.
+  pub root: PathBuf,
+  /// The user's `files.exclude` setting.
+  pub exclude: ferrite_workspace::ExcludeFilter,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]

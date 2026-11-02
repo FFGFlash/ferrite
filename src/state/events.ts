@@ -26,6 +26,8 @@ export function handleEvent(event: AppEvent): void {
       refreshDirectories(event.directories)
       break
     case 'documentReloaded':
+    case 'documentMoved':
+    case 'documentSaved':
       updateSummary(event.document)
       editorFor(event.document.id)?.refresh()
       break

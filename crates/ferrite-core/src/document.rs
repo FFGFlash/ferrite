@@ -205,6 +205,14 @@ impl Document {
     self.history.seal();
   }
 
+  /// Records that the document's file was renamed or moved to `path`. The
+  /// text and whether it's saved don't change.
+  pub fn moved_to(&mut self, path: PathBuf) {
+    if let Some(file) = &mut self.file {
+      file.path = path;
+    }
+  }
+
   /// The disk stamp recorded when the file was last loaded or saved.
   pub fn disk_stamp(&self) -> Option<&FileStamp> {
     self.file.as_ref().and_then(|file| file.stamp.as_ref())

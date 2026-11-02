@@ -16,7 +16,7 @@ use ferrite_extension_host::icons::IconTheme;
 use ferrite_extension_host::preview::PreviewElement;
 use ferrite_extension_host::{
   Embedder, ExtensionHost, ExtensionStatus, HostOptions, Limits, MANIFEST_FILE, Notification,
-  Permission, PreviewContent, PreviewInfo, StatusItem, ViewContent,
+  OpenFolder, Permission, PreviewContent, PreviewInfo, StatusItem, ViewContent,
 };
 use serde::{Serialize, Serializer};
 use tauri::{AppHandle, Manager, State, WebviewWindow};
@@ -29,6 +29,7 @@ use crate::events::{self, AppEvent};
 use crate::languages::{self, LanguagesState};
 use crate::lsp::{DiagnosticDto, DiagnosticMessageDto};
 use crate::settings::{self, Settings, SettingsState};
+use crate::workspace::WorkspaceState;
 
 const EXTENSIONS_DIR: &str = "extensions";
 const PERMISSIONS_FILE: &str = "extension-permissions.json";
@@ -129,6 +130,18 @@ impl Embedder for AppEmbedder {
       .state::<LanguagesState>()
       .for_path(path)
       .map(|language| language.id().to_owned())
+  }
+
+  fn open_folder(&self) -> Option<OpenFolder> {
+    let root = self.app.state::<WorkspaceState>().root()?;
+    Some(OpenFolder {
+      root,
+      exclude: self.app.state::<SettingsState>().get().exclude_filter(),
+    })
+  }
+
+  fn save(&self, document: DocumentId) -> Result<(), String> {
+    crate::editor::save_quietly(&self.app, document)
   }
 
   // Called with the editor lock possibly held, so this only emits events.

@@ -1,8 +1,10 @@
 //! Tidy: an example Ferrite extension.
 //!
 //! It flags trailing whitespace and lines longer than a configurable limit
-//! (as diagnostics), and adds two commands: one trims trailing whitespace
-//! (a validated, versioned edit) and one counts words.
+//! (as diagnostics), and adds commands: one trims trailing whitespace (a
+//! validated, versioned edit), one counts words, and one, in the explorer's
+//! menu, trims trailing whitespace in a file or every file in a folder
+//! (through the `files` interface).
 //!
 //! It shows how to keep per-document state up to date from change
 //! notifications without re-reading whole documents: problems are stored
@@ -16,7 +18,8 @@ use ferrite_extension_api::types::{
   Activation, ApiError, CommandContext, ConfigValue, Diagnostic, DocumentChange, DocumentId,
   DocumentInfo, LogLevel, MessageLevel, Permission, Position, Range, Severity, TextEdit,
 };
-use ferrite_extension_api::{Guest, export_extension, host};
+use ferrite_extension_api::files::{self, FileError};
+use ferrite_extension_api::{Guest, export_extension, host, workbench};
 
 /// Lines read per request.
 const CHUNK_LINES: u32 = 2_000;
@@ -297,6 +300,65 @@ fn trim(id: DocumentId) -> Result<String, String> {
   Err("The document kept changing; try again.".into())
 }
 
+fn describe_file(error: &FileError) -> String {
+  match error {
+    FileError::PermissionDenied(permission) => {
+      format!("Tidy is not allowed {permission} (see the Extensions view)")
+    }
+    FileError::OutsideFolder => "only files in the open folder can be tidied".into(),
+    FileError::NotFound => "the file or folder no longer exists".into(),
+    FileError::WrongKind => "not a file".into(),
+    FileError::NotText => "not a text file".into(),
+    FileError::TooLarge(message) | FileError::Failed(message) => message.clone(),
+  }
+}
+
+/// `text` without spaces and tabs at the ends of its lines; line breaks
+/// are kept as they are.
+fn trim_text(text: &str) -> String {
+  let mut trimmed = String::with_capacity(text.len());
+  for line in text.split_inclusive('\n') {
+    let body = line.trim_end_matches(['\r', '\n']);
+    trimmed.push_str(body.trim_end_matches([' ', '\t']));
+    trimmed.push_str(&line[body.len()..]);
+  }
+  trimmed
+}
+
+/// Trims trailing whitespace in a file, or in every file in a folder,
+/// from the explorer's menu. Files that aren't text are skipped, and so
+/// are Markdown files in a folder (trailing spaces break lines there).
+fn trim_files(path: &str) -> Result<String, String> {
+  let (paths, folder) = match files::list_files(path) {
+    Ok(list) => (list.paths, true),
+    Err(FileError::WrongKind) => (vec![path.to_owned()], false),
+    Err(error) => return Err(describe_file(&error)),
+  };
+  let mut changed = 0;
+  for file in &paths {
+    let lower = file.to_lowercase();
+    if folder && (lower.ends_with(".md") || lower.ends_with(".markdown")) {
+      continue;
+    }
+    let text = match files::read_file(file) {
+      Ok(text) => text,
+      Err(FileError::NotText | FileError::TooLarge(_)) if folder => continue,
+      Err(error) => return Err(format!("{file}: {}", describe_file(&error))),
+    };
+    let trimmed = trim_text(&text);
+    if trimmed != text {
+      files::write_file(file, &trimmed).map_err(|error| format!("{file}: {}", describe_file(&error)))?;
+      changed += 1;
+    }
+  }
+  Ok(match (changed, folder) {
+    (0, _) => "No trailing whitespace found.".into(),
+    (_, false) => "Trimmed trailing whitespace.".into(),
+    (1, true) => "Trimmed trailing whitespace in 1 file.".into(),
+    (n, true) => format!("Trimmed trailing whitespace in {n} files."),
+  })
+}
+
 /// Counts words in the primary selection, or the whole document.
 fn count_words(id: DocumentId, context: &CommandContext) -> Result<String, String> {
   if let Some(selection) = context.selections.first()
@@ -343,6 +405,12 @@ impl Guest for Tidy {
   }
 
   fn run_command(command: String, context: CommandContext) -> Result<(), String> {
+    if command == "example.tidy.trimFiles" {
+      // From the explorer: the file's or folder's path.
+      let path = workbench::command_argument().ok_or("Choose a file or folder in the explorer.")?;
+      host::show_message(MessageLevel::Info, &trim_files(&path)?);
+      return Ok(());
+    }
     let Some(id) = context.document else {
       return Err("Open a document first.".into());
     };
@@ -419,6 +487,12 @@ mod tests {
   fn counts_columns_in_bytes_and_limits_in_characters() {
     let problems = check_line("ééééé", &settings(3));
     assert_eq!((problems[0].start, problems[0].end), (6, 10));
+  }
+
+  #[test]
+  fn trims_line_ends_and_keeps_line_breaks() {
+    assert_eq!(trim_text("a  \r\nb\t\nc \n\n  "), "a\r\nb\nc\n\n");
+    assert_eq!(trim_text("clean\n"), "clean\n");
   }
 
   #[test]

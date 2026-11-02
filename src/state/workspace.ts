@@ -125,6 +125,110 @@ export async function createEntry(
   return created.path
 }
 
+/** Whether `path` is `folder` or inside it. */
+export function isWithin(path: string, folder: string): boolean {
+  return path === folder || path.startsWith(folder + pathSeparator(folder))
+}
+
+/** The folder that holds `path`. */
+export function parentOf(path: string): string {
+  const index = path.lastIndexOf(pathSeparator(path))
+  return index > 0 ? path.slice(0, index) : path
+}
+
+/** Where `path` is after `from` (a file or folder) moved to `to`; `null` if it didn't move. */
+export function movedPath(path: string, from: string, to: string): string | null {
+  return isWithin(path, from) ? to + path.slice(from.length) : null
+}
+
+/**
+ * Follows a file or folder that moved from `from` to `to`: expanded folders
+ * stay expanded under their new paths, and the listings that changed are
+ * fetched again.
+ */
+async function afterMove(from: string, to: string): Promise<void> {
+  const before = layoutStore.get().expanded
+  const after = before.map(path => movedPath(path, from, to) ?? path)
+  if (after.some((path, index) => path !== before[index])) {
+    updateLayout({ expanded: after })
+  }
+  forget(from)
+  const moved = after.filter(path => isWithin(path, to))
+  await Promise.all([parentOf(from), parentOf(to), ...moved].map(reload))
+}
+
+/** Drops the listings of `path` and what's inside it, which no longer exist there. */
+function forget(path: string): void {
+  workspaceStore.update(state => {
+    const listings = new Map(state.listings)
+    for (const listed of state.listings.keys()) {
+      if (isWithin(listed, path)) {
+        listings.delete(listed)
+      }
+    }
+    return { ...state, listings }
+  })
+}
+
+/** Lists `path` again if it's loaded, or expanded (as a moved folder is). */
+function reload(path: string): Promise<void> {
+  const { listings, info } = workspaceStore.get()
+  return listings.has(path) || path === info?.root || expanded().has(path)
+    ? load(path)
+    : Promise.resolve()
+}
+
+/**
+ * Renames a file or folder, returning its new path; `name` may name new
+ * subfolders, which are expanded. Failures are thrown for the caller to
+ * show.
+ */
+export async function renameEntry(path: string, name: string): Promise<string> {
+  const renamed = await ipc.renameEntry(path, name)
+  const root = workspaceStore.get().info?.root
+  const created = renamed.directories.filter(folder => folder !== root && !expanded().has(folder))
+  if (created.length > 0) {
+    updateLayout({ expanded: [...expanded(), ...created] })
+  }
+  await afterMove(path, renamed.path)
+  await Promise.all(renamed.directories.map(reload))
+  return renamed.path
+}
+
+/** Moves files and folders into `folder`, returning their new paths. */
+export async function moveEntries(paths: readonly string[], folder: string): Promise<string[]> {
+  const moved = await ipc.moveEntries([...paths], folder)
+  await Promise.all(paths.map((path, index) => afterMove(path, moved[index] ?? path)))
+  return moved
+}
+
+/** Copies files and folders into `folder`, returning the copies' paths. */
+export async function copyEntries(paths: readonly string[], folder: string): Promise<string[]> {
+  const copies = await ipc.copyEntries([...paths], folder)
+  await reload(folder)
+  return copies
+}
+
+/**
+ * Deletes files and folders after the backend asks: to the trash, or
+ * permanently. Returns false if the user cancelled.
+ */
+export async function deleteEntries(
+  paths: readonly string[],
+  permanent: boolean,
+): Promise<boolean> {
+  if (!(await ipc.deleteEntries([...paths], permanent))) {
+    return false
+  }
+  const gone = (folder: string) => paths.some(path => isWithin(folder, path))
+  if (layoutStore.get().expanded.some(gone)) {
+    updateLayout({ expanded: layoutStore.get().expanded.filter(folder => !gone(folder)) })
+  }
+  paths.forEach(forget)
+  await Promise.all(paths.map(path => reload(parentOf(path))))
+  return true
+}
+
 /** The folders between the workspace root and `path` (see `foldersBetween`). */
 export function foldersTo(path: string): string[] | null {
   const root = workspaceStore.get().info?.root

@@ -1,25 +1,29 @@
-//! Filesystem access for Ferrite: loading and saving files, listing and
-//! creating entries for the explorer, the Go to File index, find in files,
-//! change notifications, and backups of unsaved documents. This crate holds
-//! no editor state.
+//! Filesystem access for Ferrite: loading and saving files, listing,
+//! creating, renaming, moving, copying, and deleting entries for the
+//! explorer, the Go to File index, find in files, change notifications, and
+//! backups of unsaved documents. This crate holds no editor state.
 
 mod backup;
 mod create;
+mod entries;
 mod file;
 mod filters;
 mod index;
+mod paths;
 mod search;
 mod tree;
 mod watcher;
 
 pub use backup::{Abandoned, BackupMeta, BackupSession, RecoveredBackup};
-pub use create::{CreateError, Created, create_entry};
+pub use create::{Created, create_entry};
+pub use entries::{EntryError, copy_entry, delete_entry, move_entry, rename_entry};
 pub use file::{
   FileError, FileStamp, LoadedFile, MAX_FILE_BYTES, load_text_file, save_text_file,
   write_file_atomically,
 };
 pub use filters::{ExcludeFilter, FilterError, to_slash};
-pub use index::{FileIndex, FileMatch, MAX_INDEXED_FILES, scan_files};
+pub use index::{FileIndex, FileMatch, MAX_INDEXED_FILES, files_in, scan_files};
+pub use paths::normalize_path;
 pub use search::{FileMatches, LineMatch, SearchLimits, SearchSummary, search_workspace};
 pub use tree::{DirEntry, EntryKind, list_directory};
 pub use watcher::{WatchError, WorkspaceWatcher};

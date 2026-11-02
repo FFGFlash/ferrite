@@ -268,6 +268,24 @@ below the files creates at the top level. Type a name and press
 New files open in the editor. Go to File and find in files skip them, along with paths matching
 `files.exclude`. The folder, open files, and layout are restored on the next launch.
 
+Right-click a file or folder for the rest, or use these keys while the explorer has focus:
+
+| Action                                      | Keys (Windows and Linux)                      |
+| ------------------------------------------- | --------------------------------------------- |
+| Rename                                      | `F2` (`Enter` on macOS)                       |
+| Delete to the Recycle Bin / Trash           | `Delete` (`Cmd+Backspace` on macOS)           |
+| Delete permanently                          | `Shift+Delete` (`Cmd+Alt+Backspace` on macOS) |
+| Cut, copy, paste                            | `Ctrl+X`, `Ctrl+C`, `Ctrl+V`                  |
+| Copy path, copy path relative to the folder | `Shift+Alt+C`, `Ctrl+Shift+Alt+C`             |
+| Reveal in File Explorer (or Finder)         | `Shift+Alt+R`                                 |
+
+Deleting asks first. Pasting where the name is taken adds ` copy` (`notes copy.md`). Drag a file or
+folder onto a folder to move it, or hold `Ctrl` (`Alt` on macOS) to copy it; hovering over a
+closed folder opens it. Open files follow when they're renamed or moved, and their language
+servers and extensions see the new name. Files of a deleted folder stay open, as when another
+program deletes them. Extensions can add their own items, for files, folders, or files with
+certain names, such as Tidy's **Trim Trailing Whitespace in Files**.
+
 ## Layout
 
 Everything is a tab: documents, the explorer, search, extensions, extension views, and terminals.

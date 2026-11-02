@@ -124,6 +124,8 @@ describe('accessibility (axe)', () => {
     explorerStore.set({
       focused: null,
       creating: { parent: '/w', directory: false },
+      renaming: null,
+      clipboard: null,
       revealed: null,
     })
     render(<Workbench appInfo={null} />)
@@ -131,7 +133,13 @@ describe('accessibility (axe)', () => {
     expect(screen.getByRole('alert')).toBeInTheDocument()
     expect(await axeViolations()).toEqual([])
     act(() => {
-      explorerStore.set({ focused: null, creating: null, revealed: null })
+      explorerStore.set({
+        focused: null,
+        creating: null,
+        renaming: null,
+        clipboard: null,
+        revealed: null,
+      })
       workspaceStore.set({ info: null, listings: new Map(), indexing: false })
     })
   })

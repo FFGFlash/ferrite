@@ -10,6 +10,7 @@ mod bench;
 mod commands;
 mod dialogs;
 mod editor;
+mod entries;
 mod error;
 mod events;
 mod extensions;
@@ -131,6 +132,7 @@ pub fn run() {
     })
     .invoke_handler(tauri::generate_handler![
       commands::app_info,
+      commands::clipboard_write_text,
       commands::frontend_log,
       commands::frontend_ready,
       commands::open_external,
@@ -165,6 +167,11 @@ pub fn run() {
       workspace::workspace_close,
       workspace::workspace_list_dir,
       workspace::workspace_create,
+      entries::workspace_rename,
+      entries::workspace_move,
+      entries::workspace_copy,
+      entries::workspace_delete,
+      entries::workspace_reveal,
       workspace::workspace_find_files,
       workspace::workspace_search,
       workspace::workspace_search_cancel,

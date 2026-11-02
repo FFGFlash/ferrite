@@ -15,6 +15,7 @@ import {
   setExtensionPermissions,
   type DecorationType,
   type ExtensionStatus,
+  type MenuContribution,
   type MenuLocation,
   type MessageLevel,
   type ResourceUsage,
@@ -171,18 +172,71 @@ export interface ContributedMenuItem {
   group: string
 }
 
-/** Contributed menu items for `location`, grouped and sorted. */
-export function contributedMenuItems(location: MenuLocation): ContributedMenuItem[] {
+/** What a menu is for: a file or folder in the explorer, or the active document's file. */
+export interface MenuTarget {
+  /** `null` for an untitled document. */
+  path: string | null
+  directory: boolean
+}
+
+/** Contributed menu items for `location` that apply to `target`, grouped and sorted. */
+export function contributedMenuItems(
+  location: MenuLocation,
+  target: MenuTarget,
+): ContributedMenuItem[] {
   const items: ContributedMenuItem[] = []
   for (const extension of usableExtensions(extensionsStore.get())) {
     for (const menu of extension.contributions.menus) {
       const command = extension.commands.find(c => c.id === menu.command)
-      if (menu.location === location && command) {
+      if (menu.location === location && command && menuApplies(menu, target)) {
         items.push({ command: menu.command, title: command.title, group: menu.group })
       }
     }
   }
   return items.sort((a, b) => a.group.localeCompare(b.group) || a.title.localeCompare(b.title))
+}
+
+/** Whether a menu item is for `target`: its kind, and for a file, its name's patterns. */
+export function menuApplies(menu: MenuContribution, target: MenuTarget): boolean {
+  if (target.directory) {
+    return menu.forFolders
+  }
+  if (!menu.forFiles) {
+    return false
+  }
+  if (menu.patterns.length === 0) {
+    return true
+  }
+  const name = target.path?.split(/[/\\]/).pop()
+  return name !== undefined && menu.patterns.some(pattern => patternMatcher(pattern).test(name))
+}
+
+/**
+ * A file name pattern as a regular expression: `*` is any characters, `?`
+ * one, and `{a,b}` either; case is ignored. The backend checked the
+ * pattern's syntax.
+ */
+export function patternMatcher(pattern: string): RegExp {
+  let source = ''
+  let inBraces = false
+  for (const c of pattern) {
+    if (c === '*') {
+      source += '.*'
+    } else if (c === '?') {
+      source += '.'
+    } else if (c === '{') {
+      inBraces = true
+      source += '(?:'
+    } else if (c === '}') {
+      inBraces = false
+      source += ')'
+    } else if (c === ',' && inBraces) {
+      source += '|'
+    } else {
+      source += c.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+    }
+  }
+  return new RegExp(`^${source}$`, 'iu')
 }
 
 /** Decoration types by key, from usable extensions. */

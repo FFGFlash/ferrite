@@ -6,6 +6,8 @@ do only what the [extension API](../crates/ferrite-extension-api/wit/extension.w
 - register commands;
 - read open documents and get notified of changes;
 - edit documents through validated, versioned edits;
+- read and write files in the open folder, such as every file in a folder chosen in the
+  explorer;
 - publish diagnostics (squiggles, hover messages, and entries in the Problems view);
 - customize the workbench: color themes, keybindings, context menu items, status bar items,
   side bar views, editor decorations, and previews (formatted pages, such as rendered
@@ -14,15 +16,16 @@ do only what the [extension API](../crates/ferrite-extension-api/wit/extension.w
 - read their own settings;
 - log, and show messages.
 
-There is no filesystem, network, environment, clock, or process access. A manifest declares
-the permissions an extension needs, and the user grants them before the extension starts.
+There is no network, environment, clock, or process access, and no file access beyond the
+open folder's files. A manifest declares the permissions an extension needs, and the user grants
+them before the extension starts.
 (Language servers an extension declares are started by Ferrite, not by the extension, and only
 once the user allows it.)
 
 This guide uses these examples:
 
 - [Tidy](../extensions/tidy/) flags trailing whitespace and long lines, and has commands to trim
-  trailing whitespace and to count words.
+  trailing whitespace and to count words. Its explorer menu item trims every file in a folder.
 - [TODOs](../extensions/todos/) uses every workbench contribution: it highlights TODO comments,
   lists them in a side bar view, counts them in the status bar, and adds a keybinding and a
   context menu item.
@@ -110,6 +113,8 @@ ferrite = ">=0.1.0"               # optional semver requirement on the editor
 [permissions]
 documents_read = true
 documents_write = true
+files_read = true
+files_write = true
 
 [[commands]]
 id = "example.tidy.trimTrailingWhitespace"   # must start with the extension id
@@ -166,6 +171,8 @@ commands run only from view items or other contributions.
 | ------------------ | -------------------------------------------------------------------------------- |
 | `documents_read`   | Listing and reading open documents, change notifications, publishing diagnostics |
 | `documents_write`  | Editing open documents                                                           |
+| `files_read`       | Listing and reading [files](#files) in the open folder (API 1.3)                 |
+| `files_write`      | Changing and creating files in the open folder (API 1.3)                         |
 | `language_servers` | Ferrite running the extension's [language servers](#language-servers)            |
 
 Commands, settings, logging, messages, and languages need no permission.
@@ -177,14 +184,15 @@ permission, now or later in the Extensions view. Decisions are stored in
 
 An extension with denied permissions still runs. Calls that need them fail with
 `permission-denied`, and it gets no document notifications without `documents_read`.
-`activate` receives the granted permissions, so the extension can adapt. Changing permissions
-restarts the extension.
+`activate` receives the granted permissions, so the extension can adapt (except `files_read`
+and `files_write`, which the API 1.0 `permission` type can't name: a call tells by failing with
+`permission-denied`). Changing permissions restarts the extension.
 
 ## The API
 
 The full interface, with comments, is
 [`extension.wit`](../crates/ferrite-extension-api/wit/extension.wit). Functions the extension
-calls are in `host`; the extension exports the rest.
+calls are in `host`, `workbench`, and `files`; the extension exports the rest.
 
 ### Positions and versions
 
@@ -245,9 +253,36 @@ Each diagnostic has a range, a severity, a message, and an optional code.
 - **Version.** It may be the current version or one of the last eight sent to the extension.
   Ranges are converted in that text, then move with later edits.
 - **Limit.** At most 5,000 diagnostics per call.
-- **Display.** They appear as squiggles, in hover cards (labeled with the extension's name), and
-  in the status bar's counts for files with a known language.
+- **Display.** They appear as squiggles, in hover cards (labeled with the extension's name), in
+  the Problems view, and in the status bar's counts.
 - **Removal.** They are removed when the extension stops.
+
+### Files
+
+The `files` interface (API 1.3) works on files in the folder open in the editor, such as every
+file in a folder the user chose in the explorer. Paths are absolute.
+
+- `folder()` returns the open folder, or `none`.
+- `list-files(folder)` returns the files in a folder and its subfolders, sorted: at most 10,000,
+  with `truncated` set if there were more. Like Go to File, it leaves out what `files.exclude`
+  hides and what Git ignores.
+- `read-file(path)` returns a file's text, line breaks included. A file open in the editor is
+  read from its document, unsaved changes included, so the extension sees what the user sees.
+- `write-file(path, text)` replaces a file's text, or creates the file in an existing folder.
+  Line breaks are converted to the file's line ending (a new file gets them as written). A file
+  open in the editor is changed in its document, as one undo step, and saved unless it had
+  unsaved changes (those stay the user's to save). Writing the text a file already has changes
+  nothing.
+
+Reading needs `files_read`, and writing `files_write`. Only files inside the open folder can be
+used: paths are resolved (links and `..` included) first, and files that `files.exclude` hides,
+and anything in a `.git` folder, are refused too. Failures are a `file-error`:
+`permission-denied` (naming the permission), `outside-folder`, `not-found`, `wrong-kind` (a
+folder where a file is needed, or the other way round), `not-text` (not UTF-8), `too-large`
+(more than 16 MiB), or `failed` with the reason.
+
+A command has 10 s, so a command that works through many files should do little per file. Tidy's
+**Trim Trailing Whitespace in Files** trims a few thousand files well within that.
 
 ### Settings, logging, and messages
 
@@ -409,12 +444,24 @@ Keyboard Shortcuts** lists every command with its id and keys.
 location = "editor/context"       # or "explorer/context"
 command = "example.todos.insert"
 group = "todos"                   # items are grouped by this, then sorted by title
+patterns = ["*.rs", "*.{ts,tsx}"] # optional: only for files whose names match one
+
+[[menus]]
+location = "explorer/context"
+command = "example.tidy.trimFiles"
+targets = ["files", "folders"]    # explorer only; default ["files"]
 ```
 
 - **`editor/context`** items appear in the editor's right-click menu and run with the usual
   command context (the active document and its selections).
-- **`explorer/context`** items appear when right-clicking a file in the explorer. They receive
-  the file's path as the command argument (`workbench::command-argument`).
+- **`explorer/context`** items appear when right-clicking a file or folder in the explorer, as
+  `targets` says (right-clicking the space below the files counts as the open folder). They
+  receive its path as the command argument (`workbench::command-argument`). With the
+  [`files`](#files) interface, a command can work on everything in a folder, as a formatter's
+  **Format All** would.
+- **`patterns`** match a file's name, ignoring case: `*` is any characters, `?` one, and
+  `{a,b}` either. An item with patterns isn't shown for untitled documents. At most 20 patterns
+  of 100 characters each.
 
 ### Status bar items
 
@@ -831,19 +878,19 @@ model for testing an extension end to end. Run them with
 ## Other languages
 
 Any language that can produce a WebAssembly component for the `extension` world works. The
-component must import nothing but the Ferrite interfaces (`ferrite:extension/host` and
-`ferrite:extension/workbench`). The host provides no WASI, so
+component must import nothing but the Ferrite interfaces (`ferrite:extension/host`,
+`ferrite:extension/workbench`, and `ferrite:extension/files`). The host provides no WASI, so
 a component that imports `wasi:*` interfaces (most toolchains' defaults) fails to start, with a
 message saying so. Rust on `wasm32-unknown-unknown` is the supported path for now.
 
 ## Versioning
 
-The WIT package is versioned: `ferrite:extension@1.1.0`, `api_version = "1"`.
+The WIT package is versioned: `ferrite:extension@1.3.0`, `api_version = "1"`.
 
 - **Additions.** New host functions arrive as minor versions of the package. Version 1.1 added the
-  `workbench` interface, and 1.2 added previews to it. Wasmtime links components built against an
-  older minor version: the host's tests load a Tidy build made against 1.0 and a TODOs build made
-  against 1.1.
+  `workbench` interface, 1.2 added previews to it, and 1.3 added the `files` interface. Wasmtime
+  links components built against an older minor version: the host's tests load Tidy builds made
+  against 1.0 and 1.2 and a TODOs build made against 1.1.
 - **Breaking changes.** Changes that break existing extensions get a new major version and a new
   `api_version`.
 - **Rejection.** Manifests for unsupported versions are rejected before loading.

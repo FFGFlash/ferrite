@@ -15,7 +15,7 @@ use ferrite_core::{DocumentId, Editor, EditorOp};
 use ferrite_extension_host::preview::{ImageSource, LinkTarget, PreviewElement};
 use ferrite_extension_host::{
   ConfigValue, Embedder, ExtensionHost, ExtensionState, HostOptions, Limits, Notification,
-  Permission, PreviewInfo, Severity,
+  OpenFolder, Permission, PreviewInfo, Severity,
 };
 
 /// Builds the extensions workspace once and returns its output folder.
@@ -48,6 +48,10 @@ struct Fake {
   editor: Mutex<Editor>,
   notifications: Mutex<Vec<Notification>>,
   arrived: Condvar,
+  /// The open folder, if any.
+  folder: Mutex<Option<PathBuf>>,
+  /// Documents saved through `save`.
+  saved: Mutex<Vec<DocumentId>>,
 }
 
 impl Embedder for Fake {
@@ -74,6 +78,34 @@ impl Embedder for Fake {
       .unwrap_or_else(PoisonError::into_inner)
       .push(notification);
     self.arrived.notify_all();
+  }
+
+  fn open_folder(&self) -> Option<OpenFolder> {
+    let root = self
+      .folder
+      .lock()
+      .unwrap_or_else(PoisonError::into_inner)
+      .clone()?;
+    Some(OpenFolder {
+      root,
+      exclude: ferrite_workspace::ExcludeFilter::new(&[".git", "excluded"]).expect("valid"),
+    })
+  }
+
+  fn save(&self, document: DocumentId) -> Result<(), String> {
+    let mut editor = self.editor();
+    let document = editor.document_mut(document).map_err(|e| e.to_string())?;
+    let point = document.save_point();
+    let path = document.path().expect("a file").to_path_buf();
+    let stamp = ferrite_workspace::save_text_file(&path, &point.snapshot, point.has_bom, None)
+      .map_err(|e| e.to_string())?;
+    document.mark_saved(&point, path, stamp);
+    self
+      .saved
+      .lock()
+      .unwrap_or_else(PoisonError::into_inner)
+      .push(document.id());
+    Ok(())
   }
 }
 
@@ -786,6 +818,165 @@ fn extensions_built_against_api_1_0_still_run() {
     *n == Notification::DiagnosticsChanged(id)
   });
   assert_eq!(state_of(&s.host).0, ExtensionState::Active);
+}
+
+#[test]
+fn extensions_built_against_api_1_2_still_run() {
+  let s = setup("tidy", "tidy", Some(ALL), "", |m| m);
+  let dir = PathBuf::from(&s.host.statuses()[0].path);
+  let old = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/tidy-api-1.2.wasm");
+  std::fs::copy(old, dir.join("tidy.wasm")).expect("copy");
+  let id = s.fake.open(&s.host, "x  \n");
+  s.host.load();
+  s.fake.wait_for("diagnostics", |n| {
+    *n == Notification::DiagnosticsChanged(id)
+  });
+  assert_eq!(state_of(&s.host).0, ExtensionState::Active);
+}
+
+const WITH_FILES: &[Permission] = &[
+  Permission::DocumentsRead,
+  Permission::DocumentsWrite,
+  Permission::FilesRead,
+  Permission::FilesWrite,
+];
+
+/// A folder of files for Tidy to trim, open in the fake editor.
+fn tidy_folder(s: &Setup) -> PathBuf {
+  let root = ferrite_workspace::normalize_path(s._dir.path()).join("project");
+  let write = |relative: &str, bytes: &[u8]| {
+    let path = root.join(relative);
+    std::fs::create_dir_all(path.parent().expect("parent")).expect("mkdir");
+    std::fs::write(path, bytes).expect("write");
+  };
+  write("src/a.rs", b"fn a() {  \r\n}\r\n");
+  write("src/clean.rs", b"fn clean() {}\n");
+  write("src/open.rs", b"open  \n");
+  write("src/edited.rs", b"edited  \n");
+  write("src/image.bin", b"\xff\xfe  \n");
+  write("notes.md", b"hard break  \n");
+  write("excluded/x.rs", b"x  \n");
+  *s.fake.folder.lock().unwrap_or_else(PoisonError::into_inner) = Some(root.clone());
+  root
+}
+
+#[test]
+fn tidy_trims_files_in_a_folder_from_the_explorer() {
+  let s = setup("tidy", "tidy", Some(WITH_FILES), "", |m| m);
+  let root = tidy_folder(&s);
+  let src = root.join("src");
+  let open = s.fake.open_file(&s.host, &src.join("open.rs"));
+  let edited = s.fake.open_file(&s.host, &src.join("edited.rs"));
+  s.fake.type_text(&s.host, edited, "// mine\n");
+  s.host.load();
+
+  s.host
+    .run_command(
+      "example.tidy.trimFiles",
+      None,
+      Some(root.display().to_string()),
+    )
+    .expect("queued")
+    .wait()
+    .expect("trimmed");
+  assert_eq!(
+    s.fake.wait_for_message("Trimmed"),
+    "Trimmed trailing whitespace in 3 files."
+  );
+  let read = |path: &Path| std::fs::read(path).expect("reads");
+  // Line breaks are kept.
+  assert_eq!(read(&src.join("a.rs")), b"fn a() {\r\n}\r\n");
+  assert_eq!(read(&src.join("clean.rs")), b"fn clean() {}\n");
+  // Skipped: not text, Markdown, and excluded.
+  assert_eq!(read(&src.join("image.bin")), b"\xff\xfe  \n");
+  assert_eq!(read(&root.join("notes.md")), b"hard break  \n");
+  assert_eq!(read(&root.join("excluded/x.rs")), b"x  \n");
+
+  // An open document is changed in the editor (undoably), and saved if it
+  // had no unsaved changes.
+  assert_eq!(s.fake.text(open), "open\n");
+  assert_eq!(read(&src.join("open.rs")), b"open\n");
+  assert_eq!(s.fake.text(edited), "// mine\nedited\n");
+  assert_eq!(read(&src.join("edited.rs")), b"edited  \n");
+  assert_eq!(
+    *s.fake.saved.lock().unwrap_or_else(PoisonError::into_inner),
+    vec![open]
+  );
+  {
+    let editor = s.fake.editor();
+    assert!(!editor.document(open).expect("open").is_dirty());
+    assert!(editor.document(edited).expect("open").is_dirty());
+  }
+
+  // A file outside the folder, or an excluded one, can't be used.
+  let outside = s._dir.path().join("outside.rs");
+  std::fs::write(&outside, "x  \n").expect("write");
+  for path in [outside, root.join("excluded/x.rs")] {
+    let error = s
+      .host
+      .run_command(
+        "example.tidy.trimFiles",
+        None,
+        Some(path.display().to_string()),
+      )
+      .expect("queued")
+      .wait()
+      .expect_err("refused");
+    assert!(error.contains("only files in the open folder"), "{error}");
+  }
+}
+
+#[test]
+fn files_need_their_permissions() {
+  let s = setup("tidy", "tidy", Some(ALL), "", |m| m);
+  let root = tidy_folder(&s);
+  s.host.load();
+  let error = s
+    .host
+    .run_command(
+      "example.tidy.trimFiles",
+      None,
+      Some(root.display().to_string()),
+    )
+    .expect("queued")
+    .wait()
+    .expect_err("refused");
+  assert!(error.contains("not allowed files-read"), "{error}");
+  assert_eq!(
+    std::fs::read(root.join("src/a.rs")).expect("reads"),
+    b"fn a() {  \r\n}\r\n"
+  );
+}
+
+#[test]
+fn a_moved_document_is_reopened_for_extensions() {
+  let s = setup("tidy", "tidy", Some(ALL), "", |m| m);
+  let dir = ferrite_workspace::normalize_path(s._dir.path());
+  std::fs::write(dir.join("a.txt"), "x  \n").expect("write");
+  let id = s.fake.open_file(&s.host, &dir.join("a.txt"));
+  s.host.load();
+  s.fake.wait_for("diagnostics", |n| {
+    *n == Notification::DiagnosticsChanged(id)
+  });
+
+  std::fs::rename(dir.join("a.txt"), dir.join("b.txt")).expect("rename");
+  {
+    let mut editor = s.fake.editor();
+    editor.follow_move(&dir.join("a.txt"), &dir.join("b.txt"));
+    s.host.sync(editor.document(id).expect("open"));
+  }
+  // Closed and opened again: Tidy checks it afresh.
+  s.fake.wait_for("diagnostics again", |n| {
+    *n == Notification::DiagnosticsChanged(id)
+  });
+  let editor = s.fake.editor();
+  let document = editor.document(id).expect("open");
+  assert_eq!(
+    s.host
+      .diagnostics(document, 0..document.buffer().len())
+      .len(),
+    1
+  );
 }
 
 #[test]

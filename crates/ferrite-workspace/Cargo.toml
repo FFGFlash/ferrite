@@ -17,6 +17,7 @@ serde_json = { workspace = true }
 tempfile = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
+trash = { workspace = true }
 
 [lints]
 workspace = true

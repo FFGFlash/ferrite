@@ -31,6 +31,12 @@ pub enum AppEvent {
   DocumentReloaded { document: DocumentSummary },
   /// A document with unsaved changes was modified on disk by another program.
   DocumentChangedOnDisk { document: DocumentSummary },
+  /// A document's file was renamed or moved (from the explorer), so its
+  /// path and title changed.
+  DocumentMoved { document: DocumentSummary },
+  /// A document was saved without the frontend asking (an extension
+  /// changed its file).
+  DocumentSaved { document: DocumentSummary },
   /// Settings were applied; `announce` tells the user (not when they
   /// changed one setting in the settings editor).
   SettingsChanged {

@@ -13,7 +13,15 @@ import { layoutStore, updateLayout } from '../state/layout'
 import { notify } from '../state/notifications'
 import { closeFolder, collapseAll, openFolder, workspaceStore } from '../state/workspace'
 import { isMac } from '../editor/keymap'
-import { beginCreate } from '../panels/explorerState'
+import {
+  beginCreate,
+  beginRename,
+  copyPath,
+  deleteEntry,
+  focusedEntry,
+  revealInSystem,
+  revealLabel,
+} from '../panels/explorerState'
 import { clearTerminal, closeTerminal, terminalsStore } from '../terminal/terminals'
 import { menuOrigin, openDefaultProfileMenu, openNewTerminalMenu } from '../terminal/profileMenu'
 import {
@@ -44,6 +52,12 @@ import {
 const hasEditor = () => activeEditor.get() !== null
 const hasDocument = () => documentsStore.get().activeId !== null
 const hasWorkspace = () => workspaceStore.get().info !== null
+/** Runs `action` on the explorer's focused file or folder. */
+const onFocusedEntry = (action: (path: string) => void | Promise<void>) => () => {
+  const entry = focusedEntry()
+  return entry ? action(entry.path) : undefined
+}
+const hasFocusedEntry = () => focusedEntry() !== null
 const hasTerminal = () => terminalsStore.get().activeId !== null
 const editor = () => activeEditor.get()
 
@@ -343,6 +357,51 @@ export const builtinCommands: Command[] = [
     title: 'Collapse Folders',
     enabled: hasWorkspace,
     run: collapseAll,
+  },
+  {
+    id: 'explorer.rename',
+    category: 'Explorer',
+    title: 'Rename…',
+    enabled: hasFocusedEntry,
+    run: onFocusedEntry(path => {
+      showView('explorer', false)
+      beginRename(path)
+    }),
+  },
+  {
+    id: 'explorer.delete',
+    category: 'Explorer',
+    title: 'Delete',
+    enabled: hasFocusedEntry,
+    run: onFocusedEntry(path => deleteEntry(path)),
+  },
+  {
+    id: 'explorer.deletePermanently',
+    category: 'Explorer',
+    title: 'Delete Permanently',
+    enabled: hasFocusedEntry,
+    run: onFocusedEntry(path => deleteEntry(path, true)),
+  },
+  {
+    id: 'explorer.copyPath',
+    category: 'Explorer',
+    title: 'Copy Path',
+    enabled: hasFocusedEntry,
+    run: onFocusedEntry(path => copyPath(path, false)),
+  },
+  {
+    id: 'explorer.copyRelativePath',
+    category: 'Explorer',
+    title: 'Copy Relative Path',
+    enabled: hasFocusedEntry,
+    run: onFocusedEntry(path => copyPath(path, true)),
+  },
+  {
+    id: 'explorer.reveal',
+    category: 'Explorer',
+    title: revealLabel(),
+    enabled: hasFocusedEntry,
+    run: onFocusedEntry(revealInSystem),
   },
   {
     id: 'view.nextEditor',

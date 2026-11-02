@@ -3,7 +3,8 @@
  */
 import { call } from './index'
 
-export type Permission = 'documents-read' | 'documents-write' | 'language-servers'
+export type Permission =
+  'documents-read' | 'documents-write' | 'files-read' | 'files-write' | 'language-servers'
 
 export type ExtensionState =
   | 'inactive'
@@ -79,6 +80,12 @@ export interface MenuContribution {
   location: MenuLocation
   command: string
   group: string
+  /** In the explorer: shown for files. */
+  forFiles: boolean
+  /** In the explorer: shown for folders. */
+  forFolders: boolean
+  /** File name patterns (`*.md`, `*.{ts,tsx}`); only matching files get it. Empty: all. */
+  patterns: string[]
 }
 
 export interface ViewContribution {

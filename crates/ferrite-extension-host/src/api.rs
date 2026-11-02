@@ -130,7 +130,11 @@ impl ApiContext {
     self.shared()
   }
 
-  fn shared(&self) -> Result<Arc<Shared>, ApiError> {
+  pub(crate) fn has(&self, permission: Permission) -> bool {
+    self.granted.contains(&permission)
+  }
+
+  pub(crate) fn shared(&self) -> Result<Arc<Shared>, ApiError> {
     self
       .shared
       .upgrade()

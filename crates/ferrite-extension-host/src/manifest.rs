@@ -167,6 +167,10 @@ struct RawPermissions {
   #[serde(default)]
   documents_write: bool,
   #[serde(default)]
+  files_read: bool,
+  #[serde(default)]
+  files_write: bool,
+  #[serde(default)]
   language_servers: bool,
 }
 
@@ -369,6 +373,12 @@ pub fn parse(
   }
   if raw.permissions.documents_write {
     permissions.push(Permission::DocumentsWrite);
+  }
+  if raw.permissions.files_read {
+    permissions.push(Permission::FilesRead);
+  }
+  if raw.permissions.files_write {
+    permissions.push(Permission::FilesWrite);
   }
   if raw.permissions.language_servers {
     permissions.push(Permission::LanguageServers);

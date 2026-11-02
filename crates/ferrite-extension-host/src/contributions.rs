@@ -85,8 +85,8 @@ pub enum MenuLocation {
   /// The editor's context menu.
   #[serde(rename = "editor/context")]
   EditorContext,
-  /// The explorer's context menu for a file; the command gets its path as
-  /// the argument.
+  /// The explorer's context menu for a file or folder; the command gets its
+  /// path as the argument.
   #[serde(rename = "explorer/context")]
   ExplorerContext,
 }
@@ -98,6 +98,46 @@ pub struct MenuContribution {
   pub command: String,
   /// Items are grouped by this, then sorted by title.
   pub group: String,
+  /// In the explorer: shown for files.
+  pub for_files: bool,
+  /// In the explorer: shown for folders.
+  pub for_folders: bool,
+  /// File name patterns (`*.md`, `*.{ts,tsx}`, `Cargo.toml`), compared
+  /// ignoring case: the item is shown only for files whose names match one
+  /// (the active document's, in the editor). Empty: every file.
+  pub patterns: Vec<String>,
+}
+
+/// Most patterns in a menu item, and the longest pattern.
+const MAX_MENU_PATTERNS: usize = 20;
+const MAX_PATTERN_CHARS: usize = 100;
+
+/// Checks a file name pattern: `*` (any characters), `?` (one character),
+/// and `{a,b}` (either), matching a file's name, not its path.
+fn check_pattern(pattern: &str) -> Result<(), String> {
+  if pattern.is_empty() || pattern.chars().count() > MAX_PATTERN_CHARS {
+    return Err(format!("must be 1 to {MAX_PATTERN_CHARS} characters"));
+  }
+  if pattern.contains(['/', '\\']) {
+    return Err("matches a file's name, so it can't contain / or \\".into());
+  }
+  if pattern.contains(['[', ']']) || pattern.chars().any(char::is_control) {
+    return Err("can only use *, ?, and {a,b}".into());
+  }
+  let mut open = false;
+  for c in pattern.chars() {
+    match c {
+      '{' if open => return Err("can't nest { }".into()),
+      '{' => open = true,
+      '}' if !open => return Err("has a } without a {".into()),
+      '}' => open = false,
+      _ => {}
+    }
+  }
+  if open {
+    return Err("has a { without a }".into());
+  }
+  Ok(())
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -317,6 +357,8 @@ pub struct RawMenu {
   location: String,
   command: String,
   group: Option<String>,
+  targets: Option<Vec<String>>,
+  patterns: Option<Vec<String>>,
 }
 
 #[derive(Deserialize)]
@@ -528,10 +570,53 @@ pub fn parse(
         )));
       }
     };
+    let command = declared("menus", &menu.command)?;
+    let (for_files, for_folders) = match (location, menu.targets) {
+      (_, None) => (true, false),
+      (MenuLocation::EditorContext, Some(_)) => {
+        return Err(invalid(format!(
+          "menus: {command}: targets only apply to \"explorer/context\""
+        )));
+      }
+      (MenuLocation::ExplorerContext, Some(targets)) => {
+        if let Some(other) = targets.iter().find(|t| *t != "files" && *t != "folders") {
+          return Err(invalid(format!(
+            "menus: {command}: target {other:?} must be \"files\" or \"folders\""
+          )));
+        }
+        if targets.is_empty() {
+          return Err(invalid(format!(
+            "menus: {command}: targets must list \"files\", \"folders\", or both"
+          )));
+        }
+        (
+          targets.iter().any(|t| t == "files"),
+          targets.iter().any(|t| t == "folders"),
+        )
+      }
+    };
+    let patterns = menu.patterns.unwrap_or_default();
+    if patterns.len() > MAX_MENU_PATTERNS {
+      return Err(invalid(format!(
+        "menus: {command}: at most {MAX_MENU_PATTERNS} patterns"
+      )));
+    }
+    if !patterns.is_empty() && !for_files {
+      return Err(invalid(format!(
+        "menus: {command}: patterns only apply to files"
+      )));
+    }
+    for pattern in &patterns {
+      check_pattern(pattern)
+        .map_err(|problem| invalid(format!("menus: {command}: pattern {pattern:?} {problem}")))?;
+    }
     contributions.menus.push(MenuContribution {
       location,
-      command: declared("menus", &menu.command)?,
+      command,
       group: menu.group.unwrap_or_default(),
+      for_files,
+      for_folders,
+      patterns,
     });
   }
 
@@ -1008,6 +1093,18 @@ fn inside(section: &str, path: &str) -> Result<PathBuf, ManifestError> {
 #[cfg(test)]
 mod tests {
   use super::*;
+
+  #[test]
+  fn checks_menu_patterns() {
+    for ok in ["*.md", "*.{ts,tsx}", "Cargo.toml", "?.txt", ".*rc"] {
+      assert_eq!(check_pattern(ok), Ok(()), "{ok}");
+    }
+    for bad in [
+      "", "src/*.rs", r"**\*.rs", "[ab].rs", "{a,{b}}", "{a", "a}", "a\tb",
+    ] {
+      assert!(check_pattern(bad).is_err(), "{bad:?}");
+    }
+  }
 
   #[test]
   fn the_token_list_is_loaded() {
