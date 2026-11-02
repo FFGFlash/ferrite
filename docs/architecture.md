@@ -195,7 +195,12 @@ timestamp granularity and with the same length isn't detected.
 - **Exclusions and ignore rules.** `files.exclude` globs (default `.git`, `.DS_Store`,
   `Thumbs.db`) are hidden everywhere. `.gitignore` (in git repositories), `.ignore`, and global
   git excludes come from ripgrep's `ignore` crate. Ignored entries are **shown dimmed** in the
-  explorer but skipped by the file index and search.
+  explorer but skipped by the file index and search. A listing marks the entries that rules
+  match; the explorer also dims everything inside an ignored folder, as Git never looks inside
+  one (a rule like `!target/keep.txt` doesn't un-ignore it).
+- **Problem marks.** The explorer colors files with errors or warnings, with their count, and
+  the folders above them, with a dot. It derives them from the Problems view's file problems
+  (`problemsByPath`), so they cover what's listed there.
 - **Explorer listings** are fetched one directory at a time when a folder is expanded, never by
   walking the whole tree. Directories are listed first, sorted case-insensitively. Listing
   requests outside the workspace root are refused.

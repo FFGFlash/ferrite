@@ -84,6 +84,23 @@
   opacity: 0.6;
 }
 
+/* After the ignored color: a problem shows even in an ignored file. */
+.explorer-tree__row[data-problems='error'] {
+  color: var(--color-list-error-foreground);
+}
+
+.explorer-tree__row[data-problems='warning'] {
+  color: var(--color-list-warning-foreground);
+}
+
+.explorer-tree__problems {
+  flex: none;
+  margin-left: auto;
+  padding-left: var(--space-2);
+  font-size: var(--font-size-ui-small);
+  font-variant-numeric: tabular-nums;
+}
+
 .explorer-tree__row--input {
   position: relative;
   cursor: default;

@@ -13,6 +13,7 @@ const {
   currentProblems,
   fileProblemsStore,
   followFileProblems,
+  problemsByPath,
   recordProblem,
   reportedProblems,
 } = await import('./problems')
@@ -96,6 +97,37 @@ describe('file problems', () => {
 
   it('counts errors and warnings, not information', () => {
     expect(countFileProblems(list(1, 2, 2, 3))).toEqual({ errors: 1, warnings: 2 })
+  })
+
+  it('counts errors and warnings by file and by each folder above it', () => {
+    const file = (path: string | null, ...severities: FileProblem['severity'][]) => ({
+      path,
+      document: null,
+      title: 'x',
+      problems: severities.map(at),
+    })
+    const w = String.raw`C:\w`
+    const byPath = problemsByPath({
+      files: [
+        file(String.raw`${w}\src\a.rs`, 1, 2),
+        file(String.raw`${w}\src\net\b.rs`, 2),
+        file(String.raw`${w}\notes.md`, 3),
+        file(null, 1),
+      ],
+      leftOut: 0,
+    })
+    expect(byPath.get(String.raw`${w}\src\a.rs`)).toEqual({ errors: 1, warnings: 1 })
+    expect(byPath.get(String.raw`${w}\src\net`)).toEqual({ errors: 0, warnings: 1 })
+    expect(byPath.get(String.raw`${w}\src`)).toEqual({ errors: 1, warnings: 2 })
+    expect(byPath.get(w)).toEqual({ errors: 1, warnings: 2 })
+    expect(byPath.get('C:')).toEqual({ errors: 1, warnings: 2 })
+    // Information isn't marked.
+    expect(byPath.has(String.raw`${w}\notes.md`)).toBe(false)
+
+    expect([...problemsByPath({ files: [file('/w/a.rs', 1)], leftOut: 0 }).keys()]).toEqual([
+      '/w/a.rs',
+      '/w',
+    ])
   })
 
   it('fetches once for a burst of changes, and when documents open or close', async () => {

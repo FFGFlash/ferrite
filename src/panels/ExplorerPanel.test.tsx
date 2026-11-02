@@ -24,6 +24,7 @@ const { themeKind } = await import('../themes/theme')
 const { ExplorerActions, ExplorerPanel } = await import('./ExplorerPanel')
 const { explorerStore } = await import('./explorerState')
 const { contextMenuStore } = await import('../components/contextMenuState')
+const { fileProblemsStore } = await import('../state/problems')
 
 const entry = (path: string, directory = false, ignored = false): DirectoryEntry => ({
   name: path.split('/').pop() ?? path,
@@ -59,6 +60,7 @@ describe('ExplorerPanel', () => {
       encoding: 'UTF-8',
     }))
     documentsStore.set({ documents: [], activeId: null })
+    fileProblemsStore.set({ files: [], leftOut: 0 })
   })
 
   async function renderTree() {
@@ -83,6 +85,67 @@ describe('ExplorerPanel', () => {
     const items = within(tree).getAllByRole('treeitem')
     expect(items.map(item => item.textContent)).toEqual(['▸src', '▸target', 'README.md'])
     expect(items[1]).toHaveAttribute('data-ignored')
+  })
+
+  it('marks everything inside an ignored folder as ignored', async () => {
+    const user = userEvent.setup()
+    // A rule can match inside an ignored folder without un-ignoring it.
+    listings['/w/target'] = [entry('/w/target/debug', true), entry('/w/target/keep.txt')]
+    const tree = await renderTree()
+    await user.click(within(tree).getByText('target'))
+    expect((await within(tree).findByText('keep.txt')).closest('li')).toHaveAttribute(
+      'data-ignored',
+    )
+    expect(within(tree).getByText('debug').closest('li')).toHaveAttribute('data-ignored')
+    expect(within(tree).getByText('src').closest('li')).not.toHaveAttribute('data-ignored')
+  })
+
+  it('marks files with problems and the folders that contain them', async () => {
+    const user = userEvent.setup()
+    const problem = (severity: 1 | 2 | 3) => ({
+      start: { line: 0, column: 0 },
+      end: { line: 0, column: 1 },
+      severity,
+      message: 'm',
+      source: null,
+    })
+    fileProblemsStore.set({
+      files: [
+        {
+          path: '/w/src/main.rs',
+          document: null,
+          title: 'main.rs',
+          problems: [problem(1), problem(2)],
+        },
+        {
+          path: '/w/README.md',
+          document: 1,
+          title: 'README.md',
+          problems: [problem(2), problem(3)],
+        },
+      ],
+      leftOut: 0,
+    })
+    const tree = await renderTree()
+    const row = (name: string) => within(tree).getByText(name).closest('li')
+
+    expect(row('src')).toHaveAttribute('data-problems', 'error')
+    expect(row('src')).toHaveAttribute('aria-description', 'Contains 1 error, 1 warning')
+    expect(row('target')).not.toHaveAttribute('data-problems')
+    expect(row('README.md')).toHaveAttribute('data-problems', 'warning')
+    expect(row('README.md')).toHaveAttribute('aria-description', '1 warning')
+    expect(row('README.md')).toHaveAttribute('title', '/w/README.md\n1 warning')
+    expect(row('README.md')?.querySelector('.explorer-tree__problems')).toHaveTextContent('1')
+
+    await user.click(within(tree).getByText('src'))
+    await within(tree).findByText('main.rs')
+    expect(row('main.rs')).toHaveAttribute('data-problems', 'error')
+    expect(row('main.rs')?.querySelector('.explorer-tree__problems')).toHaveTextContent('2')
+
+    // Fixed: the marks go.
+    act(() => fileProblemsStore.set({ files: [], leftOut: 0 }))
+    expect(row('src')).not.toHaveAttribute('data-problems')
+    expect(row('main.rs')?.querySelector('.explorer-tree__problems')).toBeNull()
   })
 
   it('expands folders lazily and opens files', async () => {

@@ -8,6 +8,7 @@ import { iconThemeStore, type LoadedIconTheme } from '../state/iconTheme'
 import { contributedMenuItems, runContributed } from '../state/extensions'
 import { layoutStore } from '../state/layout'
 import { reportError } from '../state/notifications'
+import { fileProblemsStore, problemsByPath, type PathProblems } from '../state/problems'
 import { useStore } from '../state/store'
 import { themeKind } from '../themes/theme'
 import {
@@ -59,6 +60,12 @@ interface Row {
   entry: DirectoryEntry
   depth: number
   expanded: boolean
+  /**
+   * Ignored by Git: matched by an ignore rule, or inside a folder that is
+   * (Git doesn't look inside an ignored folder, so nothing in it is
+   * committed, whatever rules match it).
+   */
+  ignored: boolean
 }
 
 /** Folders and files of the open workspace, loaded as folders expand. */
@@ -69,11 +76,13 @@ export function ExplorerPanel() {
   const { focused, creating, revealed } = useStore(explorerStore)
   const iconTheme = useStore(iconThemeStore)
   const light = useStore(themeKind) === 'light'
+  const fileProblems = useStore(fileProblemsStore)
+  const problems = useMemo(() => problemsByPath(fileProblems), [fileProblems])
   const treeRef = useRef<HTMLUListElement>(null)
   const activePath = documents.find(document => document.id === activeId)?.path ?? null
 
   const rows = useMemo(
-    () => (info ? flatten(info.root, listings, new Set(expanded), 0) : []),
+    () => (info ? flatten(info.root, listings, new Set(expanded), 0, false) : []),
     [info, listings, expanded],
   )
 
@@ -224,6 +233,8 @@ export function ExplorerPanel() {
         {rows.map((row, index) => {
           const folder = row.entry.directory ? { expanded: row.expanded } : null
           const icon = entryIcon(row.entry.name, folder, iconTheme, light)
+          const counts = problems.get(row.entry.path)
+          const described = counts && describeProblems(counts, row.entry.directory)
           return [
             <li
               key={row.entry.path}
@@ -234,9 +245,11 @@ export function ExplorerPanel() {
               aria-expanded={row.entry.directory ? row.expanded : undefined}
               aria-selected={row.entry.path === activePath}
               data-focused={index === focusIndex || undefined}
-              data-ignored={row.entry.ignored || undefined}
+              data-ignored={row.ignored || undefined}
+              data-problems={counts ? (counts.errors > 0 ? 'error' : 'warning') : undefined}
+              aria-description={described}
               style={indent(row.depth)}
-              title={row.entry.path}
+              title={described ? `${row.entry.path}\n${described}` : row.entry.path}
               onClick={() => activate(row)}
               onContextMenu={event => {
                 event.preventDefault()
@@ -253,6 +266,12 @@ export function ExplorerPanel() {
                 className="explorer-tree__icon"
               />
               <span className="explorer-tree__name">{row.entry.name}</span>
+              {counts && (
+                // A file's count; a folder's dot says something inside has problems.
+                <span className="explorer-tree__problems" aria-hidden="true">
+                  {row.entry.directory ? '●' : counts.errors + counts.warnings}
+                </span>
+              )}
             </li>,
             index + 1 === inputIndex && nameInput,
           ]
@@ -453,6 +472,7 @@ function flatten(
   listings: ReadonlyMap<string, Listing>,
   expanded: ReadonlySet<string>,
   depth: number,
+  inIgnored: boolean,
 ): Row[] {
   const listing = listings.get(directory)
   if (!listing || 'error' in listing) {
@@ -460,9 +480,20 @@ function flatten(
   }
   return listing.flatMap(entry => {
     const isOpen = entry.directory && expanded.has(entry.path)
-    const row = { entry, depth, expanded: isOpen }
-    return isOpen ? [row, ...flatten(entry.path, listings, expanded, depth + 1)] : [row]
+    const ignored = inIgnored || entry.ignored
+    const row = { entry, depth, expanded: isOpen, ignored }
+    return isOpen ? [row, ...flatten(entry.path, listings, expanded, depth + 1, ignored)] : [row]
   })
+}
+
+const plural = (count: number, noun: string) => `${count} ${noun}${count === 1 ? '' : 's'}`
+
+/** `2 errors, 1 warning`, or for a folder, `Contains 2 errors, 1 warning`. */
+function describeProblems({ errors, warnings }: PathProblems, folder: boolean): string {
+  const counts = [errors && plural(errors, 'error'), warnings && plural(warnings, 'warning')]
+    .filter(Boolean)
+    .join(', ')
+  return folder ? `Contains ${counts}` : counts
 }
 
 function indent(depth: number) {

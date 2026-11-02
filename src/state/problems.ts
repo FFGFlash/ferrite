@@ -237,6 +237,36 @@ export function countFileProblems(list: ProblemsList): { errors: number; warning
   return { errors, warnings }
 }
 
+export interface PathProblems {
+  errors: number
+  warnings: number
+}
+
+/**
+ * The errors and warnings in each file with any, and in each folder that
+ * contains them (at any depth), by path, for the explorer.
+ */
+export function problemsByPath(list: ProblemsList): Map<string, PathProblems> {
+  const byPath = new Map<string, PathProblems>()
+  for (const file of list.files) {
+    if (!file.path) {
+      continue
+    }
+    const { errors, warnings } = countFileProblems({ files: [file], leftOut: 0 })
+    if (errors + warnings === 0) {
+      continue
+    }
+    // The file, then each folder up to the top.
+    for (let path = file.path; path;) {
+      const counts = byPath.get(path) ?? { errors: 0, warnings: 0 }
+      byPath.set(path, { errors: counts.errors + errors, warnings: counts.warnings + warnings })
+      const separator = Math.max(path.lastIndexOf('/'), path.lastIndexOf('\\'))
+      path = separator > 0 ? path.slice(0, separator) : ''
+    }
+  }
+  return byPath
+}
+
 /** Every error and warning: Ferrite's, extensions', and files'. */
 export function useProblemCounts(): { errors: number; warnings: number } {
   const app = countProblems(useProblems())

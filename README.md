@@ -255,7 +255,9 @@ Reloading keeps open documents and unsaved changes. See
 ## Workspace
 
 Open a folder with **File: Open Folder…** (command palette or the Explorer). The explorer shows
-`.gitignore`d entries dimmed. It follows the file you're editing: switching tabs, going to a
+`.gitignore`d entries dimmed, along with everything inside an ignored folder. Files with errors or
+warnings (those listed in **View: Problems**) are colored and show how many, and so are the
+folders that contain them, with a dot. It follows the file you're editing: switching tabs, going to a
 definition, or opening a search result expands the file's folders and selects it.
 
 To add a file or folder, use the **New File** and **New Folder** buttons in the Explorer header,

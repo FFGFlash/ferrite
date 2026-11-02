@@ -88,6 +88,8 @@
   --color-list-active-background: rgb(143 184 222 / 0.18);
   --color-list-focus-outline: var(--color-focus-ring);
   --color-text-ignored: #6b717d;
+  --color-list-error-foreground: #f58a80;
+  --color-list-warning-foreground: var(--color-diagnostic-warning);
   --color-explorer-folder-icon: #d2a865;
   --color-explorer-file-icon: var(--color-text-muted);
   --color-text-highlight: var(--color-accent);
@@ -190,6 +192,8 @@
   --color-minimap-slider-hover-background: rgb(100 100 100 / 0.35);
   --color-list-active-background: rgb(47 110 168 / 0.14);
   --color-text-ignored: #9aa0aa;
+  --color-list-error-foreground: #b3261e;
+  --color-list-warning-foreground: #7d5600;
   --color-explorer-folder-icon: #9a6b1f;
   --color-overlay-backdrop: rgb(0 0 0 / 0.15);
   --color-button-background: #2f6ea8;
