@@ -10,7 +10,6 @@ import {
   type FormEvent,
   type KeyboardEvent,
   type MouseEvent as ReactMouseEvent,
-  type ReactNode,
 } from 'react'
 import {
   type DisplayLine,
@@ -37,6 +36,15 @@ import { notifyPainted, recordTiming } from '../state/perf'
 import { useStore } from '../state/store'
 import { registerEditor, type EditorController } from './activeEditor'
 import { isWordChar, visibleCompletions, wordAround } from './completion'
+import { PeekView } from './PeekView'
+import {
+  closePeek,
+  closePeekIn,
+  openPeek,
+  peekHeightInLines,
+  peekLayout,
+  peekStore,
+} from './references'
 import { FindWidget, type FindState } from './FindWidget'
 import { inputMirror, typedText, type InputMirror } from './inputMirror'
 import { isMac, keyToCommand } from './keymap'
@@ -73,7 +81,8 @@ import {
 import { themeKind } from '../themes/theme'
 import { decorationRectStyle, textOverlays } from './decorations'
 import { displayRow, lineAtRow, rowOf } from './rows'
-import { LINK_CLASS, segments, type TextOverlay } from './segments'
+import { highlighted } from './highlighted'
+import { LINK_CLASS, type TextOverlay } from './segments'
 import { EditorSession, ipcTransport, type EditorTransport } from './session'
 import './EditorView.css'
 
@@ -117,6 +126,25 @@ interface Word {
 interface LinkState extends Word {
   /** The document version it was found in; edits hide it. */
   version: number
+}
+
+/** The space a peek view takes between rows: below display row `row`, `height` pixels tall. */
+interface Zone {
+  row: number
+  height: number
+}
+
+/** The top of display row `row`, below a zone above it. */
+function rowTop(row: number, lineHeight: number, zone: Zone | null): number {
+  return row * lineHeight + (zone && row > zone.row ? zone.height : 0)
+}
+
+/** The display row at `y` from the top of the rows; a zone counts as the row above it. */
+function rowAtY(y: number, lineHeight: number, zone: Zone | null): number {
+  if (zone && y >= (zone.row + 1) * lineHeight) {
+    return Math.max(zone.row, Math.floor((y - zone.height) / lineHeight))
+  }
+  return Math.floor(y / lineHeight)
 }
 
 /** Whether `event` holds the go-to-definition modifier (Ctrl, or ⌘ on macOS) alone. */
@@ -163,7 +191,8 @@ export function EditorView({ documentId, title, transport = ipcTransport }: Edit
   const lineHeightRef = useRef(lineHeight)
   lineHeightRef.current = lineHeight
   const [view, setView] = useState<View | null>(null)
-  const [overlay, setOverlay] = useState<Overlay>(EMPTY_OVERLAY)
+  /** Carets and highlights as measured, without room for a peek. */
+  const [measuredOverlay, setOverlay] = useState<Overlay>(EMPTY_OVERLAY)
   const [composing, setComposing] = useState(false)
   const [find, setFind] = useState<FindState | null>(null)
   const [hover, setHover] = useState<HoverState | null>(null)
@@ -199,6 +228,25 @@ export function EditorView({ documentId, title, transport = ipcTransport }: Edit
   /** When the view being rendered arrived, and when the oldest unpainted input happened. */
   const receivedAtRef = useRef(0)
   const inputStartRef = useRef<number | null>(null)
+  const referencesSeqRef = useRef(0)
+
+  // A references peek shown in this editor, and the room it takes.
+  const peekState = useStore(peekStore)
+  const peek = peekState?.documentId === documentId ? peekState : null
+  useStore(peekLayout)
+  const zone: Zone | null =
+    peek && view
+      ? {
+          row: displayRow(view, peek.anchor.line),
+          height:
+            peekHeightInLines(Math.floor((scrollRef.current?.clientHeight ?? 0) / lineHeight)) *
+            lineHeight,
+        }
+      : null
+  const zoneRef = useRef(zone)
+  zoneRef.current = zone
+  /** The editor's visible width, which a peek spans. */
+  const [scrollerWidth, setScrollerWidth] = useState(0)
 
   // Focusing must not scroll: the input spans the cursor's whole line.
   const focusInput = () => inputRef.current?.focus({ preventScroll: true })
@@ -216,7 +264,7 @@ export function EditorView({ documentId, title, transport = ipcTransport }: Edit
     const pending = pendingSelection(documentId)
     const session = new EditorSession(
       documentId,
-      viewportFor(scrollRef.current, lineHeightRef.current),
+      viewportFor(scrollRef.current, lineHeightRef.current, zoneRef.current),
       next => {
         receivedAtRef.current = performance.now()
         setView(next)
@@ -242,6 +290,7 @@ export function EditorView({ documentId, title, transport = ipcTransport }: Edit
         scrollPositions.set(documentId, { top: scroller.scrollTop, left: scroller.scrollLeft })
       }
       unregister()
+      closePeekIn(documentId)
       session.dispose()
       sessionRef.current = null
       editorStatus.set(null)
@@ -266,7 +315,7 @@ export function EditorView({ documentId, title, transport = ipcTransport }: Edit
         const current = viewRef.current
         if (scroller) {
           const row = current ? displayRow(current, line) : line
-          scroller.scrollTop = row * lineHeightRef.current
+          scroller.scrollTop = rowTop(row, lineHeightRef.current, zoneRef.current)
         }
       },
       scrollBy: lines => {
@@ -276,6 +325,8 @@ export function EditorView({ documentId, title, transport = ipcTransport }: Edit
         }
       },
       goToDefinition: () => void goToDefinition(),
+      goToReferences: () => void findReferences(false),
+      peekReferences: () => void findReferences(true),
       triggerSuggest: () => requestCompletion(null, false),
       showHover: () => void showHoverAtCursor(),
     }
@@ -286,7 +337,7 @@ export function EditorView({ documentId, title, transport = ipcTransport }: Edit
 
   // A different font size changes which lines are visible.
   useEffect(() => {
-    sessionRef.current?.setViewport(viewportFor(scrollRef.current, lineHeight))
+    sessionRef.current?.setViewport(viewportFor(scrollRef.current, lineHeight, zoneRef.current))
   }, [lineHeight])
 
   const findQuery = find?.query ?? null
@@ -362,7 +413,7 @@ export function EditorView({ documentId, title, transport = ipcTransport }: Edit
       const caret = measured.carets.find(c => c.primary)
       reveal(
         scroller,
-        view.primary.row * lineHeight,
+        rowTop(view.primary.row, lineHeight, zoneRef.current),
         lineHeight,
         caret?.left,
         (gutterRef.current?.offsetWidth ?? 0) + (minimapVisible ? MINIMAP_WIDTH : 0),
@@ -439,12 +490,13 @@ export function EditorView({ documentId, title, transport = ipcTransport }: Edit
     }
     // The text moved under the pointer; the next pointer move looks again.
     clearLink()
-    if (completionRef.current) {
+    // Popups follow the text, and a peek's arrow its anchor.
+    if (completionRef.current || zoneRef.current) {
       setScrollTick(tick => tick + 1)
     }
     const scroller = scrollRef.current
-    if (scroller && !covers(viewRef.current, scroller, lineHeight)) {
-      sessionRef.current?.setViewport(viewportFor(scroller, lineHeight))
+    if (scroller && !covers(viewRef.current, scroller, lineHeight, zoneRef.current)) {
+      sessionRef.current?.setViewport(viewportFor(scroller, lineHeight, zoneRef.current))
     }
   }
 
@@ -484,6 +536,17 @@ export function EditorView({ documentId, title, transport = ipcTransport }: Edit
           closeCompletion()
           return
       }
+    }
+    if (
+      event.key === 'Escape' &&
+      !event.ctrlKey &&
+      !event.altKey &&
+      !event.metaKey &&
+      peekStore.get()?.documentId === documentId
+    ) {
+      event.preventDefault()
+      closePeek()
+      return
     }
     if (event.key === 'Escape' && findRef.current) {
       event.preventDefault()
@@ -587,7 +650,9 @@ export function EditorView({ documentId, title, transport = ipcTransport }: Edit
       return null
     }
     const top = lines.getBoundingClientRect().top
-    const row = Math.floor((clientY - top) / lineHeight)
+    const zone = zoneRef.current
+    const layerTop = rowTop(current.startRow, lineHeight, zone)
+    const row = rowAtY(clientY - top + layerTop, lineHeight, zone) - current.startRow
     if (current.startRow + row < 0) {
       return { line: 0, column: 0 }
     }
@@ -595,7 +660,9 @@ export function EditorView({ documentId, title, transport = ipcTransport }: Edit
       return { line: current.lineCount - 1, column: END_OF_LINE }
     }
     const element = lines.children[row]
-    const column = element ? columnAt(element, clientX, top + (row + 0.5) * lineHeight) : 0
+    const middle =
+      top + rowTop(current.startRow + row, lineHeight, zone) - layerTop + lineHeight / 2
+    const column = element ? columnAt(element, clientX, middle) : 0
     return { line: lineAtRow(current, row), column }
   }
 
@@ -610,8 +677,11 @@ export function EditorView({ documentId, title, transport = ipcTransport }: Edit
     if (!lines || !current) {
       return false
     }
+    const zone = zoneRef.current
     const textBottom =
-      lines.getBoundingClientRect().top + (current.rowCount - current.startRow) * lineHeight
+      lines.getBoundingClientRect().top +
+      rowTop(current.rowCount, lineHeight, zone) -
+      rowTop(current.startRow, lineHeight, zone)
     return clientY >= textBottom
   }
 
@@ -680,7 +750,12 @@ export function EditorView({ documentId, title, transport = ipcTransport }: Edit
       return null
     }
     const frameBox = frame.getBoundingClientRect()
-    const lineTop = lines.getBoundingClientRect().top - frameBox.top + row * lineHeight
+    const zone = zoneRef.current
+    const lineTop =
+      lines.getBoundingClientRect().top -
+      frameBox.top +
+      rowTop(current.startRow + row, lineHeight, zone) -
+      rowTop(current.startRow, lineHeight, zone)
     const x = Math.max(0, Math.min(left, frameBox.width - COMPLETION_WIDTH))
     const fitsBelow = lineTop + lineHeight + height <= frameBox.height
     return fitsBelow || lineTop < height
@@ -795,6 +870,11 @@ export function EditorView({ documentId, title, transport = ipcTransport }: Edit
           hint: hint('editor.goToDefinition'),
           run: () => goToDefinition(position ?? undefined),
         },
+        {
+          label: 'Go to References',
+          hint: hint('editor.goToReferences'),
+          run: () => findReferences(false, position ?? undefined),
+        },
         null,
       )
     }
@@ -838,14 +918,66 @@ export function EditorView({ documentId, title, transport = ipcTransport }: Edit
     }
     try {
       const location = await lsp.definition(documentId, at)
-      if (location) {
-        await openPath(location.path, { start: location.start })
-      } else {
+      if (!location) {
         notify('info', 'No definition found.')
+      } else if (
+        location.path === documentPath() &&
+        !earlierThan(at, location.start) &&
+        !earlierThan(location.end, at)
+      ) {
+        // Already at the definition: show its references instead, as VS Code does.
+        await findReferences(false, at)
+      } else {
+        await openPath(location.path, { start: location.start })
       }
     } catch (error) {
       reportError('Going to the definition', error)
     }
+  }
+
+  const documentPath = () =>
+    documentsStore.get().documents.find(document => document.id === documentId)?.path ?? null
+
+  /**
+   * Finds the references to the symbol at `position` (or the cursor). As
+   * in VS Code, a lone reference is gone to unless `peekAlways`; several
+   * open a peek below the line.
+   */
+  const findReferences = async (peekAlways: boolean, position?: Position) => {
+    const at = position ?? viewRef.current?.primary.position
+    if (!at) {
+      return
+    }
+    const seq = ++referencesSeqRef.current
+    let found: lsp.Reference[] | null
+    try {
+      found = await lsp.references(documentId, at)
+    } catch (error) {
+      reportError('Finding references', error)
+      return
+    }
+    if (seq !== referencesSeqRef.current) {
+      return
+    }
+    if (!found || found.length === 0) {
+      const word = wordAtPosition(at)
+      notify('info', word ? `No references found for '${word}'.` : 'No references found.')
+    } else if (found.length === 1 && !peekAlways) {
+      await openPath(found[0]!.path, { start: found[0]!.start })
+    } else {
+      openPeek(documentId, documentPath(), at, 'References', found)
+    }
+  }
+
+  /** The word at or just before `position`, if the view has its line. */
+  const wordAtPosition = (position: Position): string | null => {
+    const current = viewRef.current
+    const text = current?.lines[rowOf(current.lineNumbers, position.line)]?.text
+    if (text === undefined) {
+      return null
+    }
+    const range = wordAround(text, position.column) ?? wordAround(text, position.column - 1)
+    return range && text.slice(range[0], range[1])
   }
 
   /** The word under a point of the text, if any. */
@@ -993,6 +1125,62 @@ export function EditorView({ documentId, title, transport = ipcTransport }: Edit
     focusInput()
   }
 
+  const startRow = view?.startRow ?? 0
+  const zoneRow = zone?.row
+  const zoneHeight = zone?.height ?? 0
+  /** The overlay with rows below a peek moved down past it. */
+  const overlay = useMemo(() => {
+    if (zoneRow === undefined || zoneRow < startRow) {
+      return measuredOverlay
+    }
+    const below = (zoneRow - startRow + 1) * lineHeight
+    const shift = <T extends Rect>(rects: T[]) =>
+      rects.map(rect => (rect.top >= below ? { ...rect, top: rect.top + zoneHeight } : rect))
+    return {
+      carets: shift(measuredOverlay.carets),
+      selections: shift(measuredOverlay.selections),
+      matches: shift(measuredOverlay.matches),
+      diagnostics: shift(measuredOverlay.diagnostics),
+      decorations: shift(measuredOverlay.decorations),
+    }
+  }, [measuredOverlay, zoneRow, zoneHeight, startRow, lineHeight])
+
+  const hasPeek = peek !== null
+  useLayoutEffect(() => {
+    const scroller = scrollRef.current
+    if (!hasPeek || !scroller) {
+      return
+    }
+    const measure = () => setScrollerWidth(scroller.clientWidth)
+    measure()
+    const observer = new ResizeObserver(measure)
+    observer.observe(scroller)
+    return () => observer.disconnect()
+  }, [hasPeek])
+
+  // A peek opening (or moving) scrolls so it shows below its line.
+  const peekRequest = peek && zone ? `${zone.row}:${peek.focusRequest}` : null
+  useLayoutEffect(() => {
+    const scroller = scrollRef.current
+    const current = zoneRef.current
+    if (!peekRequest || !scroller || !current) {
+      return
+    }
+    const anchorTop = current.row * lineHeight
+    const bottom = anchorTop + 2 * lineHeight + current.height
+    if (bottom > scroller.scrollTop + scroller.clientHeight) {
+      scroller.scrollTop = Math.min(anchorTop, bottom - scroller.clientHeight)
+    }
+    if (anchorTop < scroller.scrollTop) {
+      scroller.scrollTop = anchorTop
+    }
+  }, [peekRequest, lineHeight])
+
+  // The rows on screen change as a peek opens, closes, or is resized.
+  useEffect(() => {
+    sessionRef.current?.setViewport(viewportFor(scrollRef.current, lineHeight, zoneRef.current))
+  }, [zoneRow, zoneHeight, lineHeight])
+
   const primaryCaret: Rect | undefined = overlay.carets.find(c => c.primary)
   const cursorLine = view?.primary.position.line ?? 0
   const shownCompletions =
@@ -1016,7 +1204,6 @@ export function EditorView({ documentId, title, transport = ipcTransport }: Edit
         )
       : null
 
-  const startRow = view?.startRow ?? 0
   const rowCount = view?.rowCount ?? 1
   const lineCount = view?.lineCount ?? 1
   const lineNumbers = view?.lineNumbers ?? NO_LINES
@@ -1040,7 +1227,22 @@ export function EditorView({ documentId, title, transport = ipcTransport }: Edit
   )
   const primary = primaryCaret
   const activeLine = view?.primary.position.line
-  const layerStyle = { transform: `translateY(${startRow * lineHeight}px)` }
+  const layerStyle = { transform: `translateY(${rowTop(startRow, lineHeight, zone)}px)` }
+  /** Which of the view's lines a peek opens below, if one does. */
+  const zoneIndex = zone ? zone.row - startRow : -1
+  /** Where a peek's arrow points, from the editor's left edge. */
+  let arrowLeft: number | null = null
+  if (peek && view) {
+    const element = linesRef.current?.children[rowOf(view.lineNumbers, peek.anchor.line)]
+    const scroller = scrollRef.current
+    if (element && scroller) {
+      arrowLeft =
+        element.getBoundingClientRect().left -
+        scroller.getBoundingClientRect().left +
+        columnX(element, peek.anchor.column)
+    }
+  }
+  const peekWidth = Math.max(0, scrollerWidth - (minimapVisible ? MINIMAP_WIDTH : 0))
 
   /** A click on a fold marker in the gutter folds or unfolds its region. */
   const onGutterMouseDown = (event: ReactMouseEvent<HTMLDivElement>) => {
@@ -1081,7 +1283,7 @@ export function EditorView({ documentId, title, transport = ipcTransport }: Edit
         <div
           className="editor-view__sizer"
           style={{
-            minHeight: `max(${rowCount * lineHeight}px, 100% + ${(rowCount - 1) * lineHeight}px)`,
+            minHeight: `max(${rowTop(rowCount, lineHeight, zone)}px, 100% + ${rowTop(rowCount - 1, lineHeight, zone)}px)`,
           }}
         >
           <div
@@ -1092,7 +1294,7 @@ export function EditorView({ documentId, title, transport = ipcTransport }: Edit
             onMouseDown={onGutterMouseDown}
           >
             <div style={layerStyle}>
-              {lineNumbers.map(line => {
+              {lineNumbers.map((line, index) => {
                 const folded = foldedLines.has(line)
                 const foldable = folded || foldableLines.has(line)
                 return (
@@ -1100,6 +1302,7 @@ export function EditorView({ documentId, title, transport = ipcTransport }: Edit
                     key={line}
                     className="editor-view__line-number"
                     data-active={line === activeLine || undefined}
+                    style={index === zoneIndex ? { marginBottom: zoneHeight } : undefined}
                   >
                     {line + 1}
                     <span
@@ -1188,6 +1391,7 @@ export function EditorView({ documentId, title, transport = ipcTransport }: Edit
                       }
                       overlays={lineOverlays.get(lineNumber) ?? NO_OVERLAYS}
                       folded={foldedLines.has(lineNumber)}
+                      spacer={index === zoneIndex ? zoneHeight : 0}
                     />
                   )
                 })}
@@ -1210,7 +1414,9 @@ export function EditorView({ documentId, title, transport = ipcTransport }: Edit
                 style={
                   mirror.line >= 0
                     ? {
-                        top: rowOf(lineNumbers, mirror.line) * lineHeight,
+                        top:
+                          rowTop(startRow + rowOf(lineNumbers, mirror.line), lineHeight, zone) -
+                          rowTop(startRow, lineHeight, zone),
                         left: 0,
                         width: '100%',
                         height: mirror.value.split('\n').length * lineHeight,
@@ -1234,6 +1440,22 @@ export function EditorView({ documentId, title, transport = ipcTransport }: Edit
               />
             </div>
           </div>
+          {peek && zone && (
+            <div
+              className="editor-view__zone"
+              style={{ top: (zone.row + 1) * lineHeight, height: zone.height }}
+            >
+              <div className="editor-view__zone-content" style={{ width: peekWidth }}>
+                <PeekView
+                  state={peek}
+                  lineHeight={lineHeight}
+                  width={peekWidth}
+                  height={zone.height}
+                  arrowLeft={arrowLeft}
+                />
+              </div>
+            </div>
+          )}
         </div>
       </div>
       {minimapVisible && view && (
@@ -1297,9 +1519,11 @@ interface LineProps {
   overlays: readonly TextOverlay[]
   /** Whether the region starting on this line is folded. */
   folded: boolean
+  /** Room below the line for a peek, in pixels. */
+  spacer: number
 }
 
-const Line = memo(function Line({ line, link, overlays, folded }: LineProps) {
+const Line = memo(function Line({ line, link, overlays, folded, spacer }: LineProps) {
   const all = link
     ? [...overlays, { from: link.from, to: link.to, className: LINK_CLASS }]
     : overlays
@@ -1312,9 +1536,10 @@ const Line = memo(function Line({ line, link, overlays, folded }: LineProps) {
       ⋯
     </span>
   )
+  const style = spacer ? { marginBottom: spacer } : undefined
   if (line.fullLength === null) {
     return (
-      <div className="editor-view__line">
+      <div className="editor-view__line" style={style}>
         {text}
         {marker}
       </div>
@@ -1322,7 +1547,7 @@ const Line = memo(function Line({ line, link, overlays, folded }: LineProps) {
   }
   // A very long line shortened for display; the document keeps all of it.
   return (
-    <div className="editor-view__line">
+    <div className="editor-view__line" style={style}>
       {text}
       <span
         className="editor-view__cut"
@@ -1334,23 +1559,6 @@ const Line = memo(function Line({ line, link, overlays, folded }: LineProps) {
     </div>
   )
 })
-
-/** `text` split into plain, highlighted, decorated, and linked runs (see `measure.ts`). */
-function highlighted(
-  text: string,
-  spans: readonly number[],
-  overlays: readonly TextOverlay[],
-): ReactNode[] {
-  return segments(text, spans, overlays).map(({ start, end, className, style }) =>
-    className || style ? (
-      <span key={start} className={className || undefined} style={style}>
-        {text.slice(start, end)}
-      </span>
-    ) : (
-      text.slice(start, end)
-    ),
-  )
-}
 
 function later(a: Position, b: Position): Position {
   return earlier(a, b) === a ? b : a
@@ -1364,26 +1572,39 @@ function samePosition(a: Position, b: Position): boolean {
   return a.line === b.line && a.column === b.column
 }
 
-function visibleRange(scroller: HTMLElement, lineHeight: number): [number, number] {
-  const first = Math.floor(scroller.scrollTop / lineHeight)
-  const count = Math.ceil(scroller.clientHeight / lineHeight) + 1
-  return [first, first + count]
+function visibleRange(
+  scroller: HTMLElement,
+  lineHeight: number,
+  zone: Zone | null,
+): [number, number] {
+  const first = rowAtY(scroller.scrollTop, lineHeight, zone)
+  const last = rowAtY(scroller.scrollTop + scroller.clientHeight, lineHeight, zone)
+  return [first, last + 2]
 }
 
-function viewportFor(scroller: HTMLElement | null, lineHeight: number): Viewport {
+function viewportFor(
+  scroller: HTMLElement | null,
+  lineHeight: number,
+  zone: Zone | null,
+): Viewport {
   if (!scroller) {
     return { startRow: 0, endRow: OVERSCAN * 2 }
   }
-  const [first, last] = visibleRange(scroller, lineHeight)
+  const [first, last] = visibleRange(scroller, lineHeight, zone)
   return { startRow: Math.max(0, first - OVERSCAN), endRow: last + OVERSCAN }
 }
 
 /** Whether `view` already contains every visible line. */
-function covers(view: View | null, scroller: HTMLElement, lineHeight: number): boolean {
+function covers(
+  view: View | null,
+  scroller: HTMLElement,
+  lineHeight: number,
+  zone: Zone | null,
+): boolean {
   if (!view) {
     return false
   }
-  const [first, last] = visibleRange(scroller, lineHeight)
+  const [first, last] = visibleRange(scroller, lineHeight, zone)
   return (
     view.startRow <= first && view.startRow + view.lines.length >= Math.min(last, view.rowCount)
   )

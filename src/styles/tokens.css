@@ -78,6 +78,13 @@
   --color-editor-find-match-current: rgb(240 138 75 / 0.45);
   --color-editor-find-match-border: rgb(240 138 75 / 0.8);
 
+  /* The references peek, laid between the editor's lines. */
+  --color-peek-border: #6fa8dc;
+  --color-peek-header-background: #25282e;
+  --color-peek-editor-background: #1a1c20;
+  --color-peek-result-background: #202328;
+  --color-peek-match: rgb(240 138 75 / 0.3);
+
   --color-widget-background: #25282e;
   --color-widget-border: #363a42;
   --color-input-background: #1b1d21;
@@ -183,6 +190,12 @@
   --color-editor-find-match: rgb(185 80 31 / 0.18);
   --color-editor-find-match-current: rgb(185 80 31 / 0.35);
   --color-editor-find-match-border: rgb(185 80 31 / 0.7);
+
+  --color-peek-border: #2f6ea8;
+  --color-peek-header-background: #f1f2f5;
+  --color-peek-editor-background: #f7f9fc;
+  --color-peek-result-background: #f3f4f6;
+  --color-peek-match: rgb(185 80 31 / 0.22);
 
   --color-widget-background: #ffffff;
   --color-widget-border: #d3d6dc;

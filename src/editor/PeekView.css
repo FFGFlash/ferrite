@@ -1,0 +1,260 @@
+/* The references peek (see PeekView.tsx), laid in the editor between lines.
+   It spans the editor's visible width and doesn't scroll sideways with the
+   text. */
+.peek {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  font-family: var(--font-ui);
+  font-size: var(--font-size-ui);
+  line-height: normal;
+  cursor: default;
+}
+
+.peek__arrow-row {
+  position: relative;
+  flex: none;
+}
+
+/* A triangle pointing up at the reference the peek was opened on. */
+.peek__arrow {
+  position: absolute;
+  bottom: 0;
+  width: 0;
+  height: 0;
+  border-style: solid;
+  border-color: transparent transparent var(--color-peek-border) transparent;
+}
+
+.peek__frame {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+  border-top: 1px solid var(--color-peek-border);
+  border-bottom: 1px solid var(--color-peek-border);
+}
+
+.peek__head {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 0 var(--space-1) 0 var(--space-3);
+  background: var(--color-peek-header-background);
+  color: var(--color-text);
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+.peek__title {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  min-width: 0;
+  padding: 0;
+  border: none;
+  background: none;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.peek__name {
+  font-weight: 600;
+}
+
+.peek__folder,
+.peek__meta {
+  overflow: hidden;
+  color: var(--color-text-muted);
+  font-size: var(--font-size-ui-small);
+  text-overflow: ellipsis;
+}
+
+.peek__meta::before {
+  content: '–';
+  padding-right: var(--space-2);
+}
+
+.peek__close {
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  margin-left: auto;
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-control);
+  background: none;
+  color: var(--color-text-muted);
+  cursor: pointer;
+}
+
+.peek__close:hover {
+  background: var(--color-control-hover-background);
+  color: var(--color-text);
+}
+
+.peek__body {
+  display: flex;
+  flex: none;
+}
+
+.peek__preview-pane {
+  position: relative;
+  flex: none;
+  height: 100%;
+}
+
+/* Dragged to make the peek taller or shorter. */
+.peek__resize {
+  position: absolute;
+  right: 0;
+  bottom: calc(var(--size-sash) / -2);
+  left: 0;
+  z-index: 1;
+  height: var(--size-sash);
+  cursor: row-resize;
+  touch-action: none;
+}
+
+.peek__resize:hover {
+  background: var(--color-sash-hover);
+}
+
+.peek-preview {
+  height: 100%;
+  overflow: auto;
+  overscroll-behavior: contain;
+  background: var(--color-peek-editor-background);
+  color: var(--color-editor-foreground);
+  font-family: var(--font-mono);
+  font-size: var(--font-size-editor);
+  line-height: var(--editor-line-height);
+}
+
+.peek-preview:focus-visible,
+.peek-list:focus-visible {
+  outline: 1px solid var(--color-focus-ring);
+  outline-offset: -1px;
+}
+
+.peek-preview__sizer {
+  display: flex;
+  width: max-content;
+  min-width: 100%;
+}
+
+.peek-preview__gutter {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  flex: none;
+  padding-right: var(--space-3);
+  background: var(--color-peek-editor-background);
+  color: var(--color-editor-line-number);
+  text-align: right;
+}
+
+.peek-preview__number,
+.peek-preview__line {
+  height: var(--editor-line-height);
+}
+
+.peek-preview__lines {
+  flex: 1;
+  padding-right: var(--space-4);
+}
+
+.peek-preview__line {
+  white-space: pre;
+  tab-size: var(--editor-tab-size, 4);
+}
+
+.peek-preview__match {
+  background: var(--color-peek-match);
+}
+
+.peek-preview__match--selected {
+  background: var(--color-editor-selection);
+  outline: 1px solid var(--color-peek-match);
+}
+
+.peek-list {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  overflow: auto;
+  overscroll-behavior: contain;
+  background: var(--color-peek-result-background);
+  color: var(--color-text);
+}
+
+.peek-list__row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  height: 22px;
+  padding: 0 var(--space-2);
+  white-space: nowrap;
+  overflow: hidden;
+  cursor: pointer;
+}
+
+.peek-list__row:hover {
+  background: var(--color-list-hover-background);
+}
+
+.peek-list__row[aria-selected='true'] {
+  background: var(--color-list-active-background);
+}
+
+.peek-list:focus-within .peek-list__row[data-focused] {
+  outline: 1px solid var(--color-list-focus-outline);
+  outline-offset: -1px;
+}
+
+.peek-list__chevron {
+  display: inline-flex;
+  flex: none;
+  color: var(--color-text-muted);
+}
+
+.peek-list__icon {
+  flex: none;
+  color: var(--color-explorer-file-icon);
+}
+
+.peek-list__folder {
+  overflow: hidden;
+  color: var(--color-text-muted);
+  font-size: var(--font-size-ui-small);
+  text-overflow: ellipsis;
+}
+
+.peek-list__count {
+  margin-left: auto;
+  padding: 0 6px;
+  border-radius: 8px;
+  background: var(--color-control-hover-background);
+  font-size: var(--font-size-ui-small);
+}
+
+.peek-list__reference {
+  display: block;
+  line-height: 22px;
+  font-family: var(--font-mono);
+  font-size: var(--font-size-ui-small);
+  text-overflow: ellipsis;
+}
+
+.peek-list__reference[data-nested] {
+  padding-left: 32px;
+}
+
+.peek-list__match {
+  border-radius: 2px;
+  background: var(--color-peek-match);
+  color: inherit;
+}

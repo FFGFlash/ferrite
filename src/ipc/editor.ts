@@ -307,6 +307,13 @@ export interface MinimapHeader {
   region: boolean
 }
 
+/** Lines of a file for a peek view's preview, from `start`. */
+export interface PeekLines {
+  lineCount: number
+  start: number
+  lines: { text: string; spans: number[] }[]
+}
+
 export const listDocuments = () => call<DocumentSummary[]>('document_list')
 /** Creates an untitled document, optionally with `text`. */
 export const newDocument = (text?: string) =>
@@ -351,3 +358,9 @@ export const clipboard = (
   known: KnownLines | null,
   search: SearchQuery | null,
 ) => call<WireView>('editor_clipboard', { id, action, viewport, known, search })
+/**
+ * Lines `start..end` of the file at `path` with their highlights: the open
+ * document's if it's open, otherwise the file on disk.
+ */
+export const peekLines = (path: string, start: number, end: number) =>
+  call<PeekLines>('editor_peek_lines', { path, start, end })

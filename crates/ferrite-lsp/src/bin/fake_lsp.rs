@@ -3,7 +3,7 @@
 //! It keeps each open document's text by applying the changes it receives
 //! (counting columns its own way, independently of the client), reports a
 //! diagnostic for every occurrence of the word `error`, and answers hover,
-//! definition and completion requests from the text. `fake/text` returns a
+//! definition, references and completion requests from the text. `fake/text` returns a
 //! document's text so tests can check synchronization; `fake/sleep` delays
 //! its answer. Flags: `--utf16` negotiates UTF-16 positions instead of
 //! UTF-8; `--crash-on-hover` exits when asked for a hover.
@@ -127,6 +127,7 @@ impl Server {
             "textDocumentSync": { "openClose": true, "change": 2, "save": { "includeText": false } },
             "hoverProvider": true,
             "definitionProvider": true,
+            "referencesProvider": true,
             "completionProvider": { "triggerCharacters": ["."] },
           },
           "serverInfo": { "name": "fake", "version": "1" },
@@ -191,6 +192,24 @@ impl Server {
           }),
           _ => Value::Null,
         }
+      }
+      "textDocument/references" => {
+        let (uri, word) = self.word_at(&params);
+        let text = self.documents.get(&uri).cloned().unwrap_or_default();
+        let locations: Vec<Value> = if word.is_empty() {
+          Vec::new()
+        } else {
+          text
+            .match_indices(&word)
+            .map(|(offset, _)| {
+              json!({
+                "uri": uri,
+                "range": { "start": self.position(&text, offset), "end": self.position(&text, offset + word.len()) },
+              })
+            })
+            .collect()
+        };
+        json!(locations)
       }
       "textDocument/completion" => json!({
         "isIncomplete": false,

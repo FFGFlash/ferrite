@@ -1,21 +1,23 @@
-//! Requests made for the editor: hover, go to definition, and completion.
-//! Each syncs the document, takes what it needs under the locks, and waits
-//! for the server on a blocking thread with no lock held. Results are mapped
-//! to the document as it is when they arrive.
+//! Requests made for the editor: hover, go to definition, references, and
+//! completion. Each syncs the document, takes what it needs under the locks,
+//! and waits for the server on a blocking thread with no lock held. Results
+//! are mapped to the document as it is when they arrive.
 
+use std::collections::BTreeMap;
 use std::iter::Peekable;
+use std::path::PathBuf;
 use std::str::Chars;
 use std::time::Duration;
 
-use ferrite_core::DocumentId;
+use ferrite_core::{DocumentId, MAX_DISPLAY_LINE_BYTES};
 use ferrite_lsp::LspError;
-use ferrite_lsp::convert::{to_offset, to_offsets, to_position, uri_to_path};
-use ferrite_lsp::lsp_types::request::{Completion, GotoDefinition, HoverRequest};
+use ferrite_lsp::convert::{PositionEncoding, to_offset, to_offsets, to_position, uri_to_path};
+use ferrite_lsp::lsp_types::request::{Completion, GotoDefinition, HoverRequest, References};
 use ferrite_lsp::lsp_types::{
   CompletionContext, CompletionItemKind, CompletionParams, CompletionResponse, CompletionTextEdit,
   CompletionTriggerKind, GotoDefinitionParams, GotoDefinitionResponse, HoverContents, HoverParams,
-  HoverProviderCapability, InsertTextFormat, MarkedString, MarkupKind, OneOf,
-  TextDocumentIdentifier, TextDocumentPositionParams,
+  HoverProviderCapability, InsertTextFormat, MarkedString, MarkupKind, OneOf, Range,
+  ReferenceContext, ReferenceParams, TextDocumentIdentifier, TextDocumentPositionParams, Uri,
 };
 use ferrite_text::{TextBuffer, map_offset_through};
 use ferrite_workspace::load_text_file;
@@ -50,6 +52,17 @@ pub struct LocationDto {
   pub path: String,
   pub start: Position,
   pub end: Position,
+}
+
+/// A reference to a symbol.
+#[derive(Debug, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReferenceDto {
+  pub path: String,
+  pub start: Position,
+  pub end: Position,
+  /// The text of the line it starts on, for previews.
+  pub line: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -237,50 +250,142 @@ pub async fn lsp_definition(
       .map(|link| (link.target_uri, link.target_selection_range)),
     None => None,
   };
-  let Some(path) = location
-    .as_ref()
-    .and_then(|(uri, _)| uri_to_path(uri))
-    .map(|path| paths::normalize(&path))
-  else {
+  let resolved = resolve(
+    &app,
+    target.server.encoding(),
+    location.into_iter().collect(),
+  )
+  .await?;
+  Ok(resolved.into_iter().next().map(|reference| LocationDto {
+    path: reference.path,
+    start: reference.start,
+    end: reference.end,
+  }))
+}
+
+/// The references to the symbol at `position`, including its declaration,
+/// in order of path and position.
+#[tauri::command]
+pub async fn lsp_references(
+  app: AppHandle,
+  id: u64,
+  position: Position,
+) -> Result<Option<Vec<ReferenceDto>>, CommandError> {
+  let prepared = prepare(&app, DocumentId::from_raw(id), position)?;
+  let Some(target) = &prepared.target else {
     return Ok(None);
   };
-  let Some((_, range)) = location else {
+  if matches!(
+    target.server.capabilities().references_provider,
+    None | Some(OneOf::Left(false))
+  ) {
     return Ok(None);
+  }
+  let params = ReferenceParams {
+    text_document_position: prepared.position_params(target),
+    work_done_progress_params: Default::default(),
+    partial_result_params: Default::default(),
+    context: ReferenceContext {
+      include_declaration: true,
+    },
   };
-  let encoding = target.server.encoding();
-  let convert = move |buffer: &TextBuffer| {
-    let offsets = to_offsets(buffer, range, encoding);
-    (
-      Position::from(buffer.offset_to_utf16(offsets.start)),
-      Position::from(buffer.offset_to_utf16(offsets.end)),
-    )
+  let server = target.server.clone();
+  let locations = match blocking(move || {
+    server.request::<References>(params, REQUEST_TIMEOUT, || false)
+  })
+  .await?
+  {
+    Ok(locations) => locations.unwrap_or_default(),
+    Err(error) => {
+      log_failure("references", &error);
+      return Ok(None);
+    }
   };
-  let open = {
+  let locations = locations
+    .into_iter()
+    .map(|location| (location.uri, location.range))
+    .collect();
+  Ok(Some(
+    resolve(&app, target.server.encoding(), locations).await?,
+  ))
+}
+
+/// `locations` as positions in their files' text: an open document's as it
+/// is now, or the file's on disk. Those in files that can't be read are left
+/// out. Sorted by path and position, without duplicates.
+async fn resolve(
+  app: &AppHandle,
+  encoding: PositionEncoding,
+  locations: Vec<(Uri, Range)>,
+) -> Result<Vec<ReferenceDto>, CommandError> {
+  let mut by_path: BTreeMap<PathBuf, Vec<Range>> = BTreeMap::new();
+  for (uri, range) in locations {
+    if let Some(path) = uri_to_path(&uri) {
+      by_path
+        .entry(paths::normalize(&path))
+        .or_default()
+        .push(range);
+    }
+  }
+  // Open documents' text now; other files are read without the lock.
+  let mut texts: Vec<(PathBuf, Vec<Range>, Option<TextBuffer>)> = {
     let state = app.state::<EditorState>();
     let editor = state.lock();
-    editor
-      .find_by_path(&path)
-      .and_then(|id| editor.document(id).ok())
-      .map(|document| convert(document.buffer()))
+    by_path
+      .into_iter()
+      .map(|(path, ranges)| {
+        let open = editor
+          .find_by_path(&path)
+          .and_then(|id| editor.document(id).ok())
+          .map(|document| TextBuffer::from_snapshot(&document.buffer().snapshot()));
+        (path, ranges, open)
+      })
+      .collect()
   };
-  let (start, end) = match open {
-    Some(positions) => positions,
-    None => {
-      let file = path.clone();
-      match blocking(move || load_text_file(&file)).await? {
-        Ok(loaded) => convert(&TextBuffer::from_text(&loaded.text)),
-        Err(error) => {
-          tracing::warn!(%error, path = %path.display(), "could not read definition target");
-          return Ok(None);
+  texts = blocking(move || {
+    for (path, _, text) in &mut texts {
+      if text.is_none() {
+        match load_text_file(path) {
+          Ok(loaded) => *text = Some(TextBuffer::from_text(&loaded.text)),
+          Err(error) => {
+            tracing::warn!(%error, path = %path.display(), "could not read a referenced file");
+          }
         }
       }
     }
-  };
-  Ok(Some(LocationDto {
-    path: path.display().to_string(),
-    start,
-    end,
-  }))
+    texts
+  })
+  .await?;
+  let mut resolved = Vec::new();
+  for (path, ranges, text) in texts {
+    let Some(buffer) = text else {
+      continue;
+    };
+    let mut references: Vec<ReferenceDto> = ranges
+      .into_iter()
+      .map(|range| {
+        let offsets = to_offsets(&buffer, range, encoding);
+        let start = Position::from(buffer.offset_to_utf16(offsets.start));
+        ReferenceDto {
+          path: path.display().to_string(),
+          start,
+          end: buffer.offset_to_utf16(offsets.end).into(),
+          line: buffer.line_prefix(start.line, MAX_DISPLAY_LINE_BYTES).0,
+        }
+      })
+      .collect();
+    references.sort_by_key(|reference| {
+      (
+        reference.start.line,
+        reference.start.column,
+        reference.end.line,
+        reference.end.column,
+      )
+    });
+    references.dedup();
+    resolved.extend(references);
+  }
+  Ok(resolved)
 }
 
 fn is_word_char(ch: char) -> bool {

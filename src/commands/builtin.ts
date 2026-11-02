@@ -3,6 +3,7 @@ import { openPalette, openQuickPick } from '../components/paletteState'
 import { togglePerfOverlay } from '../components/PerfOverlay'
 import { resetPerf } from '../state/perf'
 import { activeEditor } from '../editor/activeEditor'
+import { goToNextReference, peekStore } from '../editor/references'
 import {
   documentsStore,
   newFile,
@@ -77,6 +78,7 @@ import {
 } from './registry'
 
 const hasEditor = () => activeEditor.get() !== null
+const hasPeek = () => peekStore.get() !== null
 const hasDocument = () => documentsStore.get().activeId !== null
 
 /** The active document, if it has a file (and so an encoding to change). */
@@ -815,6 +817,37 @@ export const builtinCommands: Command[] = [
     keybinding: 'f12',
     enabled: hasEditor,
     run: () => editor()?.goToDefinition(),
+  },
+  {
+    id: 'editor.goToReferences',
+    category: 'Go',
+    title: 'Go to References',
+    keybinding: 'shift+f12',
+    enabled: hasEditor,
+    run: () => editor()?.goToReferences(),
+  },
+  {
+    id: 'editor.peekReferences',
+    category: 'Go',
+    title: 'Peek References',
+    enabled: hasEditor,
+    run: () => editor()?.peekReferences(),
+  },
+  {
+    id: 'editor.goToNextReference',
+    category: 'Go',
+    title: 'Go to Next Reference',
+    keybinding: 'f4',
+    enabled: hasPeek,
+    run: () => goToNextReference(true),
+  },
+  {
+    id: 'editor.goToPreviousReference',
+    category: 'Go',
+    title: 'Go to Previous Reference',
+    keybinding: 'shift+f4',
+    enabled: hasPeek,
+    run: () => goToNextReference(false),
   },
   {
     id: 'editor.triggerSuggest',

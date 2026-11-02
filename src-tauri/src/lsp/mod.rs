@@ -1,6 +1,6 @@
 //! Language servers for open documents: starting them on demand, keeping
 //! documents in sync, diagnostics, and (in `commands`) hover, go to
-//! definition and completion.
+//! definition, references and completion.
 //!
 //! A document of a language with a configured server is opened on the
 //! server for its workspace root the first time it is viewed; the server is

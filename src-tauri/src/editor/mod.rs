@@ -7,6 +7,7 @@ mod counts;
 pub(crate) mod fold_memory;
 mod folding;
 mod minimap;
+mod peek;
 pub(crate) mod protocol;
 pub(crate) mod syntax;
 
@@ -27,6 +28,7 @@ use crate::ui_state::UiStateStore;
 use protocol::DocumentSummary;
 
 pub use commands::*;
+pub use peek::*;
 
 /// The authoritative editor state. Commands hold the lock only briefly; file
 /// I/O and dialogs run without it.

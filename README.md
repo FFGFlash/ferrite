@@ -99,6 +99,7 @@ file between text and the viewers that can show it.
 | Cursors at line ends / cursor undo  | Shift+Alt+I / Ctrl+U             | ⌥⇧I / ⌘U                 |
 | Scroll a line up / down             | Ctrl+↑ / ↓                       | ⌃↑ / ↓                   |
 | Go to definition                    | F12, Ctrl+click                  | F12, ⌘click              |
+| Go to references / next, previous   | Shift+F12 / F4, Shift+F4         | ⇧F12 / F4, ⇧F4           |
 | Trigger suggestions                 | Ctrl+Space                       | ⌃Space                   |
 
 With nothing selected, cut and copy take the whole line, and pasting it inserts it as a line
@@ -169,7 +170,9 @@ works either way. Markdown's highlighting needs no build either; its preview doe
 With a language server, Ferrite also shows errors and warnings as you type (squiggles, and in
 **View: Problems** with every file's, counted in the status bar), shows type information and documentation when the pointer rests on a
 symbol, goes to definitions (F12 or Ctrl/⌘+click; holding Ctrl/⌘ underlines the symbol under the
-pointer when it has one), and offers completions (as you type, after `.` and similar
+pointer when it has one), finds references (Shift+F12, or Ctrl/⌘+click on a definition: one is
+gone to, several open a peek below the line with a preview and a list by file; F4 and Shift+F4
+step through them, Enter or a double-click opens one, Escape closes it), and offers completions (as you type, after `.` and similar
 characters, or with Ctrl+Space). Servers start when you open a file that needs one. The status
 bar shows the server's state; hover it for details if a server is missing or failed. Servers can
 be changed, added, or turned off in the `[lsp]` section of the settings.

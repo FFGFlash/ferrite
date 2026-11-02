@@ -21,10 +21,11 @@ use lsp_types::notification::Notification;
 use lsp_types::request::Request;
 use lsp_types::{
   ClientCapabilities, ClientInfo, CompletionClientCapabilities, CompletionItemCapability,
-  GeneralClientCapabilities, GotoCapability, HoverClientCapabilities, InitializeParams, MarkupKind,
-  PositionEncodingKind, PublishDiagnosticsClientCapabilities, ServerCapabilities,
-  TextDocumentClientCapabilities, TextDocumentSyncCapability, TextDocumentSyncClientCapabilities,
-  TextDocumentSyncKind, WindowClientCapabilities, WorkspaceFolder,
+  DynamicRegistrationClientCapabilities, GeneralClientCapabilities, GotoCapability,
+  HoverClientCapabilities, InitializeParams, MarkupKind, PositionEncodingKind,
+  PublishDiagnosticsClientCapabilities, ServerCapabilities, TextDocumentClientCapabilities,
+  TextDocumentSyncCapability, TextDocumentSyncClientCapabilities, TextDocumentSyncKind,
+  WindowClientCapabilities, WorkspaceFolder,
 };
 use serde::de::DeserializeOwned;
 use serde_json::{Value, json};
@@ -544,6 +545,7 @@ fn initialize_params(root: &Path) -> InitializeParams {
           link_support: Some(false),
           ..Default::default()
         }),
+        references: Some(DynamicRegistrationClientCapabilities::default()),
         publish_diagnostics: Some(PublishDiagnosticsClientCapabilities {
           version_support: Some(true),
           ..Default::default()

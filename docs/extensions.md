@@ -829,7 +829,7 @@ root_markers = ["package.json"]          # optional: files marking a project roo
   user allows it, or if they deny it, the servers don't run; the languages are highlighted
   either way.
 - **Ferrite runs them**: started on demand when a file of
-  one of their languages is opened, with hover, go to definition, completion, and diagnostics.
+  one of their languages is opened, with hover, go to definition, references, completion, and diagnostics.
   The extension's code, if any, has no access to them.
 - **Commands.** A command without `/` or `\` is looked up on the `PATH`. A relative path runs a
   program the extension ships, inside its folder. Absolute paths aren't allowed. A server that

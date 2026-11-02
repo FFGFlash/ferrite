@@ -176,12 +176,7 @@ impl DocumentSyntax {
         None => vec![Vec::new(); lines.len()],
       };
       for (line, spans) in lines.clone().zip(spans) {
-        let spans = if spans.is_empty() {
-          Vec::new()
-        } else {
-          let (text, _) = buffer.line_prefix(line, MAX_DISPLAY_LINE_BYTES);
-          flatten_utf16(&text, &spans)
-        };
+        let spans = line_spans(buffer, line, &spans);
         let hash = hash_spans(&spans);
         if carried.get(&line) != Some(&hash) {
           changed.push(LineHighlightsDto { line, spans });
@@ -256,20 +251,37 @@ pub fn highlight_snippet(
   let language = registry.for_name(&name.to_ascii_lowercase())?;
   let buffer = TextBuffer::from_text(text);
   let tree = parse(language, registry, &buffer, None, deadline(budget)).ok()??;
-  let lines = 0..buffer.line_count();
-  let spans = highlight_lines(&tree, &buffer, lines.clone(), MAX_DISPLAY_LINE_BYTES);
-  Some(
-    lines
-      .zip(spans)
-      .map(|(line, spans)| {
-        if spans.is_empty() {
-          return Vec::new();
-        }
-        let (text, _) = buffer.line_prefix(line, MAX_DISPLAY_LINE_BYTES);
-        flatten_utf16(&text, &spans)
-      })
-      .collect(),
-  )
+  Some(highlight_buffer_lines(
+    Some(&tree),
+    &buffer,
+    0..buffer.line_count(),
+  ))
+}
+
+/// Highlights `lines` of `buffer` with `tree` (a parse of it), flattened as
+/// in views; no spans without a tree.
+pub fn highlight_buffer_lines(
+  tree: Option<&SyntaxTree>,
+  buffer: &TextBuffer,
+  lines: Range<usize>,
+) -> Vec<Vec<u32>> {
+  let Some(tree) = tree else {
+    return vec![Vec::new(); lines.len()];
+  };
+  let spans = highlight_lines(tree, buffer, lines.clone(), MAX_DISPLAY_LINE_BYTES);
+  lines
+    .zip(spans)
+    .map(|(line, spans)| line_spans(buffer, line, &spans))
+    .collect()
+}
+
+/// The spans of `line` (byte columns), flattened as UTF-16 triples.
+fn line_spans(buffer: &TextBuffer, line: usize, spans: &[Span]) -> Vec<u32> {
+  if spans.is_empty() {
+    return Vec::new();
+  }
+  let (text, _) = buffer.line_prefix(line, MAX_DISPLAY_LINE_BYTES);
+  flatten_utf16(&text, spans)
 }
 
 /// `spans` (byte columns into `text`, in order) as flat UTF-16 triples.

@@ -477,6 +477,8 @@ EditorView = { version, lineCount, rowCount, startRow, startLine, endLine,
 | `events_subscribe`                                            | Register the backend event channel                     |
 | `perf_stats`                                                  | Backend timings, scheduler statistics, memory          |
 | `lsp_hover`, `lsp_definition`, `lsp_completion`               | Language server requests at a position                 |
+| `lsp_references`                                              | A symbol's references, with their lines                |
+| `editor_peek_lines`                                           | A file's highlighted lines, for the references peek    |
 | `terminal_create`, `terminal_list`, `terminal_attach`         | Start a terminal, or reattach after a reload           |
 | `terminal_platform`                                           | The Windows build, for the emulator's ConPTY handling  |
 | `terminal_profiles`, `settings_set_default_profile`           | Installed shells and profiles; choose the default      |
@@ -573,8 +575,8 @@ server (`lsp/`).
   the same way until the server publishes others (servers that only check open files clear
   them). A document's own diagnostics replace them when it opens, and a server that exits or
   restarts loses them.
-- **Requests never hold locks while waiting.** `lsp_hover`, `lsp_definition`, and
-  `lsp_completion` sync the document, capture the position and a snapshot under the locks,
+- **Requests never hold locks while waiting.** `lsp_hover`, `lsp_definition`,
+  `lsp_references`, and `lsp_completion` sync the document, capture the position and a snapshot under the locks,
   then wait on a blocking thread (5 s timeout). Completion results are filtered and ranked in
   Rust (prefix, case-insensitive prefix, then letters in order; at most 200) and their edit
   positions are mapped to the current text. The frontend narrows them further as typing
@@ -809,7 +811,13 @@ viewers through the `viewers` interface (API 1.4).
   Terminal colors and fonts follow the theme tokens and editor settings.
 - **Language features**: resting the pointer on text shows a hover card (diagnostics at that
   point plus the server's Markdown, rendered as React elements, never HTML); F12 or Ctrl/Cmd+click
-  goes to the definition; completion opens on the server's trigger characters, on typing a word,
+  goes to the definition; Shift+F12 (or Ctrl/Cmd+click on the definition itself) goes to a lone
+  reference or opens the references peek (`editor/PeekView`, state in `editor/references.ts`),
+  as in VS Code: a zone between the editor's lines, which the row geometry in `EditorView`
+  makes room for, with a read-only preview of the selected reference's file (lines from
+  `editor_peek_lines`: the open document's, or the file on disk) and a tree of references by
+  file. F4 and Shift+F4 move the cursor and the peek to the next and previous reference,
+  following it into another file's editor; completion opens on the server's trigger characters, on typing a word,
   or with Ctrl+Space, and is navigated with the arrow keys and accepted with Enter or Tab. The
   status bar shows the language and the server's state (and the counts of every file's
   problems).
@@ -832,7 +840,7 @@ viewers through the `viewers` interface (API 1.4).
 - **Quick picks** (`openQuickPick` in `components/paletteState.ts`) show a list of choices in
   the palette, filtered by typing: encodings, and the ways to reopen a file.
 - **Context menus** (`components/ContextMenu`) are a generic keyboard-navigable menu, opened by
-  the editor (clipboard, Go to Definition, extension items, Command Palette) and by explorer
+  the editor (clipboard, Go to Definition and References, extension items, Command Palette) and by explorer
   file rows (Open, extension items).
 - **Tabs** can be dragged within and between groups, cycled with Ctrl+Tab and
   Ctrl+PageUp/PageDown within their group, and closed with Delete or Ctrl+W (the current group's
@@ -971,8 +979,10 @@ These are tracked for later milestones:
 - Single folder only; multi-root workspaces aren't supported.
 - Scroll positions are remembered per tab only while the app runs. Unsaved changes aren't kept
   across a normal close (closing asks about them); they're backed up only for crash recovery.
-- Language features are limited to diagnostics, hover, go to definition, and completion. Find
-  references, rename, code actions, formatting, signature help, and semantic tokens aren't
+- Language features are limited to diagnostics, hover, go to definition, references, and
+  completion. The references peek's preview is read only (VS Code's can be edited), and its
+  references and anchor are where they were when it opened, not moved by later edits; there's
+  no Find All References view. Rename, code actions, formatting, signature help, and semantic tokens aren't
   implemented, nor are completion's additional edits (such as auto-imports) or snippets
   (completion asks servers for plain text). There's no problems panel; diagnostics for files that
   aren't open aren't shown.

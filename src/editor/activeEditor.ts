@@ -24,6 +24,10 @@ export interface EditorController {
   scrollBy(lines: number): void
   /** Goes to the definition of the symbol at the cursor. */
   goToDefinition(): void
+  /** Goes to the one reference to the symbol at the cursor, or peeks at several. */
+  goToReferences(): void
+  /** Peeks at the references to the symbol at the cursor. */
+  peekReferences(): void
   /** Opens completion at the cursor. */
   triggerSuggest(): void
   /** Shows hover information for the symbol at the cursor. */

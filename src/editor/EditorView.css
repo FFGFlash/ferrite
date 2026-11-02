@@ -20,9 +20,25 @@
 }
 
 .editor-view__sizer {
+  position: relative;
   display: flex;
   width: max-content;
   min-width: 100%;
+}
+
+/* Room between lines for a peek (see PeekView.tsx), across the sizer's whole
+   width; its content keeps to the visible width, whatever the horizontal
+   scroll. */
+.editor-view__zone {
+  position: absolute;
+  right: 0;
+  left: 0;
+  z-index: 3;
+}
+
+.editor-view__zone-content {
+  position: sticky;
+  left: 0;
 }
 
 .editor-view__gutter {

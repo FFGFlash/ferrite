@@ -23,6 +23,12 @@ export interface Location {
   end: Position
 }
 
+/** A reference to a symbol. */
+export interface Reference extends Location {
+  /** The text of the line it starts on. */
+  line: string
+}
+
 export interface CompletionItem {
   label: string
   kind: string | null
@@ -44,5 +50,8 @@ export const hover = (id: number, position: Position) =>
   call<Hover | null>('lsp_hover', { id, position })
 export const definition = (id: number, position: Position) =>
   call<Location | null>('lsp_definition', { id, position })
+/** References to the symbol at `position`, including its declaration, by path and position. */
+export const references = (id: number, position: Position) =>
+  call<Reference[] | null>('lsp_references', { id, position })
 export const completion = (id: number, position: Position, trigger: string | null) =>
   call<Completions | null>('lsp_completion', { id, position, trigger })
