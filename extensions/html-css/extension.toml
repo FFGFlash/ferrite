@@ -6,6 +6,7 @@ id = "example.html-css"
 name = "HTML & CSS"
 version = "0.1.0"
 description = "HTML and CSS: highlighting (with CSS and JavaScript inside HTML) and language servers."
+author = "Ferrite"
 api_version = "1"
 
 [engines]

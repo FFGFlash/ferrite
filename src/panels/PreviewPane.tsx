@@ -2,7 +2,8 @@
  * An extension's preview: formatted text the extension sends as a tree of
  * nodes (headings, paragraphs, lists, tables, code, links, pictures), drawn
  * here as React elements. Nothing an extension sends becomes markup, so it
- * can't inject HTML, scripts, or styles.
+ * can't inject HTML, scripts, or styles. Extensions' READMEs are drawn the
+ * same way (`PreviewDocument`).
  *
  * - **Links** to web and mail addresses open with the system; links to
  *   files open them in the editor, and links to headings scroll there.
@@ -16,6 +17,7 @@
 import { ImageOff } from 'lucide-react'
 import {
   createContext,
+  useCallback,
   useContext,
   useEffect,
   useMemo,
@@ -104,7 +106,8 @@ export function buildTree(content: PreviewContent): Tree {
 
 /** What links and pictures need while drawing. */
 interface Context {
-  preview: string
+  /** Loads a picture file as a `data:` URL. */
+  loadImage: (path: string) => Promise<string>
   follow: (target: LinkTarget) => void
   /** Data URLs of pictures already loaded, by path. */
   images: Map<string, string>
@@ -174,7 +177,8 @@ function Picture({
       return
     }
     let cancelled = false
-    getPreviewImage(context.preview, path)
+    context
+      .loadImage(path)
       .then(url => {
         context.images.set(path, url)
         if (!cancelled) {
@@ -409,13 +413,33 @@ function useContent(id: string): PreviewContent | null {
 
 export function PreviewPane({ preview }: { preview: PreviewInfo }) {
   const content = useContent(preview.id)
+  const loadImage = useCallback((path: string) => getPreviewImage(preview.id, path), [preview.id])
+  return (
+    <article className="preview" tabIndex={0} aria-label={preview.title}>
+      <PreviewDocument content={content} loadImage={loadImage} />
+    </article>
+  )
+}
+
+interface PreviewDocumentProps {
+  /** `null` while loading. */
+  content: PreviewContent | null
+  /** Loads a picture file the content shows; a new function loads them all again. */
+  loadImage: (path: string) => Promise<string>
+}
+
+/**
+ * Preview content drawn as elements, with its links followed and pictures
+ * loaded: an extension's preview, or an extension's README.
+ */
+export function PreviewDocument({ content, loadImage }: PreviewDocumentProps) {
   const tree = useMemo(() => (content ? buildTree(content) : null), [content])
-  const ref = useRef<HTMLElement>(null)
-  const images = useMemo(() => new Map<string, string>(), [preview.id])
+  const ref = useRef<HTMLDivElement>(null)
+  const images = useMemo(() => new Map<string, string>(), [loadImage])
 
   const context = useMemo<Context>(
     () => ({
-      preview: preview.id,
+      loadImage,
       images,
       follow: target => {
         switch (target.kind) {
@@ -439,11 +463,11 @@ export function PreviewPane({ preview }: { preview: PreviewInfo }) {
         }
       },
     }),
-    [preview.id, images],
+    [loadImage, images],
   )
 
   return (
-    <article ref={ref} className="preview" tabIndex={0} aria-label={preview.title}>
+    <div ref={ref} className="preview__document">
       <PreviewContext.Provider value={context}>
         {tree &&
           (tree.roots.length > 0 ? (
@@ -452,6 +476,6 @@ export function PreviewPane({ preview }: { preview: PreviewInfo }) {
             <p className="preview__empty">Nothing to preview.</p>
           ))}
       </PreviewContext.Provider>
-    </article>
+    </div>
   )
 }

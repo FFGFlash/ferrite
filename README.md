@@ -171,8 +171,11 @@ Markdown), and add languages. They have no access to
 files, the network, or anything else on your computer. Before an extension starts, Ferrite asks
 you to allow the permissions it requests (reading or editing open documents, or running the
 language servers it declares). The
-Extensions view (`Ctrl+Shift+X`) shows each extension's state and permissions, and lets you
-change them, restart an extension, or turn it off. An extension that crashes, loops, or uses too
+Extensions view (`Ctrl+Shift+X`) lists each extension with its icon, name, description, author,
+and how long it took to start (hover over one for the rest). Choose one to open its page: its
+README, permissions (change them there), commands, what it adds, and its resource use, with
+buttons to restart it, turn it off, or open its settings or log. The gear on each row has the
+same actions. An extension that crashes, loops, or uses too
 much memory is stopped without affecting the editor.
 
 Besides the [language extensions](#languages), six example extensions are included:
@@ -315,7 +318,8 @@ Tabs sit in groups, and any tab can go in any group, beside any other.
   reports for files that aren't open (rust-analyzer checks the whole folder, for example).
   Choose one to go to it. Groups collapse, and the arrow keys move between rows. **Output** (`Ctrl+Shift+U`) shows recent log messages from Ferrite, from each extension,
   and from each language server (including what the server prints), with **Open Log File** for
-  the full log. Each extension in the Extensions view has a **Log** button.
+  the full log. Each extension's page and its gear menu in the Extensions view have **Show
+  Log**.
 - **Documents** open in the group last used for documents. The main group (on the right at
   first) stays when empty and shows the welcome page.
 
@@ -358,8 +362,8 @@ any tab, a terminal can be docked anywhere.
 Run **Preferences: Open Settings** (`Ctrl+,`) to see every setting, including those your
 extensions declare, with its value and description. Changes are written to `settings.toml` and
 apply at once. Search by name, key, or description; `@modified` shows what you've set, and
-`@ext:<id>` shows one extension's settings (each extension's **Settings** button in the
-Extensions view opens them).
+`@ext:<id>` shows one extension's settings (the **Settings** button on an extension's page
+opens them).
 
 **Preferences: Open Settings (TOML)** opens the file itself; saving applies it. Theme color
 overrides, language servers, terminal profiles, and keybindings are edited there. Every available

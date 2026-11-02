@@ -251,6 +251,11 @@ export interface ExtensionStatus {
   name: string
   version: string
   description: string
+  author: string | null
+  /** Whether it has an icon (`getExtensionIcon`). */
+  hasIcon: boolean
+  /** Whether it has a README (`getExtensionReadme`). */
+  hasReadme: boolean
   /** The extension's folder. */
   path: string
   development: boolean
@@ -277,6 +282,8 @@ export interface ResourceUsage {
   /** Document changes dropped because it was busy. */
   droppedEvents: number
   compileMs: number
+  /** How long it took to start, most recently (compiling included); `null` before it has. */
+  activationMs: number | null
 }
 
 export type MessageLevel = 'info' | 'warning' | 'error'
@@ -305,6 +312,14 @@ export const previewClosed = (preview: string) =>
 /** A picture a preview shows, as a `data:` URL. */
 export const getPreviewImage = (preview: string, path: string) =>
   call<string>('extension_preview_image', { preview, path })
+/** An extension's icon as a `data:` URL; `null` if it has none. */
+export const getExtensionIcon = (id: string) => call<string | null>('extension_icon', { id })
+/** An extension's README, rendered as preview content; `null` if it has none. */
+export const getExtensionReadme = (id: string) =>
+  call<PreviewContent | null>('extension_readme', { id })
+/** A picture in an extension's README, as a `data:` URL. */
+export const getExtensionReadmeImage = (id: string, path: string) =>
+  call<string>('extension_readme_image', { id, path })
 /** Grants `granted` and denies the extension's other requested permissions. */
 export const setExtensionPermissions = (id: string, granted: Permission[]) =>
   call<void>('extension_set_permissions', { id, granted })

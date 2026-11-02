@@ -5,6 +5,7 @@ id = "example.javascript"
 name = "JavaScript"
 version = "0.1.0"
 description = "JavaScript and JSX highlighting, and typescript-language-server."
+author = "Ferrite"
 api_version = "1"
 
 [engines]

@@ -45,6 +45,9 @@ function extension(overrides: Partial<ExtensionStatus> = {}): ExtensionStatus {
     commands: [{ id: 'example.tidy.trim', title: 'Trim', category: 'Tidy', hidden: false }],
     configErrors: [],
     hasSettings: false,
+    author: null,
+    hasIcon: false,
+    hasReadme: false,
     contributions: {
       themes: [],
       iconThemes: [],
@@ -64,6 +67,7 @@ function extension(overrides: Partial<ExtensionStatus> = {}): ExtensionStatus {
       peakMemoryBytes: 0,
       droppedEvents: 0,
       compileMs: 0,
+      activationMs: null,
     },
     ...overrides,
   }

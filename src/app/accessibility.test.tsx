@@ -77,6 +77,9 @@ describe('accessibility (axe)', () => {
         commands: [{ id: 'example.tidy.trim', title: 'Trim', category: 'Tidy', hidden: false }],
         configErrors: ['max_line_length: expected an integer'],
         hasSettings: false,
+        author: null,
+        hasIcon: false,
+        hasReadme: false,
         contributions: {
           themes: [],
           iconThemes: [],
@@ -96,6 +99,7 @@ describe('accessibility (axe)', () => {
           peakMemoryBytes: 1 << 20,
           droppedEvents: 0,
           compileMs: 40,
+          activationMs: null,
         },
       },
     ])
@@ -106,6 +110,10 @@ describe('accessibility (axe)', () => {
       await user.click(screen.getByRole('button', { name }))
       expect(await axeViolations(), name).toEqual([])
     }
+    // An extension's page, from its row.
+    await user.click(screen.getByRole('button', { name: /^Tidy/ }))
+    expect(await screen.findByRole('article', { name: 'Tidy' })).toBeInTheDocument()
+    expect(await axeViolations(), 'the extension page').toEqual([])
   })
 
   it('finds no problems in the explorer while naming a new file', async () => {

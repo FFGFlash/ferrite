@@ -4,6 +4,7 @@ id = "example.python"
 name = "Python"
 version = "0.1.0"
 description = "Python highlighting, and Pyright for diagnostics, hover, definitions, and completion."
+author = "Ferrite"
 api_version = "1"
 
 [engines]

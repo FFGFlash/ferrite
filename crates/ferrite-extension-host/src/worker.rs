@@ -341,6 +341,7 @@ fn run(shared: &Weak<Shared>, setup: &Setup) -> Result<(), Failure> {
     .entrypoint
     .as_ref()
     .ok_or("has no code to run")?;
+  let starting = Instant::now();
   let compiling = Instant::now();
   let component = runtime.compile(entrypoint)?;
   setup.usage.record_compile(compiling.elapsed());
@@ -383,6 +384,7 @@ fn run(shared: &Weak<Shared>, setup: &Setup) -> Result<(), Failure> {
     extension.call_activate(&mut *store, &activation)
   })?
   .map_err(|message| format!("could not start: {}", truncate(&message)))?;
+  setup.usage.record_activation(starting.elapsed());
   if let Some(shared) = shared.upgrade() {
     shared.worker_active(&setup.manifest.id, setup.generation);
   }

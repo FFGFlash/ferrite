@@ -1,0 +1,238 @@
+.extension-page {
+  box-sizing: border-box;
+  min-height: 100%;
+  padding: var(--space-6) var(--space-8);
+  background: var(--color-editor-background);
+  color: var(--color-editor-foreground);
+  container-type: inline-size;
+}
+
+.extension-page__header {
+  display: flex;
+  gap: var(--space-6);
+  align-items: flex-start;
+  padding-bottom: var(--space-6);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.extension-page__summary {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.extension-page__name {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--space-3);
+  margin: 0;
+  font-size: 22px;
+  font-weight: 600;
+}
+
+.extension-page__version,
+.extension-page__meta,
+.extension-page__muted,
+.extension-page__path {
+  color: var(--color-text-muted);
+}
+
+.extension-page__version {
+  font-size: 14px;
+  font-weight: normal;
+}
+
+.extension-page__badge {
+  padding: 0 6px;
+  border-radius: 3px;
+  background: var(--color-control-hover-background);
+  color: var(--color-text-muted);
+  font-size: var(--font-size-ui-small);
+  font-weight: normal;
+}
+
+.extension-page__meta,
+.extension-page__description,
+.extension-page__state {
+  margin: 0;
+}
+
+.extension-page__author {
+  color: var(--color-editor-foreground);
+}
+
+.extension-page__description {
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.extension-page__state {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.extension-page__state[data-state='failed'],
+.extension-page__state[data-state='invalid'] {
+  color: var(--color-error);
+}
+
+.extension-page__state[data-state='awaitingPermission'] {
+  color: var(--color-list-warning-foreground);
+}
+
+.extension-page__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-top: var(--space-1);
+}
+
+.extension-page__button {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px var(--space-3);
+  border: 1px solid var(--color-input-border);
+  border-radius: var(--radius-control);
+  background: none;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.extension-page__button:hover {
+  background: var(--color-control-hover-background);
+}
+
+.extension-page__button--primary {
+  border-color: transparent;
+  background: var(--color-button-background);
+  color: var(--color-button-foreground);
+}
+
+.extension-page__button--primary:hover {
+  background: var(--color-button-hover-background);
+}
+
+.extension-page__button--icon {
+  padding: 3px var(--space-1);
+}
+
+.extension-page__error,
+.extension-page__warning {
+  margin: 0;
+  padding: var(--space-2) var(--space-3);
+  border-left: 3px solid var(--color-error);
+  background: var(--color-widget-background);
+  overflow-wrap: anywhere;
+  user-select: text;
+}
+
+.extension-page__warning {
+  border-left-color: var(--color-list-warning-foreground);
+}
+
+/* The README beside the details; the details go below when it's narrow. */
+.extension-page__body {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 260px;
+  gap: var(--space-8);
+  padding-top: var(--space-6);
+}
+
+@container (max-width: 700px) {
+  .extension-page__body {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .extension-page__header {
+    flex-direction: column;
+    gap: var(--space-3);
+  }
+}
+
+/* The README keeps the preview's typography but not its scrolling box. */
+.extension-page__readme.preview {
+  height: auto;
+  overflow: visible;
+  padding: 0;
+  background: none;
+}
+
+.extension-page__details {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-6);
+  min-width: 0;
+  font-size: var(--font-size-ui-small);
+  line-height: 1.5;
+}
+
+.extension-page__section {
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: none;
+}
+
+.extension-page__section h2 {
+  margin: 0 0 var(--space-2);
+  color: var(--color-text-muted);
+  font-size: var(--font-size-ui-small);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.extension-page__section p {
+  margin: 0;
+}
+
+.extension-page__permissions legend {
+  padding: 0;
+}
+
+.extension-page__permission {
+  display: flex;
+  gap: var(--space-2);
+  align-items: flex-start;
+  margin-bottom: var(--space-1);
+  cursor: pointer;
+}
+
+.extension-page__permission input {
+  margin-top: 3px;
+}
+
+.extension-page__commands,
+.extension-page__list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.extension-page__link {
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--color-link);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.extension-page__link:hover:not(:disabled) {
+  text-decoration: underline;
+}
+
+.extension-page__link:disabled {
+  color: var(--color-text-muted);
+  cursor: default;
+}
+
+.extension-page__path {
+  overflow-wrap: anywhere;
+  user-select: text;
+}

@@ -212,6 +212,11 @@ fn install(
   std::fs::create_dir_all(&target).expect("mkdir");
   let wasm = format!("{crate_name}.wasm");
   std::fs::copy(wasm_dir().join(&wasm), target.join(&wasm)).expect("copy wasm");
+  for file in ["icon.svg", "README.md"] {
+    if source.join(file).exists() {
+      std::fs::copy(source.join(file), target.join(file)).expect("copy");
+    }
+  }
   let manifest = std::fs::read_to_string(source.join("extension.toml")).expect("manifest");
   let manifest = manifest
     .lines()
@@ -818,6 +823,40 @@ fn extensions_built_against_api_1_0_still_run() {
     *n == Notification::DiagnosticsChanged(id)
   });
   assert_eq!(state_of(&s.host).0, ExtensionState::Active);
+}
+
+#[test]
+fn statuses_have_the_author_icon_readme_and_activation_time() {
+  let s = setup("tidy", "tidy", Some(ALL), "", |m| m);
+  s.host.load();
+  s.fake
+    .wait_for("started", |n| *n == Notification::ExtensionsChanged);
+  let deadline = Instant::now() + Duration::from_secs(30);
+  while state_of(&s.host).0 != ExtensionState::Active {
+    assert!(Instant::now() < deadline, "Tidy never started");
+    std::thread::sleep(Duration::from_millis(20));
+  }
+
+  let status = &s.host.statuses()[0];
+  assert_eq!(status.author.as_deref(), Some("Ferrite"));
+  assert!(status.has_icon && status.has_readme);
+  assert!(status.usage.activation_ms.is_some_and(|ms| ms > 0.0));
+  let icon = s
+    .host
+    .icon("example.tidy")
+    .expect("has one")
+    .expect("loads");
+  assert!(icon.starts_with("data:image/svg+xml;base64,"));
+  let readme = s
+    .host
+    .readme("example.tidy")
+    .expect("has one")
+    .expect("renders");
+  assert!(matches!(
+    readme.nodes[0].element,
+    PreviewElement::Heading { level: 1 }
+  ));
+  assert!(s.host.icon("example.unknown").is_none());
 }
 
 #[test]

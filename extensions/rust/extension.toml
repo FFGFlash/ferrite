@@ -4,6 +4,7 @@ id = "example.rust"
 name = "Rust"
 version = "0.1.0"
 description = "Rust highlighting, and rust-analyzer for diagnostics, hover, definitions, and completion."
+author = "Ferrite"
 api_version = "1"
 
 [engines]

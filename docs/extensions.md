@@ -103,6 +103,8 @@ id = "example.tidy"               # publisher.name: lowercase letters, digits, '
 name = "Tidy"
 version = "0.1.0"                 # semantic version
 description = "Flags trailing whitespace and overlong lines."
+author = "Ferrite"                # optional; shown in the Extensions view
+icon = "icon.svg"                 # optional: a PNG or SVG file in its folder, at most 256 KiB
 api_version = "1"                 # the extension API version it was built for
 entrypoint = "tidy.wasm"          # relative to this file
 activation = ["on-startup"]       # see below; default: when one of its commands runs
@@ -162,6 +164,12 @@ extension may point elsewhere, such as Tidy's
 
 **Hidden commands.** A command with `hidden = true` is left out of the command palette, for
 commands run only from view items or other contributions.
+
+**The Extensions view** shows the `icon` (square works best; it's shown from 36 to 88 pixels),
+`name`, `description` (on one line, cut if long), and `author`. Choosing the extension opens its
+page, which shows the `README.md` in its folder (any case), rendered like the Markdown preview:
+relative links open files from the extension's folder, pictures load from it, and HTML is shown
+as its text. A README can be at most 1 MiB. Tidy, TODOs, and Markdown have both.
 
 **Dependencies** between extensions aren't supported in API version 1.
 
@@ -830,8 +838,9 @@ saying so, and a stopped extension returns its memory to the pool.
 
 **Resource use.** Ferrite counts, per extension, how often it ran and for how long, its slowest
 call, its memory (current and peak), the document changes it skipped because its queue was
-full, and how long it took to compile. Users see this in the Extensions view and in **Developer:
-Toggle Performance Overlay**. A call that takes more than a quarter of its deadline is logged as
+full, how long it took to compile, and how long it took to start (compiling, instantiating, and
+`activate`). Users see this in the Extensions view (the start time on each row, the rest on its
+page) and in **Developer: Toggle Performance Overlay**. A call that takes more than a quarter of its deadline is logged as
 `slow extension call`. Keep handlers short: do the minimum per change, and use the changed
 ranges instead of re-reading the whole document.
 

@@ -1074,7 +1074,7 @@ fn comment_token(section: &str, field: &str, token: &str) -> Result<String, Mani
 }
 
 /// A relative path that stays inside the extension's folder.
-fn inside(section: &str, path: &str) -> Result<PathBuf, ManifestError> {
+pub(crate) fn inside(section: &str, path: &str) -> Result<PathBuf, ManifestError> {
   let relative = Path::new(path);
   let confined = !path.is_empty()
     && !relative.has_root()

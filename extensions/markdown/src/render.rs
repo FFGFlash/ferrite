@@ -11,8 +11,13 @@
 //!   line break, comments disappear, and an HTML block becomes a paragraph
 //!   of whatever text is between its tags.
 //! - **Front matter** (YAML or TOML at the top) is left out.
+//!
+//! The editor also compiles this file, to show extensions' READMEs
+//! (`ferrite-extension-host/src/readme.rs`). So it uses the preview types
+//! through its parent module's `types`, which each side points at its own
+//! copy of them, and nothing else from the extension API.
 
-use ferrite_extension_api::types::{
+use super::types::{
   ColumnAlignment, PreviewCode, PreviewElement, PreviewImage, PreviewLink, PreviewNode,
 };
 use pulldown_cmark::{Alignment, CodeBlockKind, Event, LinkType, Options, Parser, Tag, TagEnd};

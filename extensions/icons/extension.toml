@@ -3,6 +3,7 @@ id = "example.icons"
 name = "Example File Icons"
 version = "0.1.0"
 description = "Colorful file and folder icons, as an example of a file icon theme."
+author = "Ferrite"
 api_version = "1"
 
 [[icon_themes]]

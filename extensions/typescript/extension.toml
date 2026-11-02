@@ -5,6 +5,7 @@ id = "example.typescript"
 name = "TypeScript"
 version = "0.1.0"
 description = "TypeScript and TSX highlighting, and typescript-language-server."
+author = "Ferrite"
 api_version = "1"
 
 [engines]

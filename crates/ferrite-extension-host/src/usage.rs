@@ -20,6 +20,7 @@ pub struct Usage {
   peak_memory_bytes: AtomicU64,
   dropped_events: AtomicU64,
   compile_nanos: AtomicU64,
+  activation_nanos: AtomicU64,
 }
 
 /// A snapshot of an extension's resource use.
@@ -39,6 +40,9 @@ pub struct ResourceUsage {
   pub dropped_events: u64,
   /// Time spent compiling it, most recently.
   pub compile_ms: f64,
+  /// How long it took to start, most recently: compiling, instantiating,
+  /// and `activate`. `None` until it has started once.
+  pub activation_ms: Option<f64>,
 }
 
 fn nanos(duration: Duration) -> u64 {
@@ -61,6 +65,13 @@ impl Usage {
     self.compile_nanos.store(nanos(elapsed), Ordering::Relaxed);
   }
 
+  pub fn record_activation(&self, elapsed: Duration) {
+    // Never 0, which means "not yet".
+    self
+      .activation_nanos
+      .store(nanos(elapsed).max(1), Ordering::Relaxed);
+  }
+
   pub fn set_memory(&self, bytes: usize) {
     let bytes = bytes as u64;
     self.memory_bytes.store(bytes, Ordering::Relaxed);
@@ -80,6 +91,10 @@ impl Usage {
       peak_memory_bytes: self.peak_memory_bytes.load(Ordering::Relaxed),
       dropped_events: self.dropped_events.load(Ordering::Relaxed),
       compile_ms: millis(self.compile_nanos.load(Ordering::Relaxed)),
+      activation_ms: match self.activation_nanos.load(Ordering::Relaxed) {
+        0 => None,
+        nanos => Some(millis(nanos)),
+      },
     }
   }
 }
@@ -96,7 +111,10 @@ mod tests {
     usage.set_memory(2 << 20);
     usage.set_memory(1 << 20);
     usage.record_dropped_event();
+    assert_eq!(usage.snapshot().activation_ms, None);
+    usage.record_activation(Duration::from_millis(12));
     let snapshot = usage.snapshot();
+    assert_eq!(snapshot.activation_ms, Some(12.0));
     assert_eq!(snapshot.calls, 2);
     assert!((snapshot.busy_ms - 4.0).abs() < 1e-9);
     assert!((snapshot.slowest_call_ms - 3.0).abs() < 1e-9);

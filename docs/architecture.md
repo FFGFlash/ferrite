@@ -782,9 +782,13 @@ them. Extensions fill in content through the `workbench` interface (API 1.1; pre
   inline while composing), and paste. `editor/keymap.ts` maps keys to operations per platform
   (Ctrl on Windows/Linux, Cmd/Option on macOS). Commands' keybindings are handled in the capture
   phase before the editor sees the key.
-- **Extensions view** (`panels/ExtensionsPanel`, `Ctrl+Shift+X`): each extension's state,
-  permissions (checkboxes that grant or deny), what it contributes, commands, errors, and
-  Restart and Disable buttons. The views are the built-in ones followed by those of enabled
+- **Extensions view** (`panels/ExtensionsPanel`, `Ctrl+Shift+X`): a row per extension, all the
+  same height: icon, name, description, author, start time, and state when it needs attention,
+  with the rest in the row's tooltip and its actions in a gear menu. Choosing one opens its page
+  (`panels/ExtensionPage`, the dock item `page:extension:<id>`): its README, drawn by the
+  preview renderer (`PreviewDocument`) from content the backend made with the Markdown
+  extension's renderer ([ADR 0020](adr/0020-extension-pages.md)), its permissions (checkboxes
+  that grant or deny), commands, contributions, resource use, folder, and errors. The views are the built-in ones followed by those of enabled
   extensions (`app/views.ts`). Problems and Output are panel views: they open along the bottom
   with the terminals, and show and hide with them (**View: Toggle Panel**). The activity bar
   lists everything in the side bar (the groups along the dock's left edge: views, terminals,

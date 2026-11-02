@@ -28,7 +28,7 @@ use crate::contributions::{LanguageContribution, LanguageServerContribution};
 use crate::icons::IconTheme;
 use crate::manifest::{self, MANIFEST_FILE, Manifest};
 use crate::permissions::{Decision, Decisions, Permission};
-use crate::preview::{PreviewContent, PreviewInfo};
+use crate::preview::{self, PreviewContent, PreviewInfo};
 use crate::runtime::{MemoryPool, Runtime};
 use crate::usage::{ResourceUsage, Usage};
 use crate::worker::{
@@ -948,6 +948,9 @@ impl ExtensionHost {
           name: manifest.name.clone(),
           version: manifest.version.to_string(),
           description: manifest.description.clone(),
+          author: manifest.author.clone(),
+          has_icon: manifest.icon.is_some(),
+          has_readme: manifest.readme.is_some(),
           path: manifest.dir.to_string_lossy().into_owned(),
           development: entry.development,
           state: status,
@@ -996,6 +999,9 @@ impl ExtensionHost {
         name,
         version: String::new(),
         description: String::new(),
+        author: None,
+        has_icon: false,
+        has_readme: false,
         path: invalid.dir.to_string_lossy().into_owned(),
         development: invalid.development,
         state: ExtensionState::Invalid,
@@ -1105,6 +1111,37 @@ impl ExtensionHost {
 
   /// An icon theme (`<extension id>.<icon theme id>`) from an extension that
   /// isn't turned off.
+  /// A loaded extension's manifest.
+  fn manifest(&self, id: &str) -> Option<Arc<Manifest>> {
+    let state = self.shared.lock();
+    state
+      .extensions
+      .iter()
+      .find(|entry| entry.manifest.id == id)
+      .map(|entry| entry.manifest.clone())
+  }
+
+  /// An extension's icon, as a `data:` URL; `None` if it has none.
+  pub fn icon(&self, id: &str) -> Option<Result<String, String>> {
+    let icon = self.manifest(id)?.icon.clone()?;
+    Some(preview::load_image(&icon))
+  }
+
+  /// An extension's README, as preview content (links and pictures
+  /// resolved from its folder); `None` if it has none.
+  pub fn readme(&self, id: &str) -> Option<Result<PreviewContent, String>> {
+    let manifest = self.manifest(id)?;
+    let path = manifest.readme.as_ref()?;
+    Some(crate::readme::render(path, &manifest.dir))
+  }
+
+  /// A picture in an extension's README, as a `data:` URL. Only pictures in
+  /// its folder are shown.
+  pub fn readme_image(&self, id: &str, path: &Path) -> Result<String, String> {
+    let manifest = self.manifest(id).ok_or("no such extension")?;
+    crate::readme::image(&manifest.dir, path)
+  }
+
   pub fn icon_theme(&self, id: &str) -> Option<Arc<IconTheme>> {
     let state = self.shared.lock();
     state

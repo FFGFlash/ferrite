@@ -5,7 +5,7 @@
  */
 import { ChevronDown, FileText, Plus, SquareTerminal, Trash2 } from 'lucide-react'
 import { useEffect, useRef, type ReactNode } from 'react'
-import { pages, type PageDescriptor } from '../app/pages'
+import { findPage, type PageDescriptor } from '../app/pages'
 import { useViews, type ViewDescriptor } from '../app/views'
 import { executeCommand, getCommand, primaryKeybinding } from '../commands/registry'
 import { ErrorBoundary } from '../components/ErrorBoundary'
@@ -18,6 +18,7 @@ import type { DocumentSummary } from '../ipc/editor'
 import type { PreviewInfo } from '../ipc/extensions'
 import { PreviewPane } from '../panels/PreviewPane'
 import { documentsStore } from '../state/documents'
+import { extensionsStore } from '../state/extensions'
 import { iconThemeStore } from '../state/iconTheme'
 import { previewsStore } from '../state/previews'
 import { useStore } from '../state/store'
@@ -39,6 +40,7 @@ export function useResolver(): (item: ItemId) => ResolvedItem | null {
   const { documents } = useStore(documentsStore)
   const { tabs } = useStore(terminalsStore)
   const previews = useStore(previewsStore)
+  const extensions = useStore(extensionsStore)
   const views = useViews()
   return (item: ItemId) => {
     const id = itemId(item)
@@ -60,7 +62,7 @@ export function useResolver(): (item: ItemId) => ResolvedItem | null {
         return preview ? { kind: 'preview', item, preview } : null
       }
       case 'page': {
-        const page = pages.find(candidate => candidate.id === id)
+        const page = findPage(id, extensions)
         return page ? { kind: 'page', item, page } : null
       }
       default:

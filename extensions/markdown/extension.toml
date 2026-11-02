@@ -6,6 +6,8 @@ id = "example.markdown"
 name = "Markdown"
 version = "0.1.0"
 description = "Markdown highlighting, and a preview of the rendered page."
+author = "Ferrite"
+icon = "icon.svg"
 api_version = "1"
 entrypoint = "../target/wasm32-unknown-unknown/release/markdown.wasm"
 

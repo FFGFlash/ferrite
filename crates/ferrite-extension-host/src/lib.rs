@@ -32,6 +32,7 @@ pub mod keys;
 pub mod manifest;
 mod permissions;
 pub mod preview;
+mod readme;
 mod runtime;
 mod usage;
 mod worker;
@@ -343,6 +344,11 @@ pub struct ExtensionStatus {
   pub name: String,
   pub version: String,
   pub description: String,
+  pub author: Option<String>,
+  /// Whether it has an icon ([`ExtensionHost::icon`]).
+  pub has_icon: bool,
+  /// Whether it has a README ([`ExtensionHost::readme`]).
+  pub has_readme: bool,
   /// The extension's folder.
   pub path: String,
   pub development: bool,

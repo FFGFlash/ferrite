@@ -74,9 +74,16 @@ pub struct Manifest {
   pub name: String,
   pub version: Version,
   pub description: String,
+  /// Who made it, as they want to be credited.
+  pub author: Option<String>,
   pub api_version: u32,
   /// The folder the manifest is in.
   pub dir: PathBuf,
+  /// A picture shown beside the extension's name: a PNG or SVG file in
+  /// `dir`.
+  pub icon: Option<PathBuf>,
+  /// `README.md` in `dir` (any case), shown on the extension's page.
+  pub readme: Option<PathBuf>,
   /// The component or module to load, resolved against `dir`. Extensions
   /// that only contribute themes and icon themes have none.
   pub entrypoint: Option<PathBuf>,
@@ -119,6 +126,8 @@ struct RawManifest {
   version: String,
   #[serde(default)]
   description: String,
+  author: Option<String>,
+  icon: Option<String>,
   api_version: String,
   entrypoint: Option<String>,
   #[serde(default)]
@@ -268,6 +277,19 @@ pub fn parse(
   if raw.description.chars().count() > 500 {
     return Err(invalid("description must be at most 500 characters"));
   }
+  let author = raw
+    .author
+    .as_deref()
+    .map(str::trim)
+    .filter(|a| !a.is_empty());
+  if author.is_some_and(|author| author.chars().count() > 100) {
+    return Err(invalid("author must be at most 100 characters"));
+  }
+  let icon = raw
+    .icon
+    .as_deref()
+    .map(|icon| check_icon(dir, icon))
+    .transpose()?;
 
   let api_version = raw
     .api_version
@@ -442,8 +464,11 @@ pub fn parse(
     name: name.to_owned(),
     version,
     description: raw.description.trim().to_owned(),
+    author: author.map(str::to_owned),
     api_version,
     dir: dir.to_path_buf(),
+    icon,
+    readme: find_readme(dir),
     entrypoint,
     activation,
     permissions,
@@ -451,6 +476,42 @@ pub fn parse(
     configuration,
     contributions,
   })
+}
+
+/// Largest icon file.
+pub const MAX_ICON_BYTES: u64 = 256 * 1024;
+
+/// The icon file `icon` names: a PNG or SVG file in `dir`, at most 256 KiB.
+fn check_icon(dir: &Path, icon: &str) -> Result<PathBuf, ManifestError> {
+  let path = dir.join(contributions::inside("icon", icon)?);
+  let extension = path
+    .extension()
+    .map(|extension| extension.to_string_lossy().to_lowercase());
+  if !matches!(extension.as_deref(), Some("png" | "svg")) {
+    return Err(invalid(format!("icon {icon:?} must be a PNG or SVG file")));
+  }
+  let size = std::fs::metadata(&path)
+    .map_err(|error| invalid(format!("icon {icon:?} could not be read: {error}")))?
+    .len();
+  if size > MAX_ICON_BYTES {
+    return Err(invalid(format!(
+      "icon {icon:?} must be at most {} KiB",
+      MAX_ICON_BYTES / 1024
+    )));
+  }
+  Ok(path)
+}
+
+/// `README.md` in `dir`, whatever its case.
+fn find_readme(dir: &Path) -> Option<PathBuf> {
+  std::fs::read_dir(dir)
+    .ok()?
+    .filter_map(Result::ok)
+    .find(|entry| {
+      entry.file_name().eq_ignore_ascii_case("README.md")
+        && entry.file_type().is_ok_and(|kind| kind.is_file())
+    })
+    .map(|entry| entry.path())
 }
 
 /// Identifiers are dot-separated segments of lowercase letters, digits, and
@@ -573,6 +634,36 @@ minimum = 0
 
   fn error_of(text: &str) -> String {
     parse_text(text).expect_err("rejected").to_string()
+  }
+
+  #[test]
+  fn reads_the_author_icon_and_readme() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    std::fs::write(dir.path().join("icon.svg"), "<svg/>").expect("write");
+    std::fs::write(dir.path().join("readme.MD"), "# Tidy").expect("write");
+    let with = |extra: &str| {
+      let text = VALID.replace(
+        "api_version = \"1\"",
+        &format!("api_version = \"1\"\n{extra}"),
+      );
+      parse(&text, dir.path(), &editor(), false)
+    };
+    let manifest = with("author = \"  Ferrite  \"\nicon = \"icon.svg\"").expect("valid");
+    assert_eq!(manifest.author.as_deref(), Some("Ferrite"));
+    assert_eq!(manifest.icon, Some(dir.path().join("icon.svg")));
+    assert_eq!(manifest.readme, Some(dir.path().join("readme.MD")));
+
+    for (icon, problem) in [
+      ("missing.png", "could not be read"),
+      ("icon.gif", "PNG or SVG"),
+      ("../icon.svg", "inside the extension's folder"),
+    ] {
+      let error = with(&format!("icon = \"{icon}\"")).expect_err("rejected");
+      assert!(error.to_string().contains(problem), "{icon}: {error}");
+    }
+    let long = format!("author = \"{}\"", "a".repeat(101));
+    assert!(with(&long).is_err());
+    assert_eq!(parse_text(VALID).expect("valid").readme, None);
   }
 
   #[test]

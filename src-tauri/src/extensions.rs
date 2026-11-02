@@ -388,40 +388,95 @@ pub async fn extension_preview_content(
       .state::<ExtensionsState>()
       .host()?
       .preview_content(&preview)?;
-    let registry = app.state::<LanguagesState>().registry();
-    let known = |language: &str| registry.for_name(&language.to_ascii_lowercase()).is_some();
-    let started = Instant::now();
-    let mut highlights = BTreeMap::new();
-    let mut highlights_pending = false;
-    for (index, node) in content.nodes.iter().enumerate() {
-      let PreviewElement::CodeBlock {
-        language: Some(language),
-        text,
-      } = &node.element
-      else {
-        continue;
-      };
-      if text.len() > MAX_HIGHLIGHTED_CODE_BYTES {
-        continue;
-      }
-      let lines = PREVIEW_HIGHLIGHT_BUDGET
-        .checked_sub(started.elapsed())
-        .and_then(|budget| highlight_snippet(&registry, language, text, budget));
-      match lines {
-        Some(lines) => {
-          highlights.insert(u32::try_from(index).unwrap_or(u32::MAX), lines);
-        }
-        None => highlights_pending |= known(language),
-      }
-    }
-    Some(PreviewContentDto {
-      nodes: content,
-      highlights,
-      highlights_pending,
-    })
+    Some(highlighted(&app, content))
   })
   .await
   .map_err(CommandError::internal)
+}
+
+/// Preview content with its code blocks in known languages highlighted,
+/// within a time budget.
+fn highlighted(app: &AppHandle, content: Arc<PreviewContent>) -> PreviewContentDto {
+  let registry = app.state::<LanguagesState>().registry();
+  let known = |language: &str| registry.for_name(&language.to_ascii_lowercase()).is_some();
+  let started = Instant::now();
+  let mut highlights = BTreeMap::new();
+  let mut highlights_pending = false;
+  for (index, node) in content.nodes.iter().enumerate() {
+    let PreviewElement::CodeBlock {
+      language: Some(language),
+      text,
+    } = &node.element
+    else {
+      continue;
+    };
+    if text.len() > MAX_HIGHLIGHTED_CODE_BYTES {
+      continue;
+    }
+    let lines = PREVIEW_HIGHLIGHT_BUDGET
+      .checked_sub(started.elapsed())
+      .and_then(|budget| highlight_snippet(&registry, language, text, budget));
+    match lines {
+      Some(lines) => {
+        highlights.insert(u32::try_from(index).unwrap_or(u32::MAX), lines);
+      }
+      None => highlights_pending |= known(language),
+    }
+  }
+  PreviewContentDto {
+    nodes: content,
+    highlights,
+    highlights_pending,
+  }
+}
+
+/// An extension's icon as a `data:` URL; `None` if it has none.
+#[tauri::command]
+pub async fn extension_icon(app: AppHandle, id: String) -> Result<Option<String>, CommandError> {
+  tauri::async_runtime::spawn_blocking(move || {
+    let state = app.state::<ExtensionsState>();
+    host(&state)?
+      .icon(&id)
+      .transpose()
+      .map_err(|message| CommandError::new("extensionIcon", message))
+  })
+  .await
+  .map_err(CommandError::internal)?
+}
+
+/// An extension's README as preview content; `None` if it has none.
+#[tauri::command]
+pub async fn extension_readme(
+  app: AppHandle,
+  id: String,
+) -> Result<Option<PreviewContentDto>, CommandError> {
+  tauri::async_runtime::spawn_blocking(move || {
+    let state = app.state::<ExtensionsState>();
+    let Some(readme) = host(&state)?.readme(&id) else {
+      return Ok(None);
+    };
+    let content = readme.map_err(|message| CommandError::new("extensionReadme", message))?;
+    Ok(Some(highlighted(&app, Arc::new(content))))
+  })
+  .await
+  .map_err(CommandError::internal)?
+}
+
+/// A picture in an extension's README, as a `data:` URL.
+#[tauri::command]
+pub async fn extension_readme_image(
+  app: AppHandle,
+  id: String,
+  path: String,
+) -> Result<String, CommandError> {
+  tauri::async_runtime::spawn_blocking(move || {
+    let state = app.state::<ExtensionsState>();
+    host(&state)?
+      .readme_image(&id, Path::new(&path))
+      .map_err(|message| CommandError::new("previewImage", message))
+  })
+  .await
+  .map_err(CommandError::internal)?
 }
 
 /// The user closed a preview's tab.

@@ -7,6 +7,7 @@ import { close, documentsStore, newFile, openFile, openPath, save } from '../sta
 import { addDevelopmentExtension, reloadExtensions } from '../ipc/extensions'
 import { setIconTheme, setTheme, settingsFilePath } from '../ipc/workspace'
 import { showOutput, showProblems } from '../state/output'
+import { forgetExtensionIcons } from '../state/extensions'
 import { openSettings } from '../state/settings'
 import { DEFAULT_ICON_THEME } from '../state/iconTheme'
 import { layoutStore, updateLayout } from '../state/layout'
@@ -317,6 +318,7 @@ export const builtinCommands: Command[] = [
     category: 'Extensions',
     title: 'Reload Extensions',
     run: async () => {
+      forgetExtensionIcons()
       await reloadExtensions()
       notify('info', 'Extensions reloaded.')
     },

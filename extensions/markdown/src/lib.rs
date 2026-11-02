@@ -21,7 +21,7 @@ use ferrite_extension_api::types::{
   Activation, ApiError, CommandContext, DocumentChange, DocumentId, DocumentInfo, LogLevel,
   PreviewOptions,
 };
-use ferrite_extension_api::{Guest, export_extension, host, workbench};
+use ferrite_extension_api::{Guest, export_extension, host, types, workbench};
 
 /// The preview declared in the manifest. Each document has its own, keyed
 /// by the document's id.

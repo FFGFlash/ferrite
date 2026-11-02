@@ -8,6 +8,7 @@ import { useEffect, useState } from 'react'
 import { registerCommands, type Command } from '../commands/registry'
 import { activeEditor } from '../editor/activeEditor'
 import {
+  getExtensionIcon,
   listExtensions,
   listStatusItems,
   restartExtension,
@@ -24,9 +25,9 @@ import {
 import { setIconTheme, setTheme } from '../ipc/workspace'
 import { extensionChannel, showOutput } from './output'
 import { recordProblem } from './problems'
-import { showView } from './viewRequests'
+import { showPage, showView } from './viewRequests'
 import { notify, reportError } from './notifications'
-import { createStore } from './store'
+import { createStore, useStore } from './store'
 
 export const extensionsStore = createStore<readonly ExtensionStatus[]>([])
 /** Status bar items of extensions, as the backend last reported them. */
@@ -73,6 +74,46 @@ export function useExtensionUsage(intervalMs = 2000): ReadonlyMap<string, Resour
     }
   }, [intervalMs])
   return usage
+}
+
+/** The page id of an extension's page: its README, permissions, and details. */
+export const extensionPageId = (id: string) => `extension:${id}`
+
+/** Opens an extension's page where documents open. */
+export function openExtension(id: string): void {
+  showPage(extensionPageId(id))
+}
+
+/**
+ * Extensions' icons as `data:` URLs (`null`: none, or unreadable), by a key
+ * that changes when the extension is reloaded from elsewhere or updated.
+ */
+const icons = createStore<ReadonlyMap<string, string | null>>(new Map())
+const loadingIcons = new Set<string>()
+const iconKey = (extension: ExtensionStatus) =>
+  `${extension.id}\n${extension.path}\n${extension.version}`
+
+/** An extension's icon, loaded the first time it's asked for. */
+export function useExtensionIcon(extension: ExtensionStatus): string | null {
+  const key = iconKey(extension)
+  const icon = useStore(icons).get(key) ?? null
+  useEffect(() => {
+    if (!extension.hasIcon || icons.get().has(key) || loadingIcons.has(key)) {
+      return
+    }
+    loadingIcons.add(key)
+    const loaded = (url: string | null) => {
+      loadingIcons.delete(key)
+      icons.update(current => new Map(current).set(key, url))
+    }
+    getExtensionIcon(extension.id).then(loaded, () => loaded(null))
+  }, [extension.hasIcon, extension.id, key])
+  return extension.hasIcon ? icon : null
+}
+
+/** Forgets loaded icons, so they're read again (after reloading extensions). */
+export function forgetExtensionIcons(): void {
+  icons.set(new Map())
 }
 
 export function showExtensionsView(): void {

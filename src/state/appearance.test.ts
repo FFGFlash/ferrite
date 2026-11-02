@@ -31,6 +31,9 @@ const themes = {
   commands: [],
   configErrors: [],
   hasSettings: false,
+  author: null,
+  hasIcon: false,
+  hasReadme: false,
   contributions: {
     themes: [
       { id: 'example.themes.paper', label: 'Paper', kind: 'light', colors: { text: '#111111' } },
@@ -52,6 +55,7 @@ const themes = {
     peakMemoryBytes: 0,
     droppedEvents: 0,
     compileMs: 0,
+    activationMs: null,
   },
 } satisfies ExtensionStatus
 
