@@ -2,6 +2,7 @@
 import { memo, useEffect, useRef, type CSSProperties } from 'react'
 import type { CompletionItem, Hover } from '../ipc/lsp'
 import { renderMarkdown } from './markdown'
+import { SymbolKindIcon } from './symbolKinds'
 import './LanguagePopups.css'
 
 const SEVERITY = ['', 'error', 'warning', 'info', 'hint'] as const
@@ -88,9 +89,7 @@ export const CompletionList = memo(function CompletionList({
           className="completion-list__item"
           onClick={() => onPick(item)}
         >
-          <span className="completion-list__kind" data-kind={item.kind ?? 'text'}>
-            {kindIcon(item.kind)}
-          </span>
+          <SymbolKindIcon kind={item.kind} />
           <span className="completion-list__label">{item.label}</span>
           {item.detail && <span className="completion-list__detail">{item.detail}</span>}
         </li>
@@ -98,36 +97,3 @@ export const CompletionList = memo(function CompletionList({
     </ul>
   )
 })
-
-function kindIcon(kind: string | null): string {
-  switch (kind) {
-    case 'function':
-    case 'method':
-    case 'constructor':
-      return 'ƒ'
-    case 'variable':
-      return 'x'
-    case 'field':
-    case 'property':
-      return '◆'
-    case 'struct':
-    case 'class':
-    case 'interface':
-    case 'enum':
-    case 'typeParameter':
-      return 'T'
-    case 'module':
-    case 'file':
-    case 'folder':
-      return '{}'
-    case 'keyword':
-      return 'k'
-    case 'constant':
-    case 'enumMember':
-      return 'c'
-    case 'snippet':
-      return '…'
-    default:
-      return '·'
-  }
-}

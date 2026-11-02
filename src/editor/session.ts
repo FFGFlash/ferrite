@@ -6,6 +6,9 @@
  * and sent together as one batch, so fast typing costs few round trips and
  * never reorders. Each request says which lines the session already holds,
  * so the backend sends only the lines it is missing (see `lineCache.ts`).
+ * Operations and clipboard actions are numbered, and each view says up to
+ * which it reflects: one fetched for scrolling may arrive after an
+ * operation was issued but before it was applied.
  */
 import type {
   ClipboardAction,
@@ -50,7 +53,10 @@ export const ipcTransport: EditorTransport = {
   clipboard: ipc.clipboard,
 }
 
-type Job = { kind: 'ops'; ops: EditorOp[] } | { kind: 'clipboard'; action: ClipboardAction }
+type Job = ({ kind: 'ops'; ops: EditorOp[] } | { kind: 'clipboard'; action: ClipboardAction }) & {
+  /** The number of the last request in the job. */
+  last: number
+}
 
 /** The first delay before refetching after repeated failures, doubling up to the maximum. */
 const RETRY_BASE_MS = 250
@@ -65,6 +71,9 @@ export class EditorSession {
   private busy = false
   private disposed = false
   private idleWaiters: (() => void)[] = []
+  /** Requests (operations and clipboard actions) issued, and those views reflect. */
+  private requested = 0
+  private reflected = 0
   /** Requests that failed in a row. After the first, the view is refetched with growing delays. */
   private failures = 0
   private retryTimer: ReturnType<typeof setTimeout> | null = null
@@ -72,7 +81,8 @@ export class EditorSession {
   constructor(
     private readonly documentId: number,
     viewport: Viewport,
-    private readonly onView: (view: EditorView) => void,
+    /** Receives each view, and the number of the last request it reflects. */
+    private readonly onView: (view: EditorView, reflected: number) => void,
     private readonly onError: (error: unknown) => void,
     private readonly transport: EditorTransport = ipcTransport,
   ) {
@@ -82,7 +92,9 @@ export class EditorSession {
     queueMicrotask(() => this.pump())
   }
 
-  dispatch(op: EditorOp): void {
+  /** Queues `op`; returns its number, which views report once they reflect it. */
+  dispatch(op: EditorOp): number {
+    const request = ++this.requested
     const last = this.queue.at(-1)
     if (last?.kind === 'ops') {
       const previous = last.ops.at(-1)
@@ -92,15 +104,20 @@ export class EditorSession {
       } else {
         last.ops.push(op)
       }
+      last.last = request
     } else {
-      this.queue.push({ kind: 'ops', ops: [op] })
+      this.queue.push({ kind: 'ops', ops: [op], last: request })
     }
     this.pump()
+    return request
   }
 
-  clipboard(action: ClipboardAction): void {
-    this.queue.push({ kind: 'clipboard', action })
+  /** Queues a clipboard action; returns its number, as `dispatch` does. */
+  clipboard(action: ClipboardAction): number {
+    const request = ++this.requested
+    this.queue.push({ kind: 'clipboard', action, last: request })
     this.pump()
+    return request
   }
 
   setViewport(viewport: Viewport): void {
@@ -176,11 +193,18 @@ export class EditorSession {
       .then(wire => {
         recordTiming('ipc.roundTrip', performance.now() - sent)
         this.failures = 0
+        if (job) {
+          this.reflected = job.last
+        }
         if (!this.disposed) {
           this.receive(wire)
         }
       })
       .catch((error: unknown) => {
+        if (job) {
+          // Dropped: the views that follow are as up to date as they get.
+          this.reflected = job.last
+        }
         if (!this.disposed) {
           // Resynchronize with the backend's state after a failure.
           this.cache = null
@@ -224,7 +248,7 @@ export class EditorSession {
       return
     }
     this.cache = cache
-    this.onView({ ...wire, lines: cache.lines, lineNumbers: cache.lineNumbers })
+    this.onView({ ...wire, lines: cache.lines, lineNumbers: cache.lineNumbers }, this.reflected)
   }
 
   private resolveIdle(): void {

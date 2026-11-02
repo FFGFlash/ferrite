@@ -1,0 +1,25 @@
+.symbol-kind {
+  flex: none;
+  width: 16px;
+  color: var(--color-syntax-function);
+  font-family: var(--font-mono);
+  font-size: var(--font-size-ui-small);
+  text-align: center;
+}
+
+.symbol-kind[data-kind='variable'],
+.symbol-kind[data-kind='field'],
+.symbol-kind[data-kind='property'] {
+  color: var(--color-syntax-property);
+}
+
+.symbol-kind[data-kind='struct'],
+.symbol-kind[data-kind='class'],
+.symbol-kind[data-kind='interface'],
+.symbol-kind[data-kind='enum'] {
+  color: var(--color-syntax-type);
+}
+
+.symbol-kind[data-kind='keyword'] {
+  color: var(--color-syntax-keyword);
+}

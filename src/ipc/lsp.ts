@@ -29,6 +29,36 @@ export interface Reference extends Location {
   line: string
 }
 
+/** A symbol in a document, in the order of `documentSymbols`. */
+export interface DocumentSymbol {
+  name: string
+  kind: string
+  /** The name of the symbol it's in. */
+  container: string | null
+  deprecated: boolean
+  /** The whole symbol: a function with its body, say. */
+  start: Position
+  end: Position
+  /** Where its name starts. */
+  selection: Position
+}
+
+/** Where a workspace symbol is, as its server put it; see `resolveSymbol`. */
+export interface SymbolLocation {
+  path: string
+  /** In the server's terms; `null` when it named only the file. */
+  range: unknown
+  encoding: string
+}
+
+export interface WorkspaceSymbol {
+  name: string
+  kind: string
+  container: string | null
+  deprecated: boolean
+  location: SymbolLocation
+}
+
 export interface CompletionItem {
   label: string
   kind: string | null
@@ -53,5 +83,14 @@ export const definition = (id: number, position: Position) =>
 /** References to the symbol at `position`, including its declaration, by path and position. */
 export const references = (id: number, position: Position) =>
   call<Reference[] | null>('lsp_references', { id, position })
+/** A document's symbols by position, each after the one it's in; `null` if its server can't list them. */
+export const documentSymbols = (id: number) =>
+  call<DocumentSymbol[] | null>('lsp_document_symbols', { id })
+/** Symbols matching `query` from every running language server. A newer search cancels this one. */
+export const workspaceSymbols = (query: string) =>
+  call<WorkspaceSymbol[]>('lsp_workspace_symbols', { query })
+/** Where a workspace symbol is in its file now; `null` if the file can't be read. */
+export const resolveSymbol = (location: SymbolLocation) =>
+  call<Location | null>('lsp_resolve_symbol', { location })
 export const completion = (id: number, position: Position, trigger: string | null) =>
   call<Completions | null>('lsp_completion', { id, position, trigger })

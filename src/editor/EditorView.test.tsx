@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { EditorOp, Viewport, WireView as View } from '../ipc/editor'
 import { editorStatus } from '../state/editorStatus'
 import { contextMenuStore } from '../components/contextMenuState'
+import { editorFor } from './activeEditor'
 import { EditorView } from './EditorView'
 import type { EditorTransport } from './session'
 
@@ -210,6 +211,24 @@ describe('EditorView', () => {
     expect(document.querySelector('[data-folded]')).not.toBeNull()
     fireEvent.mouseDown(screen.getByTitle('Unfold'), { button: 0, clientX: 100, clientY: 1 })
     expect(applied.flat()).toContainEqual({ type: 'toggleFoldAt', line: 0 })
+  })
+
+  it('highlights whole lines for a Go to Line or Go to Symbol preview', async () => {
+    const lines = Array.from({ length: 10 }, (_, index) => `line ${index}`)
+    const { transport, applied } = fakeTransport(makeView(lines))
+    await renderEditor(transport)
+    const highlights = () =>
+      [...document.querySelectorAll<HTMLElement>('.editor-view__range-highlight')].map(
+        highlight => highlight.style.top,
+      )
+
+    act(() => editorFor(7)!.previewLines({ start: 2, end: 3, center: 2 }))
+    expect(highlights()).toEqual(['40px', '60px'])
+    // A preview doesn't move the cursor.
+    expect(applied).toEqual([])
+
+    act(() => editorFor(7)!.previewLines(null))
+    expect(highlights()).toEqual([])
   })
 
   it('sends pasted text as a paste', async () => {

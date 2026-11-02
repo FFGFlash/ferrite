@@ -356,7 +356,12 @@ shifted character, as do bindings with Alt and a letter or punctuation, since Op
 character on macOS. A binding can be a **chord** of two key combinations (`mod+k mod+0`): the
 first key press waits (the status bar says so), and the next one runs the command or cancels the
 chord. The **command palette** lists
-enabled commands with their shortcuts (`>`), finds files (no prefix), and goes to a line (`:`).
+enabled commands with their shortcuts (`>`), finds files (no prefix), goes to a line (`:`), to
+a symbol in the active editor (`@`, or `@:` grouped by kind), and to a symbol in the workspace
+(`#`). Going to a line or to a symbol in the editor previews it as in VS Code: the selected
+item's lines are highlighted and scrolled to the middle without moving the cursor, and closing
+the palette without choosing scrolls back. Workspace symbols are searched 200 ms after typing
+pauses; a newer search cancels the older one on the servers.
 Editing keys that need the editor's textarea (arrows, Backspace, clipboard) stay in
 `editor/keymap.ts`. Extension commands, declared in their manifests, are registered into the
 same registry, so they appear in the palette before their extension starts.
@@ -478,6 +483,8 @@ EditorView = { version, lineCount, rowCount, startRow, startLine, endLine,
 | `perf_stats`                                                  | Backend timings, scheduler statistics, memory          |
 | `lsp_hover`, `lsp_definition`, `lsp_completion`               | Language server requests at a position                 |
 | `lsp_references`                                              | A symbol's references, with their lines                |
+| `lsp_document_symbols`, `lsp_workspace_symbols`               | A document's symbols; symbols in the workspace by name |
+| `lsp_resolve_symbol`                                          | Where a workspace symbol is in its file now            |
 | `editor_peek_lines`                                           | A file's highlighted lines, for the references peek    |
 | `terminal_create`, `terminal_list`, `terminal_attach`         | Start a terminal, or reattach after a reload           |
 | `terminal_platform`                                           | The Windows build, for the emulator's ConPTY handling  |
@@ -576,13 +583,15 @@ server (`lsp/`).
   them). A document's own diagnostics replace them when it opens, and a server that exits or
   restarts loses them.
 - **Requests never hold locks while waiting.** `lsp_hover`, `lsp_definition`,
-  `lsp_references`, and `lsp_completion` sync the document, capture the position and a snapshot under the locks,
+  `lsp_references`, `lsp_document_symbols`, and `lsp_completion` sync the document, capture the position and a snapshot under the locks,
   then wait on a blocking thread (5 s timeout). Completion results are filtered and ranked in
   Rust (prefix, case-insensitive prefix, then letters in order; at most 200) and their edit
   positions are mapped to the current text. The frontend narrows them further as typing
   continues, asking again only for incomplete lists. Requests the server cancels or invalidates
   (`ContentModified`) are dropped quietly. Abandoned requests are cancelled with
-  `$/cancelRequest`.
+  `$/cancelRequest`. `lsp_workspace_symbols` asks every running server that can search
+  symbols, at once, and leaves their positions as the servers put them; `lsp_resolve_symbol`
+  maps the chosen one into its file's text, so a search doesn't read every file it names.
 - **Failures are contained.** A server that exits fails its pending requests, drops its
   documents' diagnostics, and is restarted on demand up to three times, then marked failed.
   Opening or closing a folder, or changing `[lsp]` settings, restarts all servers. On exit, the
@@ -817,7 +826,9 @@ viewers through the `viewers` interface (API 1.4).
   makes room for, with a read-only preview of the selected reference's file (lines from
   `editor_peek_lines`: the open document's, or the file on disk) and a tree of references by
   file. F4 and Shift+F4 move the cursor and the peek to the next and previous reference,
-  following it into another file's editor; completion opens on the server's trigger characters, on typing a word,
+  following it into another file's editor; going somewhere (a definition, a reference, a search
+  result, a problem, a symbol) scrolls it to the middle of the editor if it's off screen, as in
+  VS Code (`selectRange`'s `centerIfOutside`); completion opens on the server's trigger characters, on typing a word,
   or with Ctrl+Space, and is navigated with the arrow keys and accepted with Enter or Tab. The
   status bar shows the language and the server's state (and the counts of every file's
   problems).
@@ -979,8 +990,8 @@ These are tracked for later milestones:
 - Single folder only; multi-root workspaces aren't supported.
 - Scroll positions are remembered per tab only while the app runs. Unsaved changes aren't kept
   across a normal close (closing asks about them); they're backed up only for crash recovery.
-- Language features are limited to diagnostics, hover, go to definition, references, and
-  completion. The references peek's preview is read only (VS Code's can be edited), and its
+- Language features are limited to diagnostics, hover, go to definition, references, symbols,
+  and completion. The references peek's preview is read only (VS Code's can be edited), and its
   references and anchor are where they were when it opened, not moved by later edits; there's
   no Find All References view. Rename, code actions, formatting, signature help, and semantic tokens aren't
   implemented, nor are completion's additional edits (such as auto-imports) or snippets

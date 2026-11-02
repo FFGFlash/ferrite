@@ -21,11 +21,13 @@ use lsp_types::notification::Notification;
 use lsp_types::request::Request;
 use lsp_types::{
   ClientCapabilities, ClientInfo, CompletionClientCapabilities, CompletionItemCapability,
-  DynamicRegistrationClientCapabilities, GeneralClientCapabilities, GotoCapability,
-  HoverClientCapabilities, InitializeParams, MarkupKind, PositionEncodingKind,
-  PublishDiagnosticsClientCapabilities, ServerCapabilities, TextDocumentClientCapabilities,
+  DocumentSymbolClientCapabilities, DynamicRegistrationClientCapabilities,
+  GeneralClientCapabilities, GotoCapability, HoverClientCapabilities, InitializeParams, MarkupKind,
+  PositionEncodingKind, PublishDiagnosticsClientCapabilities, ServerCapabilities, SymbolKind,
+  SymbolKindCapability, SymbolTag, TagSupport, TextDocumentClientCapabilities,
   TextDocumentSyncCapability, TextDocumentSyncClientCapabilities, TextDocumentSyncKind,
-  WindowClientCapabilities, WorkspaceFolder,
+  WindowClientCapabilities, WorkspaceClientCapabilities, WorkspaceFolder,
+  WorkspaceSymbolClientCapabilities,
 };
 use serde::de::DeserializeOwned;
 use serde_json::{Value, json};
@@ -523,6 +525,14 @@ fn initialize_params(root: &Path) -> InitializeParams {
         work_done_progress: Some(true),
         ..Default::default()
       }),
+      workspace: Some(WorkspaceClientCapabilities {
+        symbol: Some(WorkspaceSymbolClientCapabilities {
+          symbol_kind: Some(symbol_kinds()),
+          tag_support: Some(symbol_tags()),
+          ..Default::default()
+        }),
+        ..Default::default()
+      }),
       text_document: Some(TextDocumentClientCapabilities {
         synchronization: Some(TextDocumentSyncClientCapabilities {
           did_save: Some(true),
@@ -546,6 +556,12 @@ fn initialize_params(root: &Path) -> InitializeParams {
           ..Default::default()
         }),
         references: Some(DynamicRegistrationClientCapabilities::default()),
+        document_symbol: Some(DocumentSymbolClientCapabilities {
+          symbol_kind: Some(symbol_kinds()),
+          hierarchical_document_symbol_support: Some(true),
+          tag_support: Some(symbol_tags()),
+          ..Default::default()
+        }),
         publish_diagnostics: Some(PublishDiagnosticsClientCapabilities {
           version_support: Some(true),
           ..Default::default()
@@ -555,6 +571,47 @@ fn initialize_params(root: &Path) -> InitializeParams {
       ..Default::default()
     },
     ..Default::default()
+  }
+}
+
+/// Every symbol kind: servers fall back to older ones for clients that don't
+/// say which they handle.
+fn symbol_kinds() -> SymbolKindCapability {
+  SymbolKindCapability {
+    value_set: Some(vec![
+      SymbolKind::FILE,
+      SymbolKind::MODULE,
+      SymbolKind::NAMESPACE,
+      SymbolKind::PACKAGE,
+      SymbolKind::CLASS,
+      SymbolKind::METHOD,
+      SymbolKind::PROPERTY,
+      SymbolKind::FIELD,
+      SymbolKind::CONSTRUCTOR,
+      SymbolKind::ENUM,
+      SymbolKind::INTERFACE,
+      SymbolKind::FUNCTION,
+      SymbolKind::VARIABLE,
+      SymbolKind::CONSTANT,
+      SymbolKind::STRING,
+      SymbolKind::NUMBER,
+      SymbolKind::BOOLEAN,
+      SymbolKind::ARRAY,
+      SymbolKind::OBJECT,
+      SymbolKind::KEY,
+      SymbolKind::NULL,
+      SymbolKind::ENUM_MEMBER,
+      SymbolKind::STRUCT,
+      SymbolKind::EVENT,
+      SymbolKind::OPERATOR,
+      SymbolKind::TYPE_PARAMETER,
+    ]),
+  }
+}
+
+fn symbol_tags() -> TagSupport<SymbolTag> {
+  TagSupport {
+    value_set: vec![SymbolTag::DEPRECATED],
   }
 }
 

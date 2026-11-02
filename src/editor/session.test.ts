@@ -86,18 +86,21 @@ describe('EditorSession', () => {
     const session = new EditorSession(1, { startRow: 0, endRow: 10 }, onView, vi.fn(), transport)
     await Promise.resolve()
 
-    session.dispatch(insert('a'))
+    expect(session.dispatch(insert('a'))).toBe(1)
     session.dispatch(insert('b'))
-    session.dispatch(insert('c'))
+    expect(session.dispatch(insert('c'))).toBe(3)
     expect(calls).toHaveLength(1)
     expect(calls[0]?.kind).toBe('view')
 
     await next()
     expect(calls).toHaveLength(2)
     expect(calls[1]?.ops).toEqual([insert('a'), insert('b'), insert('c')])
+    // The view that was in flight doesn't reflect them yet.
+    expect(onView).toHaveBeenLastCalledWith(expect.anything(), 0)
 
     await next()
     expect(onView).toHaveBeenCalledTimes(2)
+    expect(onView).toHaveBeenLastCalledWith(expect.anything(), 3)
     expect(calls).toHaveLength(2)
   })
 

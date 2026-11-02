@@ -7,9 +7,30 @@
 import type { EditorOp, Position } from '../ipc/editor'
 import { createStore } from '../state/store'
 
+/**
+ * How an operation's cursor is scrolled into view: just enough (`nearest`,
+ * as when typing), to the middle (`center`), or to the middle only when it
+ * is off screen (`centerIfOutside`, as when navigating), as in VS Code.
+ */
+export type Reveal = 'nearest' | 'center' | 'centerIfOutside'
+
+/** Whole lines highlighted and scrolled to without moving the cursor. */
+export interface LinePreview {
+  start: number
+  end: number
+  /** The line scrolled to the middle. */
+  center: number
+}
+
+export interface ScrollPosition {
+  top: number
+  left: number
+}
+
 export interface EditorController {
   documentId: number
-  dispatch(op: EditorOp): void
+  /** Applies `op`, then reveals the cursor (`nearest` by default). */
+  dispatch(op: EditorOp, reveal?: Reveal): void
   /** Opens the find widget, prefilled from a single-line selection. */
   openFind(replace: boolean): void
   /** Moves to the next or previous match of the find widget's query. */
@@ -32,6 +53,13 @@ export interface EditorController {
   triggerSuggest(): void
   /** Shows hover information for the symbol at the cursor. */
   showHover(): void
+  /** The primary cursor, once the view has arrived. */
+  cursor(): Position | null
+  /** Highlights lines and scrolls to them (Go to Line and Go to Symbol), or stops. */
+  previewLines(preview: LinePreview | null): void
+  scrollPosition(): ScrollPosition
+  /** Scrolls back to a position from `scrollPosition`. */
+  restoreScroll(position: ScrollPosition): void
 }
 
 export const activeEditor = createStore<EditorController | null>(null)
@@ -79,11 +107,19 @@ export function setActiveDocument(id: number | null): void {
   update()
 }
 
-/** Selects `start..end` (or places the cursor at `start`) and scrolls to it. */
-export function selectRange(editor: EditorController, start: Position, end = start): void {
-  editor.dispatch({ type: 'setCursor', position: start, extend: false, add: false })
+/**
+ * Selects `start..end` (or places the cursor at `start`) and scrolls to it,
+ * to the middle of the editor if it's off screen.
+ */
+export function selectRange(
+  editor: EditorController,
+  start: Position,
+  end = start,
+  reveal: Reveal = 'centerIfOutside',
+): void {
+  editor.dispatch({ type: 'setCursor', position: start, extend: false, add: false }, reveal)
   if (end.line !== start.line || end.column !== start.column) {
-    editor.dispatch({ type: 'setCursor', position: end, extend: true, add: false })
+    editor.dispatch({ type: 'setCursor', position: end, extend: true, add: false }, reveal)
   }
   editor.focus()
 }

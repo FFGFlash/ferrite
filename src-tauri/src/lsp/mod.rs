@@ -1,6 +1,6 @@
 //! Language servers for open documents: starting them on demand, keeping
 //! documents in sync, diagnostics, and (in `commands`) hover, go to
-//! definition, references and completion.
+//! definition, references, symbols and completion.
 //!
 //! A document of a language with a configured server is opened on the
 //! server for its workspace root the first time it is viewed; the server is
@@ -18,6 +18,7 @@
 //! made after the locks are released.
 
 mod commands;
+mod symbols;
 
 use std::collections::{BTreeMap, HashMap, VecDeque};
 use std::ops::Range;
@@ -43,6 +44,7 @@ use serde::Serialize;
 use tauri::{AppHandle, Manager};
 
 pub use commands::*;
+pub use symbols::*;
 
 use crate::editor::EditorState;
 use crate::editor::protocol::Position;
@@ -845,6 +847,19 @@ impl LspState {
       server: open.server.clone(),
       uri: open.uri.clone(),
     })
+  }
+
+  /// The servers that are running, for requests about the whole workspace.
+  fn running(&self) -> Vec<Arc<LanguageServer>> {
+    let inner = self.lock();
+    inner
+      .servers
+      .values()
+      .filter_map(|entry| match &entry.slot {
+        Slot::Running(server) if server.is_alive() => Some(server.clone()),
+        _ => None,
+      })
+      .collect()
   }
 }
 

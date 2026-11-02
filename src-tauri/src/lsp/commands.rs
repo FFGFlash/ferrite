@@ -31,7 +31,7 @@ use crate::error::CommandError;
 use crate::paths;
 
 /// How long the editor waits for a server's answer.
-const REQUEST_TIMEOUT: Duration = Duration::from_secs(5);
+pub(super) const REQUEST_TIMEOUT: Duration = Duration::from_secs(5);
 /// Most completion items returned.
 const MAX_COMPLETIONS: usize = 200;
 /// Longest word before the cursor considered for completion.
@@ -86,7 +86,7 @@ pub struct CompletionDto {
   pub incomplete: bool,
 }
 
-async fn blocking<T: Send + 'static>(
+pub(super) async fn blocking<T: Send + 'static>(
   f: impl FnOnce() -> T + Send + 'static,
 ) -> Result<T, CommandError> {
   tauri::async_runtime::spawn_blocking(f)
@@ -94,7 +94,7 @@ async fn blocking<T: Send + 'static>(
     .map_err(CommandError::internal)
 }
 
-fn log_failure(request: &str, error: &LspError) {
+pub(super) fn log_failure(request: &str, error: &LspError) {
   match error {
     LspError::Server { code, .. }
       if *code == ferrite_lsp::REQUEST_CANCELLED || *code == ferrite_lsp::CONTENT_MODIFIED =>
@@ -313,7 +313,7 @@ pub async fn lsp_references(
 /// `locations` as positions in their files' text: an open document's as it
 /// is now, or the file's on disk. Those in files that can't be read are left
 /// out. Sorted by path and position, without duplicates.
-async fn resolve(
+pub(super) async fn resolve(
   app: &AppHandle,
   encoding: PositionEncoding,
   locations: Vec<(Uri, Range)>,

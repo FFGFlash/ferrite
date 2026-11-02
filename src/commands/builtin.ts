@@ -295,10 +295,25 @@ export const builtinCommands: Command[] = [
   {
     id: 'workbench.goToLine',
     category: 'Go',
-    title: 'Go to Line…',
+    title: 'Go to Line/Column…',
     keybinding: 'ctrl+g',
     enabled: hasEditor,
     run: () => openPalette(':'),
+  },
+  {
+    id: 'workbench.goToSymbol',
+    category: 'Go',
+    title: 'Go to Symbol in Editor…',
+    keybinding: 'mod+shift+o',
+    enabled: hasEditor,
+    run: () => openPalette('@'),
+  },
+  {
+    id: 'workbench.showAllSymbols',
+    category: 'Go',
+    title: 'Go to Symbol in Workspace…',
+    keybinding: 'mod+t',
+    run: () => openPalette('#'),
   },
   {
     id: 'workbench.toggleSidebar',

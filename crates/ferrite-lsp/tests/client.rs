@@ -166,6 +166,52 @@ fn syncs_documents_with_utf16_positions() {
 }
 
 #[test]
+fn lists_document_and_workspace_symbols() {
+  let harness = start(&[]);
+  harness.open("fn é_ok() {}\nfn main() {}\n");
+  harness.next_diagnostics();
+  let document = harness
+    .server
+    .request::<lsp_types::request::DocumentSymbolRequest>(
+      lsp_types::DocumentSymbolParams {
+        text_document: TextDocumentIdentifier::new(harness.uri.clone()),
+        work_done_progress_params: Default::default(),
+        partial_result_params: Default::default(),
+      },
+      TIMEOUT,
+      || false,
+    )
+    .expect("answers");
+  let Some(lsp_types::DocumentSymbolResponse::Nested(symbols)) = document else {
+    panic!("unexpected symbols {document:?}");
+  };
+  let names: Vec<_> = symbols.iter().map(|symbol| symbol.name.as_str()).collect();
+  assert_eq!(names, ["é_ok", "main"]);
+  assert_eq!(
+    symbols[1].selection_range.start,
+    lsp_types::Position::new(1, 3)
+  );
+
+  let workspace = harness
+    .server
+    .request::<lsp_types::request::WorkspaceSymbolRequest>(
+      lsp_types::WorkspaceSymbolParams {
+        query: "ma".into(),
+        ..Default::default()
+      },
+      TIMEOUT,
+      || false,
+    )
+    .expect("answers");
+  let Some(lsp_types::WorkspaceSymbolResponse::Flat(symbols)) = workspace else {
+    panic!("unexpected symbols {workspace:?}");
+  };
+  assert_eq!(symbols.len(), 1);
+  assert_eq!(symbols[0].name, "main");
+  assert_eq!(symbols[0].location.uri, harness.uri);
+}
+
+#[test]
 fn requests_time_out_or_are_cancelled_without_breaking_the_connection() {
   let harness = start(&[]);
   let slow = json!({ "ms": 400 });

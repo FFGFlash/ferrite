@@ -149,7 +149,7 @@ const SPECS: &[Spec] = &[
     path: &["lsp", "enabled"],
     section: "Language Servers",
     title: "Enabled",
-    description: "Run language servers, which provide diagnostics, hover, go to definition, references, and completion. Language extensions declare them, and they start when a file needs one, if installed and allowed.",
+    description: "Run language servers, which provide diagnostics, hover, go to definition, references, symbols, and completion. Language extensions declare them, and they start when a file needs one, if installed and allowed.",
     kind: Kind::Boolean,
     value: |s| json!(s.lsp.enabled),
   },

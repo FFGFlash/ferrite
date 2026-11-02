@@ -103,32 +103,6 @@
   background: var(--color-list-active-background);
 }
 
-.completion-list__kind {
-  flex: none;
-  width: 16px;
-  color: var(--color-syntax-function);
-  font-family: var(--font-mono);
-  font-size: var(--font-size-ui-small);
-  text-align: center;
-}
-
-.completion-list__kind[data-kind='variable'],
-.completion-list__kind[data-kind='field'],
-.completion-list__kind[data-kind='property'] {
-  color: var(--color-syntax-property);
-}
-
-.completion-list__kind[data-kind='struct'],
-.completion-list__kind[data-kind='class'],
-.completion-list__kind[data-kind='interface'],
-.completion-list__kind[data-kind='enum'] {
-  color: var(--color-syntax-type);
-}
-
-.completion-list__kind[data-kind='keyword'] {
-  color: var(--color-syntax-keyword);
-}
-
 .completion-list__label {
   overflow: hidden;
   font-family: var(--font-mono);

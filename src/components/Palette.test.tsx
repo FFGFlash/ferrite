@@ -3,7 +3,9 @@ import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { registerCommands } from '../commands/registry'
 import { activeEditor, type EditorController } from '../editor/activeEditor'
+import * as lsp from '../ipc/lsp'
 import { findFiles } from '../ipc/workspace'
+import { openPath } from '../state/documents'
 import { iconThemeStore } from '../state/iconTheme'
 import { workspaceStore } from '../state/workspace'
 import { Palette } from './Palette'
@@ -13,6 +15,53 @@ vi.mock('../ipc/workspace', async importOriginal => ({
   ...(await importOriginal<typeof import('../ipc/workspace')>()),
   findFiles: vi.fn(),
 }))
+vi.mock('../ipc/lsp', () => ({
+  documentSymbols: vi.fn(),
+  workspaceSymbols: vi.fn(),
+  resolveSymbol: vi.fn(),
+}))
+vi.mock('../state/documents', async importOriginal => ({
+  ...(await importOriginal<typeof import('../state/documents')>()),
+  openPath: vi.fn(),
+}))
+
+function mockEditor(): EditorController {
+  return {
+    documentId: 1,
+    dispatch: vi.fn(),
+    openFind: vi.fn(),
+    findNext: vi.fn(),
+    refresh: vi.fn(),
+    focus: vi.fn(),
+    lineCount: () => 120,
+    scrollToLine: vi.fn(),
+    scrollBy: vi.fn(),
+    goToDefinition: vi.fn(),
+    goToReferences: vi.fn(),
+    peekReferences: vi.fn(),
+    triggerSuggest: vi.fn(),
+    showHover: vi.fn(),
+    cursor: () => ({ line: 4, column: 2 }),
+    previewLines: vi.fn(),
+    scrollPosition: () => ({ top: 300, left: 0 }),
+    restoreScroll: vi.fn(),
+  }
+}
+
+const symbol = (
+  name: string,
+  kind: string,
+  line: number,
+  container: string | null = null,
+): lsp.DocumentSymbol => ({
+  name,
+  kind,
+  container,
+  deprecated: false,
+  start: { line, column: 0 },
+  end: { line: line + 2, column: 1 },
+  selection: { line, column: 4 },
+})
 
 describe('Palette', () => {
   let unregister = () => {}
@@ -52,38 +101,152 @@ describe('Palette', () => {
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
   })
 
-  it('goes to a line in the active editor', async () => {
+  it('goes to a line in the active editor, previewing it', async () => {
     const user = userEvent.setup()
-    const dispatch = vi.fn()
-    const editor: EditorController = {
-      documentId: 1,
-      dispatch,
-      openFind: vi.fn(),
-      findNext: vi.fn(),
-      refresh: vi.fn(),
-      focus: vi.fn(),
-      lineCount: () => 120,
-      scrollToLine: vi.fn(),
-      scrollBy: vi.fn(),
-      goToDefinition: vi.fn(),
-      goToReferences: vi.fn(),
-      peekReferences: vi.fn(),
-      triggerSuggest: vi.fn(),
-      showHover: vi.fn(),
-    }
+    const editor = mockEditor()
+    activeEditor.set(editor)
+    render(<Palette />)
+    act(() => openPalette(':'))
+    expect(screen.getByRole('option')).toHaveTextContent(
+      'Current Line: 5, Character: 3. Type a line number between 1 and 120 to navigate to.',
+    )
+
+    await user.keyboard('42')
+    expect(screen.getByRole('option')).toHaveTextContent('Go to line 42.')
+    expect(editor.previewLines).toHaveBeenLastCalledWith({ start: 41, end: 41, center: 41 })
+    await user.keyboard(':7')
+    expect(screen.getByRole('option')).toHaveTextContent('Go to line 42 and character 7.')
+    await user.keyboard('{Enter}')
+    expect(editor.dispatch).toHaveBeenCalledWith(
+      { type: 'setCursor', position: { line: 41, column: 6 }, extend: false, add: false },
+      'center',
+    )
+    // Chosen, so the editor stays where the preview put it.
+    expect(editor.previewLines).toHaveBeenLastCalledWith(null)
+    expect(editor.restoreScroll).not.toHaveBeenCalled()
+  })
+
+  it('counts lines back from the end, and scrolls back when closed', async () => {
+    const user = userEvent.setup()
+    const editor = mockEditor()
     activeEditor.set(editor)
     render(<Palette />)
     act(() => openPalette(':'))
 
-    await user.keyboard('42')
-    expect(screen.getByRole('option')).toHaveTextContent('Go to line 42of 120')
+    await user.keyboard('-1')
+    expect(screen.getByRole('option')).toHaveTextContent('Go to line 120.')
+    await user.keyboard('{Backspace}{Backspace}500')
+    expect(screen.getByRole('option')).toHaveTextContent('between 1 and 120')
+    // The message does nothing when chosen.
     await user.keyboard('{Enter}')
-    expect(dispatch).toHaveBeenCalledWith({
-      type: 'setCursor',
-      position: { line: 41, column: 0 },
-      extend: false,
-      add: false,
+    expect(screen.getByRole('dialog')).toBeInTheDocument()
+
+    await user.keyboard('{Escape}')
+    expect(editor.dispatch).not.toHaveBeenCalled()
+    expect(editor.previewLines).toHaveBeenLastCalledWith(null)
+    expect(editor.restoreScroll).toHaveBeenCalledWith({ top: 300, left: 0 })
+  })
+
+  it("goes to a symbol in the editor, previewing the selected one's lines", async () => {
+    const user = userEvent.setup()
+    const editor = mockEditor()
+    activeEditor.set(editor)
+    vi.mocked(lsp.documentSymbols).mockResolvedValue([
+      symbol('Parser', 'struct', 0),
+      symbol('parse', 'method', 3, 'Parser'),
+      symbol('main', 'function', 10),
+    ])
+    render(<Palette />)
+    act(() => openPalette('@'))
+
+    const options = await screen.findAllByRole('option')
+    expect(options.map(option => option.textContent)).toEqual([
+      'TParsersymbols (3)',
+      'ƒparseParser',
+      'ƒmain',
+    ])
+    expect(lsp.documentSymbols).toHaveBeenCalledWith(1)
+    expect(editor.previewLines).toHaveBeenLastCalledWith({ start: 0, end: 2, center: 0 })
+
+    // The first word matches names; the rest, the symbols they're in.
+    await user.keyboard('pa par')
+    expect(screen.getAllByRole('option').map(option => option.textContent)).toEqual([
+      'ƒparseParsersymbols (1)',
+    ])
+    expect(editor.previewLines).toHaveBeenLastCalledWith({ start: 3, end: 5, center: 3 })
+    await user.keyboard('{Enter}')
+    expect(editor.dispatch).toHaveBeenCalledWith(
+      { type: 'setCursor', position: { line: 3, column: 4 }, extend: false, add: false },
+      'center',
+    )
+  })
+
+  it('groups symbols by kind after @:', async () => {
+    activeEditor.set(mockEditor())
+    vi.mocked(lsp.documentSymbols).mockResolvedValue([
+      symbol('b', 'function', 0),
+      symbol('Point', 'struct', 2),
+      symbol('a', 'function', 5),
+    ])
+    render(<Palette />)
+    act(() => openPalette('@:'))
+
+    const options = await screen.findAllByRole('option')
+    expect(options.map(option => option.textContent)).toEqual([
+      'ƒbfunctions (2)',
+      'ƒa',
+      'TPointstructs (1)',
+    ])
+  })
+
+  it('explains when the editor has no symbols to go to', async () => {
+    activeEditor.set(mockEditor())
+    vi.mocked(lsp.documentSymbols).mockResolvedValue(null)
+    render(<Palette />)
+    act(() => openPalette('@'))
+    expect(
+      await screen.findByText('The active text editor does not provide symbol information.'),
+    ).toBeInTheDocument()
+  })
+
+  it('searches symbols across the workspace and opens the chosen one', async () => {
+    const user = userEvent.setup()
+    const location = { path: '/w/src/util.rs', range: null, encoding: 'utf-8' }
+    vi.mocked(lsp.workspaceSymbols).mockResolvedValue([
+      { name: 'total', kind: 'function', container: null, deprecated: false, location },
+      {
+        name: 'Totals',
+        kind: 'struct',
+        container: 'report',
+        deprecated: true,
+        location: { ...location, path: '/w/src/report.rs' },
+      },
+    ])
+    vi.mocked(lsp.resolveSymbol).mockResolvedValue({
+      path: '/w/src/util.rs',
+      start: { line: 4, column: 7 },
+      end: { line: 4, column: 12 },
     })
+    workspaceStore.set({ info: { root: '/w', name: 'w' }, listings: new Map(), indexing: false })
+    try {
+      render(<Palette />)
+      act(() => openPalette('#'))
+      await user.keyboard('tot')
+
+      const options = await screen.findAllByRole('option')
+      expect(lsp.workspaceSymbols).toHaveBeenLastCalledWith('tot')
+      expect(options.map(option => option.textContent)).toEqual([
+        'ƒtotalsrc/util.rs',
+        'TTotalsreport • src/report.rs',
+      ])
+      expect(options[1]?.querySelector('[data-deprecated]')).toHaveTextContent('Totals')
+
+      await user.keyboard('{Enter}')
+      expect(lsp.resolveSymbol).toHaveBeenCalledWith(location)
+      expect(openPath).toHaveBeenCalledWith('/w/src/util.rs', { start: { line: 4, column: 7 } })
+    } finally {
+      act(() => workspaceStore.set({ info: null, listings: new Map(), indexing: false }))
+    }
   })
 
   it('closes on Escape', async () => {

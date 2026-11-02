@@ -34,7 +34,12 @@ import { layoutStore } from '../state/layout'
 import { notify, reportError } from '../state/notifications'
 import { notifyPainted, recordTiming } from '../state/perf'
 import { useStore } from '../state/store'
-import { registerEditor, type EditorController } from './activeEditor'
+import {
+  registerEditor,
+  type EditorController,
+  type LinePreview,
+  type Reveal,
+} from './activeEditor'
 import { isWordChar, visibleCompletions, wordAround } from './completion'
 import { PeekView } from './PeekView'
 import {
@@ -181,7 +186,10 @@ export function EditorView({ documentId, title, transport = ipcTransport }: Edit
   const viewRef = useRef<View | null>(null)
   const findRef = useRef<FindState | null>(null)
   const composingRef = useRef(false)
-  const revealRef = useRef(false)
+  /** How to scroll the cursor into view once a view reflects request `after`. */
+  const revealRef = useRef<{ mode: Reveal; after: number } | null>(null)
+  /** The last request the latest view reflects. */
+  const reflectedRef = useRef(0)
   const restoreScrollRef = useRef(scrollPositions.get(documentId) ?? null)
 
   const { lineHeight } = useStore(appearance)
@@ -197,6 +205,8 @@ export function EditorView({ documentId, title, transport = ipcTransport }: Edit
   const [find, setFind] = useState<FindState | null>(null)
   const [hover, setHover] = useState<HoverState | null>(null)
   const [completion, setCompletion] = useState<CompletionState | null>(null)
+  /** Lines highlighted by a Go to Line or Go to Symbol preview. */
+  const [preview, setPreview] = useState<LinePreview | null>(null)
   /** Re-renders popups anchored to the text when it scrolls. */
   const [, setScrollTick] = useState(0)
   viewRef.current = view
@@ -251,10 +261,19 @@ export function EditorView({ documentId, title, transport = ipcTransport }: Edit
   // Focusing must not scroll: the input spans the cursor's whole line.
   const focusInput = () => inputRef.current?.focus({ preventScroll: true })
 
-  const dispatch = (op: EditorOp) => {
-    revealRef.current = true
-    inputStartRef.current ??= performance.now()
-    sessionRef.current?.dispatch(op)
+  const dispatch = (op: EditorOp, reveal: Reveal = 'nearest') => {
+    const session = sessionRef.current
+    if (session) {
+      inputStartRef.current ??= performance.now()
+      revealRef.current = { mode: reveal, after: session.dispatch(op) }
+    }
+  }
+
+  const sendClipboard = (action: 'cut' | 'copy' | 'paste') => {
+    const session = sessionRef.current
+    if (session) {
+      revealRef.current = { mode: 'nearest', after: session.clipboard(action) }
+    }
   }
 
   useEffect(() => {
@@ -265,8 +284,9 @@ export function EditorView({ documentId, title, transport = ipcTransport }: Edit
     const session = new EditorSession(
       documentId,
       viewportFor(scrollRef.current, lineHeightRef.current, zoneRef.current),
-      next => {
+      (next, reflected) => {
         receivedAtRef.current = performance.now()
+        reflectedRef.current = reflected
         setView(next)
         if (pending) {
           clearPendingSelection(documentId, pending)
@@ -279,9 +299,16 @@ export function EditorView({ documentId, title, transport = ipcTransport }: Edit
     const unregister = registerBeforeSave(documentId, () => session.idle())
     if (pending) {
       restoreScrollRef.current = null
-      revealRef.current = true
       session.dispatch({ type: 'setCursor', position: pending.start, extend: false, add: false })
-      session.dispatch({ type: 'setCursor', position: pending.end, extend: true, add: false })
+      revealRef.current = {
+        mode: 'centerIfOutside',
+        after: session.dispatch({
+          type: 'setCursor',
+          position: pending.end,
+          extend: true,
+          add: false,
+        }),
+      }
     }
     focusInput()
     return () => {
@@ -329,6 +356,29 @@ export function EditorView({ documentId, title, transport = ipcTransport }: Edit
       peekReferences: () => void findReferences(true),
       triggerSuggest: () => requestCompletion(null, false),
       showHover: () => void showHoverAtCursor(),
+      cursor: () => viewRef.current?.primary.position ?? null,
+      previewLines: next => {
+        setPreview(next)
+        const scroller = scrollRef.current
+        const current = viewRef.current
+        if (next && scroller && current) {
+          const lineHeight = lineHeightRef.current
+          scroller.scrollTop =
+            rowTop(displayRow(current, next.center), lineHeight, zoneRef.current) -
+            (scroller.clientHeight - lineHeight) / 2
+        }
+      },
+      scrollPosition: () => ({
+        top: scrollRef.current?.scrollTop ?? 0,
+        left: scrollRef.current?.scrollLeft ?? 0,
+      }),
+      restoreScroll: ({ top, left }) => {
+        const scroller = scrollRef.current
+        if (scroller) {
+          scroller.scrollTop = top
+          scroller.scrollLeft = left
+        }
+      },
     }
     return registerEditor(controller)
     // The controller reads current state through refs, so it only needs to
@@ -408,8 +458,9 @@ export function EditorView({ documentId, title, transport = ipcTransport }: Edit
       restoreScrollRef.current = null
       scroller.scrollTop = saved.top
       scroller.scrollLeft = saved.left
-    } else if (revealRef.current) {
-      revealRef.current = false
+    } else if (revealRef.current && reflectedRef.current >= revealRef.current.after) {
+      const { mode } = revealRef.current
+      revealRef.current = null
       const caret = measured.carets.find(c => c.primary)
       reveal(
         scroller,
@@ -417,6 +468,7 @@ export function EditorView({ documentId, title, transport = ipcTransport }: Edit
         lineHeight,
         caret?.left,
         (gutterRef.current?.offsetWidth ?? 0) + (minimapVisible ? MINIMAP_WIDTH : 0),
+        mode,
       )
     }
     return () => cancelAnimationFrame(frame)
@@ -565,8 +617,7 @@ export function EditorView({ documentId, title, transport = ipcTransport }: Edit
     if (command.kind === 'op') {
       dispatch(command.op)
     } else if (command.kind === 'clipboard') {
-      revealRef.current = true
-      sessionRef.current?.clipboard(command.action)
+      sendClipboard(command.action)
     }
   }
 
@@ -858,10 +909,7 @@ export function EditorView({ documentId, title, transport = ipcTransport }: Edit
       }
     }
     const hint = (id: string) => primaryKeybinding(getCommand(id))
-    const clipboard = (action: 'cut' | 'copy' | 'paste') => () => {
-      revealRef.current = true
-      sessionRef.current?.clipboard(action)
-    }
+    const clipboard = (action: 'cut' | 'copy' | 'paste') => () => sendClipboard(action)
     const entries: MenuEntry[] = []
     if (current?.language) {
       entries.push(
@@ -1337,6 +1385,22 @@ export function EditorView({ documentId, title, transport = ipcTransport }: Edit
           >
             <div className="editor-view__layer" style={layerStyle}>
               <div className="editor-view__selections" aria-hidden="true">
+                {preview &&
+                  lineNumbers.map(
+                    (line, index) =>
+                      line >= preview.start &&
+                      line <= preview.end && (
+                        <div
+                          key={`p${line}`}
+                          className="editor-view__range-highlight"
+                          style={{
+                            top:
+                              rowTop(startRow + index, lineHeight, zone) -
+                              rowTop(startRow, lineHeight, zone),
+                          }}
+                        />
+                      ),
+                  )}
                 {overlay.matches.map((rect, index) => (
                   <div
                     key={`m${index}`}
@@ -1610,7 +1674,7 @@ function covers(
   )
 }
 
-/** Scrolls just enough to show the primary caret. */
+/** Scrolls to show the primary caret: just enough, or to the middle. */
 function reveal(
   scroller: HTMLElement,
   top: number,
@@ -1618,8 +1682,13 @@ function reveal(
   left: number | undefined,
   /** The width the gutter and the minimap cover. */
   coveredWidth: number,
+  mode: Reveal,
 ): void {
-  if (top < scroller.scrollTop) {
+  const outside =
+    top < scroller.scrollTop || top + lineHeight > scroller.scrollTop + scroller.clientHeight
+  if (mode === 'center' || (mode === 'centerIfOutside' && outside)) {
+    scroller.scrollTop = top - (scroller.clientHeight - lineHeight) / 2
+  } else if (top < scroller.scrollTop) {
     scroller.scrollTop = top
   } else if (top + lineHeight > scroller.scrollTop + scroller.clientHeight) {
     scroller.scrollTop = top + lineHeight - scroller.clientHeight

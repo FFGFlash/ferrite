@@ -3,7 +3,8 @@
 //! It keeps each open document's text by applying the changes it receives
 //! (counting columns its own way, independently of the client), reports a
 //! diagnostic for every occurrence of the word `error`, and answers hover,
-//! definition, references and completion requests from the text. `fake/text` returns a
+//! definition, references, symbol and completion requests from the text
+//! (its symbols are the functions declared with `fn`). `fake/text` returns a
 //! document's text so tests can check synchronization; `fake/sleep` delays
 //! its answer. Flags: `--utf16` negotiates UTF-16 positions instead of
 //! UTF-8; `--crash-on-hover` exits when asked for a hover.
@@ -90,6 +91,22 @@ impl Server {
     }));
   }
 
+  /// The names of the functions declared in `text`, with their ranges.
+  fn functions(&self, text: &str) -> Vec<(String, Value)> {
+    text
+      .match_indices("fn ")
+      .filter_map(|(offset, _)| {
+        let start = offset + 3;
+        let length = text[start..].find(|ch: char| !(ch.is_alphanumeric() || ch == '_'))?;
+        (length > 0).then(|| {
+          let name = text[start..start + length].to_owned();
+          let range = json!({ "start": self.position(text, start), "end": self.position(text, start + length) });
+          (name, range)
+        })
+      })
+      .collect()
+  }
+
   fn word_at(&self, params: &Value) -> (String, String) {
     let uri = params["textDocument"]["uri"]
       .as_str()
@@ -128,6 +145,8 @@ impl Server {
             "hoverProvider": true,
             "definitionProvider": true,
             "referencesProvider": true,
+            "documentSymbolProvider": true,
+            "workspaceSymbolProvider": true,
             "completionProvider": { "triggerCharacters": ["."] },
           },
           "serverInfo": { "name": "fake", "version": "1" },
@@ -210,6 +229,32 @@ impl Server {
             .collect()
         };
         json!(locations)
+      }
+      "textDocument/documentSymbol" => {
+        let uri = params["textDocument"]["uri"].as_str().unwrap_or_default();
+        let text = self.documents.get(uri).cloned().unwrap_or_default();
+        let symbols: Vec<Value> = self
+          .functions(&text)
+          .into_iter()
+          .map(|(name, range)| {
+            json!({ "name": name, "kind": 12, "range": range, "selectionRange": range })
+          })
+          .collect();
+        json!(symbols)
+      }
+      "workspace/symbol" => {
+        let query = params["query"].as_str().unwrap_or_default();
+        let mut symbols = Vec::new();
+        for (uri, text) in &self.documents {
+          for (name, range) in self.functions(text) {
+            if name.contains(query) {
+              symbols.push(
+                json!({ "name": name, "kind": 12, "location": { "uri": uri, "range": range } }),
+              );
+            }
+          }
+        }
+        json!(symbols)
       }
       "textDocument/completion" => json!({
         "isIncomplete": false,

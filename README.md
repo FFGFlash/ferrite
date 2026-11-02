@@ -53,6 +53,7 @@ file between text and the viewers that can show it.
 | ----------------------------------- | -------------------------------- | ------------------------ |
 | Command palette                     | Ctrl+Shift+P, F1                 | ⇧⌘P, F1                  |
 | Go to file / Go to line             | Ctrl+P / Ctrl+G                  | ⌘P / ⌃G                  |
+| Go to symbol in editor / workspace  | Ctrl+Shift+O / Ctrl+T            | ⇧⌘O / ⌘T                 |
 | New file / Open / Open folder       | Ctrl+N / Ctrl+O / Ctrl+K Ctrl+O  | ⌘N / ⌘O / ⌘K ⌘O          |
 | Close tab / Reopen closed tab       | Ctrl+W / Ctrl+Shift+T            | ⌘W / ⇧⌘T                 |
 | Close saved / all tabs in group     | Ctrl+K U / Ctrl+K W              | ⌘K U / ⌘K W              |
@@ -172,7 +173,9 @@ With a language server, Ferrite also shows errors and warnings as you type (squi
 symbol, goes to definitions (F12 or Ctrl/⌘+click; holding Ctrl/⌘ underlines the symbol under the
 pointer when it has one), finds references (Shift+F12, or Ctrl/⌘+click on a definition: one is
 gone to, several open a peek below the line with a preview and a list by file; F4 and Shift+F4
-step through them, Enter or a double-click opens one, Escape closes it), and offers completions (as you type, after `.` and similar
+step through them, Enter or a double-click opens one, Escape closes it), goes to symbols
+(Ctrl/⌘+Shift+O lists the file's, previewing each in the editor, and `@:` groups them by kind;
+Ctrl/⌘+T searches the whole workspace), and offers completions (as you type, after `.` and similar
 characters, or with Ctrl+Space). Servers start when you open a file that needs one. The status
 bar shows the server's state; hover it for details if a server is missing or failed. Servers can
 be changed, added, or turned off in the `[lsp]` section of the settings.

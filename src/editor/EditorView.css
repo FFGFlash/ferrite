@@ -146,6 +146,14 @@
   background: var(--color-editor-selection);
 }
 
+.editor-view__range-highlight {
+  position: absolute;
+  right: 0;
+  left: 0;
+  height: var(--editor-line-height);
+  background: var(--color-editor-range-highlight);
+}
+
 .editor-view__match {
   position: absolute;
   height: var(--editor-line-height);

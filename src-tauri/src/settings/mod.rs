@@ -57,7 +57,7 @@ const TEMPLATE: &str = r##"# Ferrite settings. Uncomment a line to change it; sa
 
 [lsp]
 # Language servers provide diagnostics, hover, go to definition, references,
-# and completion. Language extensions declare them (the Rust extension declares
+# symbols, and completion. Language extensions declare them (the Rust extension declares
 # rust-analyzer, for example), and they start when a file needs one, if
 # installed and allowed.
 # enabled = true
