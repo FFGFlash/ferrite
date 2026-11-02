@@ -1460,20 +1460,6 @@ impl ExtensionHost {
     })
   }
 
-  /// The number of extension errors and warnings in a document.
-  pub fn problem_counts(&self, document: &Document) -> (usize, usize) {
-    let state = self.shared.lock();
-    let Some(record) = state.documents.get(&document.id()) else {
-      return (0, 0);
-    };
-    let items = record.diagnostics.values().flat_map(|set| &set.items);
-    items.fold((0, 0), |(errors, warnings), item| match item.severity {
-      Severity::Error => (errors + 1, warnings),
-      Severity::Warning => (errors, warnings + 1),
-      _ => (errors, warnings),
-    })
-  }
-
   fn collect(
     &self,
     document: &Document,

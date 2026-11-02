@@ -1,7 +1,6 @@
 /**
- * Problems with Ferrite itself and with extensions, for the Problems view
- * and the status bar's counts. (Problems in files are the editor's
- * diagnostics, which aren't listed here.)
+ * Problems for the Problems view and the status bar's counts: those with
+ * Ferrite itself and with extensions, and those in files.
  *
  * - **Current** problems come from state: an extension that stopped or
  *   couldn't be loaded, extension settings that were ignored, and a
@@ -9,10 +8,16 @@
  * - **Reported** problems are the warnings and errors notifications showed
  *   (failed actions, extensions' messages, backend notices), so they can be
  *   found after the notification is gone. They stay until cleared.
+ * - **File** problems are the diagnostics of open documents (from language
+ *   servers and extensions) and those language servers reported for other
+ *   files. The backend owns them; they're fetched again shortly after they
+ *   change.
  */
 import { useMemo } from 'react'
 import type { ExtensionStatus } from '../ipc/extensions'
+import { listFileProblems, type ProblemsList } from '../ipc/problems'
 import { getSettingsProblem } from '../ipc/workspace'
+import { documentsStore } from './documents'
 import { extensionsStore } from './extensions'
 import { createStore, useStore } from './store'
 
@@ -154,4 +159,87 @@ export function useProblems(): readonly Problem[] {
 export function countProblems(problems: readonly Problem[]): { errors: number; warnings: number } {
   const errors = problems.filter(problem => problem.severity === 'error').length
   return { errors, warnings: problems.length - errors }
+}
+
+export const fileProblemsStore = createStore<ProblemsList>({ files: [], leftOut: 0 })
+
+/** Waits this long after a change, so a burst of changes (typing) fetches once. */
+const FILE_REFRESH_DELAY_MS = 250
+
+let refreshTimer: ReturnType<typeof setTimeout> | null = null
+let fetching: Promise<void> | null = null
+let fetchAgain = false
+
+/** Fetches file problems again soon, once for a burst of calls. */
+export function fileProblemsChanged(): void {
+  if (refreshTimer !== null) {
+    clearTimeout(refreshTimer)
+  }
+  refreshTimer = setTimeout(() => {
+    refreshTimer = null
+    void refreshFileProblems()
+  }, FILE_REFRESH_DELAY_MS)
+}
+
+/** Fetches file problems now; a call while fetching fetches once more after. */
+export function refreshFileProblems(): Promise<void> {
+  if (fetching) {
+    fetchAgain = true
+    return fetching
+  }
+  fetching = (async () => {
+    do {
+      fetchAgain = false
+      try {
+        fileProblemsStore.set(await listFileProblems())
+      } catch {
+        // Outside the desktop app: there are none.
+      }
+    } while (fetchAgain)
+    fetching = null
+  })()
+  return fetching
+}
+
+/**
+ * Fetches file problems now, and again whenever a document opens or closes
+ * (which changes whose diagnostics are listed). Call once at startup; the
+ * backend announces other changes.
+ */
+export function followFileProblems(): () => void {
+  let documentIds = ''
+  void refreshFileProblems()
+  return documentsStore.subscribe(() => {
+    const ids = documentsStore
+      .get()
+      .documents.map(document => document.id)
+      .join(',')
+    if (ids !== documentIds) {
+      documentIds = ids
+      fileProblemsChanged()
+    }
+  })
+}
+
+/** Errors and warnings in files (information isn't counted). */
+export function countFileProblems(list: ProblemsList): { errors: number; warnings: number } {
+  let errors = 0
+  let warnings = 0
+  for (const file of list.files) {
+    for (const problem of file.problems) {
+      if (problem.severity === 1) {
+        errors++
+      } else if (problem.severity === 2) {
+        warnings++
+      }
+    }
+  }
+  return { errors, warnings }
+}
+
+/** Every error and warning: Ferrite's, extensions', and files'. */
+export function useProblemCounts(): { errors: number; warnings: number } {
+  const app = countProblems(useProblems())
+  const files = countFileProblems(useStore(fileProblemsStore))
+  return { errors: app.errors + files.errors, warnings: app.warnings + files.warnings }
 }

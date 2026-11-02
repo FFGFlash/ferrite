@@ -8,7 +8,7 @@ import { documentsStore } from '../state/documents'
 import { editorStatus } from '../state/editorStatus'
 import { statusItemsStore } from '../state/extensions'
 import { showProblems } from '../state/output'
-import { countProblems, useProblems } from '../state/problems'
+import { useProblemCounts } from '../state/problems'
 import { useStore } from '../state/store'
 import './StatusBar.css'
 
@@ -68,13 +68,10 @@ export const StatusBar = memo(function StatusBar({ appInfo }: StatusBarProps) {
   )
 })
 
-/** Problems with Ferrite and extensions, when there are any; opens the Problems view. */
+/** Errors and warnings in files, Ferrite, and extensions; opens the Problems view. */
 function ProblemsItem() {
-  const { errors, warnings } = countProblems(useProblems())
-  if (errors + warnings === 0) {
-    return null
-  }
-  const label = `Problems with Ferrite or extensions: ${errors} ${errors === 1 ? 'error' : 'errors'}, ${warnings} ${warnings === 1 ? 'warning' : 'warnings'}`
+  const { errors, warnings } = useProblemCounts()
+  const label = `Problems: ${errors} ${errors === 1 ? 'error' : 'errors'}, ${warnings} ${warnings === 1 ? 'warning' : 'warnings'}`
   return (
     <button
       type="button"
@@ -83,16 +80,8 @@ function ProblemsItem() {
       aria-label={label}
       onClick={showProblems}
     >
-      {errors > 0 && (
-        <>
-          <CircleX size={14} strokeWidth={1.75} aria-hidden="true" /> {errors}
-        </>
-      )}
-      {warnings > 0 && (
-        <>
-          <TriangleAlert size={14} strokeWidth={1.75} aria-hidden="true" /> {warnings}
-        </>
-      )}
+      <CircleX size={14} strokeWidth={1.75} aria-hidden="true" /> {errors}
+      <TriangleAlert size={14} strokeWidth={1.75} aria-hidden="true" /> {warnings}
     </button>
   )
 }
@@ -133,20 +122,11 @@ function serverText(server: NonNullable<LanguageStatus['server']>): string {
   }
 }
 
-/** Problem counts, language, and language server for the active document. */
+/** The active document's language and language server. (Problem counts cover every file.) */
 function LanguageItems({ status }: { status: LanguageStatus }) {
   const { server } = status
   return (
     <>
-      {server && server.state !== 'failed' && (
-        <span
-          className="statusbar__item"
-          title={`${status.errors} errors, ${status.warnings} warnings`}
-          aria-label={`${status.errors} errors, ${status.warnings} warnings`}
-        >
-          ⊗ {status.errors} ⚠ {status.warnings}
-        </span>
-      )}
       <span className="statusbar__item" title="Language">
         {status.language}
       </span>

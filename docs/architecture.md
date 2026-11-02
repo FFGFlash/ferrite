@@ -306,8 +306,12 @@ changes, so a crash, a forced shutdown, or a power cut loses at most the last se
   problems come from state (an extension that stopped or couldn't be loaded, ignored extension
   settings, a `settings.toml` that isn't in effect) and go away when fixed. Reported problems
   are the warnings and errors notifications showed, counted when repeated, kept until cleared
-  (at most 200). The status bar shows the counts when there are any. Problems in files aren't
-  listed; they're in the editor.
+  (at most 200). File problems follow, by file: `problems_list` returns every open document's
+  diagnostics (language servers' and extensions') and those servers published for files that
+  aren't open, most severe first, without hints, at most 10,000. The frontend fetches them at
+  startup, when a document opens or closes, and 250 ms after `diagnosticsChanged` or
+  `problemsChanged`. Choosing one reveals it, or opens its file there. The status bar always
+  shows the errors and warnings of all of them, and opens Problems.
 
 ## Commands and keybindings
 
@@ -433,6 +437,7 @@ EditorView = { version, lineCount, rowCount, startRow, startLine, endLine,
 | `settings_set_icon_theme`                                     | File icon theme                                        |
 | `settings_schema`, `settings_set`                             | Every setting for the settings editor; set one         |
 | `settings_problem`                                            | Why `settings.toml` isn't in effect, for Problems      |
+| `problems_list`                                               | Every file's diagnostics, for Problems                 |
 | `ui_state_get`, `ui_state_save`                               | Saved layout and active file                           |
 | `events_subscribe`                                            | Register the backend event channel                     |
 | `perf_stats`                                                  | Backend timings, scheduler statistics, memory          |
@@ -526,8 +531,13 @@ server (`lsp/`).
 - **Diagnostics are anchored to text.** A `publishDiagnostics` notification is interpreted
   against the snapshot of the version it names (the last 16 synced snapshots are kept), stored
   as byte ranges, and mapped through later edits when shown, so squiggles move with the text
-  while the server catches up. Each view carries the diagnostics on its lines and the document's
-  error and warning counts.
+  while the server catches up. Each view carries the diagnostics on its lines.
+- **Files that aren't open.** Diagnostics a server publishes for a file that isn't open (a
+  workspace-wide check) are kept by server and path, at the server's positions, for the
+  Problems view, and announced with `problemsChanged`. A closed document's diagnostics are kept
+  the same way until the server publishes others (servers that only check open files clear
+  them). A document's own diagnostics replace them when it opens, and a server that exits or
+  restarts loses them.
 - **Requests never hold locks while waiting.** `lsp_hover`, `lsp_definition`, and
   `lsp_completion` sync the document, capture the position and a snapshot under the locks,
   then wait on a blocking thread (5 s timeout). Completion results are filtered and ranked in
@@ -737,7 +747,8 @@ them. Extensions fill in content through the `workbench` interface (API 1.1; pre
   point plus the server's Markdown, rendered as React elements, never HTML); F12 or Ctrl/Cmd+click
   goes to the definition; completion opens on the server's trigger characters, on typing a word,
   or with Ctrl+Space, and is navigated with the arrow keys and accepted with Enter or Tab. The
-  status bar shows problem counts, the language, and the server's state.
+  status bar shows the language and the server's state (and the counts of every file's
+  problems).
 - **Input**: a hidden textarea at the primary caret receives keys, text, IME composition (shown
   inline while composing), and paste. `editor/keymap.ts` maps keys to operations per platform
   (Ctrl on Windows/Linux, Cmd/Option on macOS). Commands' keybindings are handled in the capture
@@ -896,8 +907,6 @@ These are tracked for later milestones:
   elements; there are no custom interactive views, inline text (inlays), gutter icons, or
   decoration hover text. Menus exist only in the editor and the
   explorer (files), and keybindings support only the `editorFocus` condition.
-- Extension diagnostics count toward the status bar's problem counts only in files with a known
-  language, because the counts live in the language status.
 - There's no keybindings UI; keybindings are edited as TOML. The settings editor doesn't edit
   tables of entries (theme colors, language servers, terminal profiles, keybindings).
 - Screen readers read the cursor's line and selection. Diagnostics under the cursor, hover cards,

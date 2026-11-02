@@ -19,8 +19,8 @@ there without changing `FERRITE_LOG`. **Open Log File** (beside the Output tab) 
 log.
 
 **View: Problems** (`Ctrl+Shift+M`) lists what's wrong with Ferrite and extensions, including
-the warnings and errors notifications showed before they disappeared. The status bar shows how
-many there are.
+the warnings and errors notifications showed before they disappeared, then the problems in
+files. The status bar shows how many errors and warnings there are.
 
 ## Ferrite crashed or was closed unexpectedly
 

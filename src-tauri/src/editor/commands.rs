@@ -128,7 +128,7 @@ pub async fn document_close(window: WebviewWindow, id: u64) -> Result<bool, Comm
   state.counts.forget(id);
   state.syntax.forget(id);
   state.regions.forget(id);
-  window.state::<LspState>().close(id);
+  window.state::<LspState>().close(&closed);
   window.state::<ExtensionsState>().closed(id);
   tracing::info!(document = %id, "closed document");
   ui_state::record_open_files(window.app_handle());
@@ -182,12 +182,7 @@ fn build_view(
   view.foldable = folding::foldable_lines(app, document, &visible);
   let lines = view.start_line..view.end_line;
   (view.diagnostics, view.language) = lsp.view(app, document, lines.clone());
-  view.decorations = extensions.add_to_view(
-    document,
-    lines,
-    &mut view.diagnostics,
-    view.language.as_mut(),
-  );
+  view.decorations = extensions.add_to_view(document, lines, &mut view.diagnostics);
   view
 }
 

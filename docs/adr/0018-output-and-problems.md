@@ -60,8 +60,7 @@ the extension's status is listed while it's stopped. Each group offers what can 
 the extension, open its settings, open `settings.toml`, or show its log. The status bar shows the
 counts when there are any, and clicking them opens Problems.
 
-Problems in files (language server and extension diagnostics) aren't listed. They are per
-document and shown in the editor. Listing them for every open document is a separate feature.
+Problems in files were added later; see [File problems](#file-problems-2026-11-01).
 
 ### Notifications disappear
 
@@ -84,3 +83,26 @@ activity bar unless docked in the side bar, and show and hide with the terminals
   servers. They were formatted before only when `FERRITE_LOG` enabled `debug`.
 - A warning is visible for 20 s unless the user looks at Problems or the status bar counts. That's
   the trade for not piling up popups.
+
+## File problems (2026-11-01)
+
+Problems now also lists problems in files, by file, after Ferrite's and extensions' own.
+
+- **What's listed.** Every open document's diagnostics, from language servers and extensions,
+  and the diagnostics language servers publish for files that aren't open. Before this,
+  `on_diagnostics` dropped a publish for a file that wasn't open. Now it's kept by server and
+  path, at the server's positions (its columns count the server's units, usually UTF-16, so a
+  column can be slightly off for a UTF-8 server). Closing a document keeps its diagnostics the
+  same way, so `cargo check` results (which rust-analyzer doesn't publish again) stay listed.
+  Servers that only check open files clear them with an empty publish. Hints are left out, as
+  in other editors. At most 10,000 are listed, with a count of the rest.
+- **Fetched, not pushed.** `problems_list` assembles the list under the editor lock (then the
+  language servers' lock, then the extension host's, in the usual order). The frontend fetches
+  it at startup, when a document opens or closes, and 250 ms after `diagnosticsChanged` or the
+  new `problemsChanged`, so a burst of publishes while typing fetches once.
+- **The status bar** always shows the total errors and warnings (files, Ferrite, extensions) and
+  opens Problems. It replaces the active document's counts, which are gone from the language
+  status (and `ExtensionHost::problem_counts` with them).
+- **Going to a problem** reveals it in its document, or opens its file at the position. Groups
+  collapse (**Collapse All** beside the tab), and the arrow keys, Home, and End move between
+  rows.

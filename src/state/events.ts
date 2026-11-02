@@ -12,7 +12,7 @@ import {
 } from './extensions'
 import { notify } from './notifications'
 import { previewChanged, refreshPreviews, showPreviewRequested } from './previews'
-import { refreshSettingsProblem } from './problems'
+import { fileProblemsChanged, refreshSettingsProblem } from './problems'
 import { refreshSettingsIfLoaded } from './settings'
 import { showView } from './viewRequests'
 import { refreshDirectories, setIndexing, setWorkspace } from './workspace'
@@ -49,10 +49,16 @@ export function handleEvent(event: AppEvent): void {
         editor.refresh()
       }
       break
+    case 'diagnosticsChanged':
+      editorFor(event.documentId)?.refresh()
+      fileProblemsChanged()
+      break
+    case 'problemsChanged':
+      fileProblemsChanged()
+      break
     case 'searchCounted':
     case 'syntaxUpdated':
     case 'decorationsChanged':
-    case 'diagnosticsChanged':
       editorFor(event.documentId)?.refresh()
       break
     case 'documentOpened':

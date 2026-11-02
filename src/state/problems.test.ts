@@ -1,12 +1,21 @@
-import { beforeEach, describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ExtensionStatus } from '../ipc/extensions'
-import {
+import type { FileProblem, ProblemsList } from '../ipc/problems'
+
+vi.mock('../ipc/problems', () => ({ listFileProblems: vi.fn() }))
+
+const ipc = await import('../ipc/problems')
+const { documentsStore } = await import('./documents')
+const {
   clearReported,
+  countFileProblems,
   countProblems,
   currentProblems,
+  fileProblemsStore,
+  followFileProblems,
   recordProblem,
   reportedProblems,
-} from './problems'
+} = await import('./problems')
 
 const extension = (overrides: Partial<ExtensionStatus>): ExtensionStatus =>
   ({
@@ -69,5 +78,48 @@ describe('problems', () => {
     }
     expect(reportedProblems.get()).toHaveLength(200)
     expect(reportedProblems.get()[0]!.message).toBe('problem 204')
+  })
+})
+
+describe('file problems', () => {
+  const at = (severity: FileProblem['severity']): FileProblem => ({
+    start: { line: 0, column: 0 },
+    end: { line: 0, column: 1 },
+    severity,
+    message: 'm',
+    source: null,
+  })
+  const list = (...severities: FileProblem['severity'][]): ProblemsList => ({
+    files: [{ path: '/a.rs', document: 1, title: 'a.rs', problems: severities.map(at) }],
+    leftOut: 0,
+  })
+
+  it('counts errors and warnings, not information', () => {
+    expect(countFileProblems(list(1, 2, 2, 3))).toEqual({ errors: 1, warnings: 2 })
+  })
+
+  it('fetches once for a burst of changes, and when documents open or close', async () => {
+    vi.useFakeTimers()
+    try {
+      vi.mocked(ipc.listFileProblems).mockResolvedValue(list(1))
+      const stop = followFileProblems()
+      await vi.advanceTimersByTimeAsync(300)
+      // Fetched when following starts.
+      const fetched = vi.mocked(ipc.listFileProblems).mock.calls.length
+      expect(fileProblemsStore.get()).toEqual(list(1))
+
+      vi.mocked(ipc.listFileProblems).mockResolvedValue(list(2))
+      documentsStore.set({ documents: [{ id: 1 } as never], activeId: 1 })
+      documentsStore.set({ documents: [{ id: 1 } as never, { id: 2 } as never], activeId: 2 })
+      // Switching documents doesn't change whose problems are listed.
+      documentsStore.set({ documents: [{ id: 1 } as never, { id: 2 } as never], activeId: 1 })
+      await vi.advanceTimersByTimeAsync(300)
+      expect(vi.mocked(ipc.listFileProblems).mock.calls.length).toBe(fetched + 1)
+      expect(fileProblemsStore.get()).toEqual(list(2))
+      stop()
+    } finally {
+      vi.useRealTimers()
+      documentsStore.set({ documents: [], activeId: null })
+    }
   })
 })

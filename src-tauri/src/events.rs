@@ -41,6 +41,9 @@ pub enum AppEvent {
   SearchCounted { document_id: u64 },
   /// A document's diagnostics changed.
   DiagnosticsChanged { document_id: u64 },
+  /// Diagnostics of files that aren't open changed, so the Problems view
+  /// should be fetched again (as it should after `DiagnosticsChanged`).
+  ProblemsChanged,
   /// A language server started, stopped, or began or finished work.
   LanguageServerChanged,
   /// A background parse finished, so a document's highlighting may have

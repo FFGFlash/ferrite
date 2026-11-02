@@ -18,6 +18,7 @@ mod logging;
 mod lsp;
 mod paths;
 mod perf;
+mod problems;
 mod settings;
 mod terminal;
 mod ui_state;
@@ -155,6 +156,7 @@ pub fn run() {
       settings::settings_problem,
       logging::logs_read,
       logging::logs_file,
+      problems::problems_list,
       ui_state::ui_state_get,
       ui_state::ui_state_save,
       workspace::workspace_get,

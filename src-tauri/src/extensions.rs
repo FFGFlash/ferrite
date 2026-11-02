@@ -27,7 +27,7 @@ use crate::editor::syntax::highlight_snippet;
 use crate::error::CommandError;
 use crate::events::{self, AppEvent};
 use crate::languages::{self, LanguagesState};
-use crate::lsp::{DiagnosticDto, DiagnosticMessageDto, LanguageStatusDto};
+use crate::lsp::{DiagnosticDto, DiagnosticMessageDto};
 use crate::settings::{self, Settings, SettingsState};
 
 const EXTENSIONS_DIR: &str = "extensions";
@@ -61,15 +61,13 @@ impl ExtensionsState {
     }
   }
 
-  /// Adds extension diagnostics on `lines` to a view's (and their counts to
-  /// the language status), and returns the decorations there. Call with the
-  /// editor locked.
+  /// Adds extension diagnostics on `lines` to a view's, and returns the
+  /// decorations there. Call with the editor locked.
   pub fn add_to_view(
     &self,
     document: &Document,
     lines: std::ops::Range<usize>,
     diagnostics: &mut Vec<DiagnosticDto>,
-    language: Option<&mut LanguageStatusDto>,
   ) -> Vec<DecorationDto> {
     let Some(host) = self.host() else {
       return Vec::new();
@@ -95,11 +93,6 @@ impl ExtensionsState {
           severity: diagnostic.severity.number(),
         }),
     );
-    if let Some(language) = language {
-      let (errors, warnings) = host.problem_counts(document);
-      language.errors += errors;
-      language.warnings += warnings;
-    }
     decorations
   }
 

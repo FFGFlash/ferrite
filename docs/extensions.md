@@ -6,7 +6,7 @@ do only what the [extension API](../crates/ferrite-extension-api/wit/extension.w
 - register commands;
 - read open documents and get notified of changes;
 - edit documents through validated, versioned edits;
-- publish diagnostics (squiggles and hover messages);
+- publish diagnostics (squiggles, hover messages, and entries in the Problems view);
 - customize the workbench: color themes, keybindings, context menu items, status bar items,
   side bar views, editor decorations, and previews (formatted pages, such as rendered
   Markdown);

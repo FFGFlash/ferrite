@@ -8,8 +8,10 @@
 //! first, so the server sees each edit right after it is applied (as an
 //! incremental change built from the buffer's edit log). Diagnostics are
 //! stored as byte ranges in the text they were computed for and mapped
-//! through later edits when shown. A server that exits is restarted on
-//! demand a few times, then given up on.
+//! through later edits when shown. Diagnostics a server publishes for files
+//! that aren't open (a workspace-wide check, or a file just closed) are kept
+//! as the server's positions, for the Problems view. A server that exits is
+//! restarted on demand a few times, then given up on.
 //!
 //! Lock order: the editor lock, then this state's lock. Nothing blocks on a
 //! server while holding either: notifications are queued, and requests are
@@ -17,7 +19,7 @@
 
 mod commands;
 
-use std::collections::{HashMap, VecDeque};
+use std::collections::{BTreeMap, HashMap, VecDeque};
 use std::ops::Range;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
@@ -86,6 +88,30 @@ struct Diagnostic {
   severity: u8,
   message: String,
   source: Option<String>,
+}
+
+/// A diagnostic at a position, for the Problems view. In a file that isn't
+/// open, the position is as the server gave it: its columns count the
+/// server's units (usually UTF-16, as the editor's do).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FileDiagnostic {
+  pub start: Position,
+  pub end: Position,
+  /// 1 error, 2 warning, 3 information, 4 hint.
+  pub severity: u8,
+  pub message: String,
+  pub source: Option<String>,
+}
+
+/// What a server's diagnostics were published for.
+enum Published {
+  /// An open document, by id.
+  Document(u64),
+  /// A file that isn't open.
+  File,
+  /// Neither (e.g. a version that's too old, or a URI that isn't a file).
+  Nothing,
 }
 
 /// A document open on a server.
@@ -161,6 +187,22 @@ impl OpenDocument {
     self.diagnostics_version = buffer.version();
   }
 
+  /// The diagnostics at positions in `buffer`, the document's text.
+  fn positioned(&mut self, buffer: &TextBuffer) -> Vec<FileDiagnostic> {
+    self.catch_up(buffer);
+    self
+      .diagnostics
+      .iter()
+      .map(|d| FileDiagnostic {
+        start: buffer.offset_to_utf16(d.range.start).into(),
+        end: buffer.offset_to_utf16(d.range.end).into(),
+        severity: d.severity,
+        message: d.message.clone(),
+        source: d.source.clone(),
+      })
+      .collect()
+  }
+
   fn close(&self) {
     if self.server.is_alive() {
       self
@@ -187,6 +229,8 @@ struct Inner {
   /// Documents waiting for their server to start (or that cannot have one
   /// because it failed), with the path they were checked for.
   waiting: HashMap<DocumentId, (PathBuf, ServerKey)>,
+  /// Diagnostics for files that aren't open, by server and path.
+  unopened: HashMap<ServerKey, BTreeMap<PathBuf, Vec<FileDiagnostic>>>,
   shutting_down: bool,
 }
 
@@ -218,8 +262,6 @@ pub struct ServerStatusDto {
 pub struct LanguageStatusDto {
   pub language: String,
   pub server: Option<ServerStatusDto>,
-  pub errors: usize,
-  pub warnings: usize,
   /// Characters that open completion; `None` without completion support.
   pub completion_triggers: Option<Vec<String>>,
 }
@@ -362,13 +404,49 @@ impl LspState {
     }
   }
 
-  /// Closes a document on its server.
-  pub fn close(&self, id: DocumentId) {
+  /// Closes a document on its server. Its diagnostics are kept as a
+  /// file's, until the server publishes others (servers that only check
+  /// open files clear them).
+  pub fn close(&self, document: &Document) {
     let mut inner = self.lock();
-    inner.waiting.remove(&id);
-    if let Some(open) = inner.documents.remove(&id) {
+    inner.waiting.remove(&document.id());
+    if let Some(mut open) = inner.documents.remove(&document.id()) {
       open.close();
+      let kept = open.positioned(document.buffer());
+      if !kept.is_empty() {
+        inner
+          .unopened
+          .entry(open.key)
+          .or_default()
+          .insert(open.path, kept);
+      }
     }
+  }
+
+  /// An open document's diagnostics, at positions in its text. Called with
+  /// the editor locked.
+  pub fn document_diagnostics(&self, document: &Document) -> Vec<FileDiagnostic> {
+    let mut inner = self.lock();
+    inner
+      .documents
+      .get_mut(&document.id())
+      .map_or_else(Vec::new, |open| open.positioned(document.buffer()))
+  }
+
+  /// Diagnostics servers published for files that aren't open, by path,
+  /// leaving out `open` files (whose diagnostics are their documents').
+  pub fn file_diagnostics(&self, open: &[PathBuf]) -> Vec<(PathBuf, Vec<FileDiagnostic>)> {
+    let inner = self.lock();
+    let mut files: BTreeMap<PathBuf, Vec<FileDiagnostic>> = BTreeMap::new();
+    for (path, diagnostics) in inner.unopened.values().flatten() {
+      if !open.iter().any(|other| same_path(other, path)) {
+        files
+          .entry(path.clone())
+          .or_default()
+          .extend(diagnostics.iter().cloned());
+      }
+    }
+    files.into_iter().collect()
   }
 
   /// Diagnostics on `lines` and the language status, for a view. Called with
@@ -388,8 +466,6 @@ impl LspState {
     let mut status = LanguageStatusDto {
       language: language.name().to_owned(),
       server: None,
-      errors: 0,
-      warnings: 0,
       completion_triggers: None,
     };
     let id = document.id();
@@ -423,8 +499,6 @@ impl LspState {
       .as_ref()
       .map(|completion| completion.trigger_characters.clone().unwrap_or_default());
     open.catch_up(buffer);
-    status.errors = open.diagnostics.iter().filter(|d| d.severity == 1).count();
-    status.warnings = open.diagnostics.iter().filter(|d| d.severity == 2).count();
     let visible = buffer.line_start(lines.start)..buffer.line_end(lines.end.saturating_sub(1));
     let diagnostics = open
       .diagnostics
@@ -461,18 +535,51 @@ impl LspState {
     found
   }
 
-  fn on_diagnostics(&self, key: &ServerKey, params: PublishDiagnosticsParams) -> Option<u64> {
+  fn on_diagnostics(&self, key: &ServerKey, params: PublishDiagnosticsParams) -> Published {
+    // As open files are named (servers may lowercase a drive letter, say),
+    // found before locking as it reads the disk.
+    let path = uri_to_path(&params.uri).map(|path| crate::paths::normalize(&path));
     let mut inner = self.lock();
-    let path = uri_to_path(&params.uri);
-    let (&id, open) = inner.documents.iter_mut().find(|(_, open)| {
+    let found = inner.documents.iter_mut().find(|(_, open)| {
       open.key == *key
         && (open.uri == params.uri
           || path
             .as_deref()
             .is_some_and(|path| same_path(path, &open.path)))
-    })?;
+    });
+    let Some((&id, open)) = found else {
+      let Some(path) = path else {
+        return Published::Nothing;
+      };
+      let files = inner.unopened.entry(key.clone()).or_default();
+      files.retain(|other, _| !same_path(other, &path));
+      let diagnostics: Vec<FileDiagnostic> = params
+        .diagnostics
+        .into_iter()
+        .map(|diagnostic| FileDiagnostic {
+          start: Position {
+            line: diagnostic.range.start.line as usize,
+            column: diagnostic.range.start.character as usize,
+          },
+          end: Position {
+            line: diagnostic.range.end.line as usize,
+            column: diagnostic.range.end.character as usize,
+          },
+          severity: severity(diagnostic.severity),
+          message: diagnostic.message,
+          source: diagnostic.source,
+        })
+        .collect();
+      if !diagnostics.is_empty() {
+        files.insert(path, diagnostics);
+      }
+      return Published::File;
+    };
     let snapshot = match params.version {
-      Some(version) => &open.history.iter().find(|(v, _)| *v == version)?.1,
+      Some(version) => match open.history.iter().find(|(v, _)| *v == version) {
+        Some((_, snapshot)) => snapshot,
+        None => return Published::Nothing,
+      },
       None => open.synced(),
     };
     let text = TextBuffer::from_snapshot(snapshot);
@@ -489,7 +596,12 @@ impl LspState {
       })
       .collect();
     open.diagnostics_version = version;
-    Some(id.get())
+    let open_path = open.path.clone();
+    // The document's diagnostics replace what was kept for the file.
+    if let Some(files) = inner.unopened.get_mut(key) {
+      files.retain(|other, _| !same_path(other, &open_path));
+    }
+    Published::Document(id.get())
   }
 
   fn on_progress(&self, key: &ServerKey, params: &serde_json::Value) -> bool {
@@ -550,6 +662,8 @@ impl LspState {
       inner.documents.remove(id);
     }
     inner.waiting.retain(|_, (_, waiting)| waiting != key);
+    // Its replacement checks the files again.
+    inner.unopened.remove(key);
     affected.into_iter().map(DocumentId::get).collect()
   }
 
@@ -561,8 +675,10 @@ impl LspState {
       inner.configs = None;
       inner.documents.clear();
       inner.waiting.clear();
+      inner.unopened.clear();
       std::mem::take(&mut inner.servers)
     };
+    events::emit(app, AppEvent::ProblemsChanged);
     let app = app.clone();
     spawn(String::from("lsp-restart"), move || {
       for entry in servers.into_values() {
@@ -670,8 +786,12 @@ fn on_server_event(app: &AppHandle, key: &ServerKey, event: ServerEvent) {
         let Ok(params) = serde_json::from_value::<PublishDiagnosticsParams>(params) else {
           return;
         };
-        if let Some(document_id) = lsp.on_diagnostics(key, params) {
-          events::emit(app, AppEvent::DiagnosticsChanged { document_id });
+        match lsp.on_diagnostics(key, params) {
+          Published::Document(document_id) => {
+            events::emit(app, AppEvent::DiagnosticsChanged { document_id });
+          }
+          Published::File => events::emit(app, AppEvent::ProblemsChanged),
+          Published::Nothing => {}
         }
       }
       "$/progress" => {
@@ -691,6 +811,7 @@ fn on_server_event(app: &AppHandle, key: &ServerKey, event: ServerEvent) {
     ServerEvent::Exited => {
       let affected = lsp.on_exit(key);
       events::emit(app, AppEvent::LanguageServerChanged);
+      events::emit(app, AppEvent::ProblemsChanged);
       for document_id in affected {
         events::emit(app, AppEvent::DiagnosticsChanged { document_id });
       }
@@ -724,5 +845,66 @@ impl LspState {
       server: open.server.clone(),
       uri: open.uri.clone(),
     })
+  }
+}
+
+#[cfg(test)]
+mod tests {
+  use ferrite_lsp::lsp_types::{
+    Diagnostic as LspDiagnostic, Position as LspPosition, Range as LspRange,
+  };
+
+  use super::*;
+
+  fn key(name: &str) -> ServerKey {
+    ServerKey {
+      name: name.into(),
+      root: std::env::temp_dir(),
+    }
+  }
+
+  fn publish(path: &Path, messages: &[&str]) -> PublishDiagnosticsParams {
+    PublishDiagnosticsParams {
+      uri: path_to_uri(path).expect("uri"),
+      diagnostics: messages
+        .iter()
+        .map(|&message| LspDiagnostic {
+          range: LspRange::new(LspPosition::new(2, 4), LspPosition::new(2, 8)),
+          severity: Some(DiagnosticSeverity::WARNING),
+          message: message.into(),
+          ..LspDiagnostic::default()
+        })
+        .collect(),
+      version: None,
+    }
+  }
+
+  #[test]
+  fn keeps_diagnostics_published_for_files_that_are_not_open() {
+    let lsp = LspState::default();
+    let a = std::env::temp_dir().join("a.rs");
+    let b = std::env::temp_dir().join("b.rs");
+    assert!(matches!(
+      lsp.on_diagnostics(&key("ra"), publish(&a, &["unused", "dead code"])),
+      Published::File
+    ));
+    lsp.on_diagnostics(&key("ra"), publish(&b, &["unused"]));
+    lsp.on_diagnostics(&key("other"), publish(&a, &["typo"]));
+
+    let files = lsp.file_diagnostics(&[]);
+    assert_eq!(files.len(), 2);
+    assert_eq!(files[0].0, a);
+    let messages: Vec<&str> = files[0].1.iter().map(|d| d.message.as_str()).collect();
+    assert_eq!(messages.len(), 3, "both servers' diagnostics: {messages:?}");
+    assert_eq!(
+      (files[0].1[0].start, files[0].1[0].severity),
+      (Position { line: 2, column: 4 }, 2)
+    );
+
+    // An open file's diagnostics are its document's, so it's left out.
+    assert_eq!(lsp.file_diagnostics(std::slice::from_ref(&a)).len(), 1);
+    // A new publish replaces the server's; an empty one clears them.
+    lsp.on_diagnostics(&key("ra"), publish(&a, &[]));
+    assert_eq!(lsp.file_diagnostics(&[])[0].1.len(), 1);
   }
 }

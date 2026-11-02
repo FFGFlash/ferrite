@@ -200,8 +200,6 @@ export interface ServerStatus {
 export interface LanguageStatus {
   language: string
   server: ServerStatus | null
-  errors: number
-  warnings: number
   /** Characters that open completion; `null` without completion support. */
   completionTriggers: string[] | null
 }

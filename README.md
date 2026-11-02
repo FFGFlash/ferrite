@@ -152,8 +152,8 @@ Load one with **Extensions: Load Development Extension…** (choose its folder, 
 works either way. Markdown's highlighting needs no build either; its preview does (see
 [Extensions](#extensions)).
 
-With a language server, Ferrite also shows errors and warnings as you type (squiggles, plus
-counts in the status bar), shows type information and documentation when the pointer rests on a
+With a language server, Ferrite also shows errors and warnings as you type (squiggles, and in
+**View: Problems** with every file's, counted in the status bar), shows type information and documentation when the pointer rests on a
 symbol, goes to definitions (F12 or Ctrl/⌘+click; holding Ctrl/⌘ underlines the symbol under the
 pointer when it has one), and offers completions (as you type, after `.` and similar
 characters, or with Ctrl+Space). Servers start when you open a file that needs one. The status
@@ -287,10 +287,13 @@ Tabs sit in groups, and any tab can go in any group, beside any other.
   Panel** (`Ctrl+J`) the groups along the bottom (terminals, Problems, Output), keeping their
   places.
 - **Problems and Output** open along the bottom, with the terminals. **Problems**
-  (`Ctrl+Shift+M`, or the counts in the status bar) lists what's wrong with Ferrite and its
-  extensions: an extension that stopped, settings that were ignored, and the warnings and errors
-  notifications showed. Notifications disappear after a while, so this is where to find them
-  again. **Output** (`Ctrl+Shift+U`) shows recent log messages from Ferrite, from each extension,
+  (`Ctrl+Shift+M`, or the counts in the status bar) lists what's wrong. First, problems with
+  Ferrite and its extensions: an extension that stopped, settings that were ignored, and the
+  warnings and errors notifications showed (notifications disappear after a while, so this is
+  where to find them again). Then the errors, warnings, and information in files, by file:
+  those in open files, from language servers and extensions, and those a language server
+  reports for files that aren't open (rust-analyzer checks the whole folder, for example).
+  Choose one to go to it. Groups collapse, and the arrow keys move between rows. **Output** (`Ctrl+Shift+U`) shows recent log messages from Ferrite, from each extension,
   and from each language server (including what the server prints), with **Open Log File** for
   the full log. Each extension in the Extensions view has a **Log** button.
 - **Documents** open in the group last used for documents. The main group (on the right at

@@ -142,6 +142,8 @@ export type AppEvent =
   | { type: 'searchCounted'; documentId: number }
   | { type: 'syntaxUpdated'; documentId: number }
   | { type: 'diagnosticsChanged'; documentId: number }
+  /** Diagnostics of files that aren't open changed. */
+  | { type: 'problemsChanged' }
   | { type: 'languageServerChanged' }
   | { type: 'languagesChanged' }
   | { type: 'documentOpened'; document: DocumentSummary; active: boolean }
