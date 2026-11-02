@@ -118,7 +118,16 @@ export interface DocumentSummary {
   path: string | null
   dirty: boolean
   lineEnding: string
+  /** The encoding's label, e.g. `UTF-8` or `Western (Windows 1252)`. */
   encoding: string
+  /** Its id, e.g. `utf-8` or `windows-1252`. */
+  encodingId: string
+}
+
+/** An encoding a document can be reopened or saved with. */
+export interface EncodingChoice {
+  id: string
+  label: string
 }
 
 export interface SelectionView {
@@ -302,12 +311,23 @@ export const listDocuments = () => call<DocumentSummary[]>('document_list')
 /** Creates an untitled document, optionally with `text`. */
 export const newDocument = (text?: string) =>
   call<DocumentSummary>('document_new', { text: text ?? null })
-export const openDocumentDialog = () => call<DocumentSummary | null>('document_open_dialog')
+/** Asks for a file to open; `null` if cancelled. */
+export const pickFile = () => call<string | null>('document_pick_file')
 export const saveDocument = (id: number) => call<DocumentSummary | null>('document_save', { id })
 export const saveDocumentAs = (id: number) =>
   call<DocumentSummary | null>('document_save_as', { id })
 export const closeDocument = (id: number) => call<boolean>('document_close', { id })
-export const openDocument = (path: string) => call<DocumentSummary>('document_open', { path })
+/**
+ * Opens a file as text. One that looks binary fails with `binary`, unless
+ * `binary` is set (the user chose to open it anyway).
+ */
+export const openDocument = (path: string, binary = false) =>
+  call<DocumentSummary>('document_open', { path, binary })
+export const listEncodings = () => call<EncodingChoice[]>('document_encodings')
+export const reopenWithEncoding = (id: number, encoding: string) =>
+  call<DocumentSummary>('document_reopen_with_encoding', { id, encoding })
+export const saveWithEncoding = (id: number, encoding: string) =>
+  call<DocumentSummary | null>('document_save_with_encoding', { id, encoding })
 
 export const getView = (
   id: number,

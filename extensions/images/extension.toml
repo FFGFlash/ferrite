@@ -1,0 +1,40 @@
+# Images: a viewer for image files. Opening a PNG, JPEG, GIF, WebP, BMP, ICO,
+# or AVIF file shows the picture, with its format, size in pixels, and file
+# size, instead of its bytes as text. SVG files open as text, and in the
+# viewer with Reopen Editor With. See docs/extensions.md#viewers.
+id = "example.images"
+name = "Images"
+version = "0.1.0"
+description = "Shows image files as pictures, with their size and format."
+author = "Ferrite"
+icon = "icon.svg"
+api_version = "1"
+entrypoint = "../target/wasm32-unknown-unknown/release/images.wasm"
+
+[engines]
+ferrite = ">=0.1.0"
+
+# Run by the viewers below, with the file's path as the argument.
+[[commands]]
+id = "example.images.show"
+title = "Show Image"
+hidden = true
+
+[[commands]]
+id = "example.images.showSvg"
+title = "Show SVG Image"
+hidden = true
+
+[[viewers]]
+id = "image"
+title = "Image Viewer"
+patterns = ["*.png", "*.apng", "*.{jpg,jpeg,jpe,jfif}", "*.gif", "*.webp", "*.bmp", "*.ico", "*.avif"]
+command = "example.images.show"
+
+# SVG is text people edit, so the viewer is only an option for it.
+[[viewers]]
+id = "svg"
+title = "Image Viewer"
+patterns = ["*.svg"]
+command = "example.images.showSvg"
+priority = "option"

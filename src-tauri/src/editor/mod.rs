@@ -18,7 +18,7 @@ use std::time::Instant;
 
 use ferrite_core::Editor;
 use ferrite_tasks::Priority;
-use ferrite_workspace::{Abandoned, load_text_file};
+use ferrite_workspace::{Abandoned, FileError, load_text_file};
 use tauri::{AppHandle, Manager, WebviewWindow};
 
 use crate::events::{self, AppEvent, NoticeLevel};
@@ -125,6 +125,18 @@ pub fn open_startup_files(app: &AppHandle, files: Vec<PathBuf>, crashed: Option<
         let started = Instant::now();
         let loaded = match load_text_file(&path) {
           Ok(loaded) => loaded,
+          // An image, say: the workbench opens it in an extension's viewer,
+          // or asks whether to open it as text.
+          Err(FileError::Binary { .. }) => {
+            events::emit(
+              &task_app,
+              AppEvent::OpenFile {
+                path: path.display().to_string(),
+                active: active.as_deref() == Some(path.as_path()),
+              },
+            );
+            continue;
+          }
           Err(error) => {
             tracing::warn!(%error, "could not open file at startup");
             failed.push(error.to_string());

@@ -10,7 +10,7 @@ import { workspaceStore } from '../state/workspace'
 import { themeKind } from '../themes/theme'
 import { entryIcon, type EntryIcon } from './fileIcons'
 import { FileIcon } from './FileIcon'
-import { closePalette, paletteStore } from './paletteState'
+import { closePalette, paletteStore, type QuickPick } from './paletteState'
 import './Palette.css'
 
 interface Item {
@@ -27,23 +27,24 @@ const MAX_ITEMS = 100
 
 /**
  * The command palette. With a `>` prefix it lists commands, with `:` it goes
- * to a line, and otherwise it finds workspace files by fuzzy path.
+ * to a line, and otherwise it finds workspace files by fuzzy path. It also
+ * shows quick picks: lists of choices, such as encodings.
  */
 export function Palette() {
-  const { open, initial, session } = useStore(paletteStore)
+  const { open, initial, session, pick } = useStore(paletteStore)
   if (!open) {
     return null
   }
-  return <PaletteDialog key={session} initial={initial} />
+  return <PaletteDialog key={session} initial={initial} pick={pick} />
 }
 
-function PaletteDialog({ initial }: { initial: string }) {
+function PaletteDialog({ initial, pick }: { initial: string; pick: QuickPick | null }) {
   const [value, setValue] = useState(initial)
   const [selected, setSelected] = useState(0)
   const inputRef = useRef<HTMLInputElement>(null)
   const listRef = useRef<HTMLUListElement>(null)
   const returnFocus = useRef<Element | null>(document.activeElement)
-  const items = usePaletteItems(value)
+  const items = usePaletteItems(value, pick)
 
   useEffect(() => {
     inputRef.current?.focus()
@@ -97,7 +98,7 @@ function PaletteDialog({ initial }: { initial: string }) {
       <div
         className="palette"
         role="dialog"
-        aria-label="Command palette"
+        aria-label={pick ? pick.placeholder : 'Command palette'}
         onMouseDown={event => event.stopPropagation()}
       >
         <input
@@ -107,8 +108,10 @@ function PaletteDialog({ initial }: { initial: string }) {
           aria-expanded="true"
           aria-controls="palette-list"
           aria-activedescendant={activeId}
-          aria-label="Type a file name, > for commands, or : for a line"
-          placeholder="Search files by name (> for commands, : to go to a line)"
+          aria-label={pick ? pick.placeholder : 'Type a file name, > for commands, or : for a line'}
+          placeholder={
+            pick ? pick.placeholder : 'Search files by name (> for commands, : to go to a line)'
+          }
           value={value}
           spellCheck={false}
           onChange={event => setValue(event.target.value)}
@@ -135,7 +138,9 @@ function PaletteDialog({ initial }: { initial: string }) {
               {item.hint && <kbd className="palette__hint">{item.hint}</kbd>}
             </li>
           ))}
-          {items.length === 0 && <li className="palette__empty">{emptyMessage(value)}</li>}
+          {items.length === 0 && (
+            <li className="palette__empty">{pick ? 'No matches' : emptyMessage(value)}</li>
+          )}
         </ul>
       </div>
     </div>
@@ -152,13 +157,23 @@ function emptyMessage(value: string): string {
   return workspaceStore.get().info ? 'No matching files' : 'Open a folder to search its files'
 }
 
-function usePaletteItems(value: string): Item[] {
+function usePaletteItems(value: string, pick: QuickPick | null): Item[] {
   const commands = useCommands()
-  const files = useFileResults(value.startsWith('>') || value.startsWith(':') ? null : value)
+  const files = useFileResults(
+    pick || value.startsWith('>') || value.startsWith(':') ? null : value,
+  )
   const iconTheme = useStore(iconThemeStore)
   const light = useStore(themeKind) === 'light'
 
   return useMemo(() => {
+    if (pick) {
+      return fuzzyFilter(pick.items, value, item => item.label).map(({ item, match }, index) => ({
+        key: `${index}:${item.label}`,
+        label: highlight(item.label, match.indices),
+        detail: item.detail,
+        run: item.run,
+      }))
+    }
     if (value.startsWith('>')) {
       const visible = commands.filter(
         command => !command.hidden && (!command.enabled || command.enabled()),
@@ -186,7 +201,7 @@ function usePaletteItems(value: string): Item[] {
         run: () => void openPath(file.path),
       }
     })
-  }, [value, commands, files, iconTheme, light])
+  }, [value, pick, commands, files, iconTheme, light])
 }
 
 function goToLineItems(text: string): Item[] {

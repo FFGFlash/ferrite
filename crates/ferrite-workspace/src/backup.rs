@@ -24,8 +24,6 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use ferrite_text::TextSnapshot;
 use serde::{Deserialize, Serialize};
 
-use crate::MAX_FILE_BYTES;
-
 const FORMAT_LINE: &str = "ferrite-backup 1";
 const LOCK_FILE: &str = "lock";
 const EXTENSION: &str = "backup";
@@ -41,6 +39,11 @@ pub struct BackupMeta {
   /// Byte offset of the primary cursor.
   #[serde(default)]
   pub cursor: usize,
+  /// The id of the file's encoding ([`crate::TextEncoding::id`]), so the
+  /// file is read the same way when the backup is restored. Older backups
+  /// have none: the encoding is detected again.
+  #[serde(default, skip_serializing_if = "Option::is_none")]
+  pub encoding: Option<String>,
 }
 
 /// A document recovered from a session that ended without cleaning up.
@@ -243,10 +246,7 @@ fn read_backup(path: &Path) -> io::Result<RecoveredBackup> {
   let meta: BackupMeta =
     serde_json::from_str(&line).map_err(|error| invalid(&format!("invalid metadata: {error}")))?;
   let mut bytes = Vec::new();
-  reader.take(MAX_FILE_BYTES + 1).read_to_end(&mut bytes)?;
-  if bytes.len() as u64 > MAX_FILE_BYTES {
-    return Err(invalid("too large"));
-  }
+  reader.read_to_end(&mut bytes)?;
   let text = String::from_utf8(bytes).map_err(|_| invalid("the text is not UTF-8"))?;
   Ok(RecoveredBackup {
     meta,
@@ -281,6 +281,7 @@ mod tests {
       path: path.map(PathBuf::from),
       title: title.into(),
       cursor: 3,
+      encoding: path.map(|_| "windows-1252".into()),
     }
   }
 

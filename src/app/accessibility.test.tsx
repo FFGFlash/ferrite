@@ -51,7 +51,7 @@ describe('accessibility (axe)', () => {
   })
 
   afterEach(() => {
-    act(() => paletteStore.set({ open: false, initial: '', session: 0 }))
+    act(() => paletteStore.set({ open: false, initial: '', session: 0, pick: null }))
   })
 
   it('finds no problems in the workbench and its views', async () => {
@@ -88,6 +88,7 @@ describe('accessibility (axe)', () => {
           views: [],
           decorations: [],
           previews: [],
+          viewers: [],
           languages: [],
           languageServers: [],
         },
@@ -163,6 +164,7 @@ describe('accessibility (axe)', () => {
           dirty: id === 2,
           lineEnding: 'LF' as const,
           encoding: 'UTF-8',
+          encodingId: 'utf-8',
         })),
         activeId: 1,
       })
@@ -194,7 +196,7 @@ describe('accessibility (axe)', () => {
       notify('error', 'Saving failed.')
     })
     expect(await axeViolations()).toEqual([])
-    act(() => paletteStore.set({ open: false, initial: '', session: 0 }))
+    act(() => paletteStore.set({ open: false, initial: '', session: 0, pick: null }))
 
     act(() =>
       openContextMenu(10, 10, [
@@ -223,6 +225,7 @@ describe('accessibility (axe)', () => {
       dirty: false,
       lineEnding: 'LF',
       encoding: 'UTF-8',
+      encodingId: 'utf-8',
     }
     render(
       <main>

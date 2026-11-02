@@ -44,6 +44,7 @@ const themes = {
     views: [],
     decorations: [],
     previews: [],
+    viewers: [],
     languages: [],
     languageServers: [],
   },

@@ -20,11 +20,14 @@ ferrite-text = { path = "crates/ferrite-text" }
 ferrite-workspace = { path = "crates/ferrite-workspace" }
 
 base64 = "0.23.1"
+# Guesses the encoding of text files that aren't UTF-8, for encoding_rs.
+chardetng = "1.0.0"
 criterion = { version = "0.8.2", default-features = false, features = [
   "cargo_bench_support",
   "html_reports",
   "plotters",
 ] }
+encoding_rs = "0.8.42"
 globset = "0.4.20"
 lsp-types = "0.97.0"
 ignore = "0.4.33"

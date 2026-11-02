@@ -33,7 +33,7 @@ fn edits_round_trip_through_disk() {
   let stamp = save_text_file(
     &path,
     &point.snapshot,
-    point.has_bom,
+    point.encoding,
     point.expected_stamp.as_ref(),
   )
   .expect("saves");
@@ -69,14 +69,14 @@ fn saving_over_an_external_change_is_refused_until_confirmed() {
   let result = save_text_file(
     &path,
     &point.snapshot,
-    point.has_bom,
+    point.encoding,
     point.expected_stamp.as_ref(),
   );
   assert!(matches!(result, Err(FileError::ModifiedOnDisk { .. })));
   assert!(document.is_dirty(), "a refused save keeps the edits dirty");
 
   // The user chose to overwrite: save without the expected stamp.
-  let stamp = save_text_file(&path, &point.snapshot, point.has_bom, None).expect("saves");
+  let stamp = save_text_file(&path, &point.snapshot, point.encoding, None).expect("saves");
   document.mark_saved(&point, path.clone(), stamp);
   assert_eq!(fs::read_to_string(&path).expect("read"), "");
   assert!(!document.is_dirty());
@@ -97,7 +97,7 @@ fn save_as_gives_untitled_documents_a_path() {
 
   let point = document.save_point();
   assert!(point.expected_stamp.is_none());
-  let stamp = save_text_file(&path, &point.snapshot, point.has_bom, None).expect("saves");
+  let stamp = save_text_file(&path, &point.snapshot, point.encoding, None).expect("saves");
   document.mark_saved(&point, path.clone(), stamp);
 
   assert_eq!(document.title(), "new.txt");

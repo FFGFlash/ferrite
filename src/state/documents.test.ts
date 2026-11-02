@@ -1,10 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { DocumentSummary } from '../ipc/editor'
+import type { FileTab } from './viewers'
 
 vi.mock('../ipc/editor', () => ({
   listDocuments: vi.fn(),
   newDocument: vi.fn(),
-  openDocumentDialog: vi.fn(),
+  pickFile: vi.fn(),
   saveDocument: vi.fn(),
   saveDocumentAs: vi.fn(),
   closeDocument: vi.fn(),
@@ -14,6 +15,9 @@ vi.mock('../ipc/editor', () => ({
 const ipc = await import('../ipc/editor')
 const documents = await import('./documents')
 const { notifications } = await import('./notifications')
+const { extensionsStore } = await import('./extensions')
+const viewers = await import('./viewers')
+const { CommandError } = await import('../ipc')
 
 const summary = (id: number, overrides: Partial<DocumentSummary> = {}): DocumentSummary => ({
   id,
@@ -22,6 +26,7 @@ const summary = (id: number, overrides: Partial<DocumentSummary> = {}): Document
   dirty: false,
   lineEnding: 'LF',
   encoding: 'UTF-8',
+  encodingId: 'utf-8',
   ...overrides,
 })
 
@@ -34,7 +39,8 @@ describe('documents store', () => {
 
   it('adds new and opened documents and activates them', async () => {
     vi.mocked(ipc.newDocument).mockResolvedValue(summary(1))
-    vi.mocked(ipc.openDocumentDialog).mockResolvedValueOnce(summary(2)).mockResolvedValueOnce(null)
+    vi.mocked(ipc.pickFile).mockResolvedValueOnce('/w/file2.txt').mockResolvedValueOnce(null)
+    vi.mocked(ipc.openDocument).mockResolvedValueOnce(summary(2))
     await documents.newFile()
     await documents.openFile()
     await documents.openFile()
@@ -107,5 +113,55 @@ describe('documents store', () => {
     expect(documents.documentsStore.get()).toBe(before)
     documents.setDirty(1, true)
     expect(documents.documentsStore.get().documents[0]?.dirty).toBe(true)
+  })
+
+  describe('files that open other than as text', () => {
+    const shown: (FileTab | null)[] = []
+    beforeEach(() => {
+      shown.length = 0
+      viewers.setFileTabHandler((_, tab) => {
+        shown.push(tab)
+        return false
+      })
+      extensionsStore.set([])
+    })
+
+    const imagesExtension = (priority: 'default' | 'option') =>
+      ({
+        id: 'example.images',
+        state: 'inactive',
+        contributions: {
+          viewers: [
+            {
+              id: 'image',
+              fullId: 'example.images.image',
+              title: 'Image Viewer',
+              patterns: ['*.png'],
+              command: 'example.images.show',
+              priority,
+            },
+          ],
+        },
+      }) as never
+
+    it('opens files in the viewer that is their default', async () => {
+      extensionsStore.set([imagesExtension('default')])
+      expect(await documents.openPath('/w/cat.PNG')).toBeNull()
+      expect(ipc.openDocument).not.toHaveBeenCalled()
+      expect(shown).toEqual([null, { viewer: 'example.images.image', path: '/w/cat.PNG' }])
+    })
+
+    it('asks before opening a binary file as text, unless told to', async () => {
+      extensionsStore.set([imagesExtension('option')])
+      vi.mocked(ipc.openDocument).mockRejectedValueOnce(new CommandError('binary', 'binary'))
+      expect(await documents.openPath('/w/cat.png')).toBeNull()
+      expect(shown.at(-1)).toEqual({ viewer: null, path: '/w/cat.png' })
+      expect(notifications.get()).toEqual([])
+
+      vi.mocked(ipc.openDocument).mockResolvedValueOnce(summary(5, { path: '/w/cat.png' }))
+      const opened = await documents.openPath('/w/cat.png', undefined, { asText: true })
+      expect(opened?.id).toBe(5)
+      expect(ipc.openDocument).toHaveBeenLastCalledWith('/w/cat.png', true)
+    })
   })
 })

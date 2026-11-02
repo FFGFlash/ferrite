@@ -73,6 +73,7 @@ describe('ExplorerPanel', () => {
       dirty: false,
       lineEnding: 'LF',
       encoding: 'UTF-8',
+      encodingId: 'utf-8',
     }))
     documentsStore.set({ documents: [], activeId: null })
     fileProblemsStore.set({ files: [], leftOut: 0 })
@@ -208,7 +209,7 @@ describe('ExplorerPanel', () => {
     expect(layoutStore.get().expanded).toEqual(['/w/src'])
 
     await user.click(within(tree).getByText('README.md'))
-    expect(editorIpc.openDocument).toHaveBeenCalledWith('/w/README.md')
+    expect(editorIpc.openDocument).toHaveBeenCalledWith('/w/README.md', false)
   })
 
   it('navigates with the keyboard', async () => {
@@ -247,6 +248,7 @@ describe('ExplorerPanel', () => {
       dirty: false,
       lineEnding: 'LF',
       encoding: 'UTF-8',
+      encodingId: 'utf-8',
     }
     await act(async () => documentsStore.set({ documents: [summary], activeId: 3 }))
     const row = (await within(tree).findByText('main.rs')).closest('li')
@@ -330,7 +332,7 @@ describe('ExplorerPanel', () => {
     expect(await within(tree).findByText('notes.md')).toBeInTheDocument()
     expect(within(tree).queryByRole('textbox')).not.toBeInTheDocument()
     expect(within(tree).getByText('notes.md').closest('li')).toHaveAttribute('data-focused')
-    expect(editorIpc.openDocument).toHaveBeenCalledWith('/w/notes.md')
+    expect(editorIpc.openDocument).toHaveBeenCalledWith('/w/notes.md', false)
   })
 
   it("creates a folder inside a folder from the folder's menu", async () => {
@@ -607,6 +609,7 @@ describe('ExplorerPanel', () => {
           views: [],
           decorations: [],
           previews: [],
+          viewers: [],
           languages: [],
           languageServers: [],
         },

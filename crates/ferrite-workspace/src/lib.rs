@@ -5,6 +5,7 @@
 
 mod backup;
 mod create;
+mod encoding;
 mod entries;
 mod file;
 mod filters;
@@ -16,9 +17,10 @@ mod watcher;
 
 pub use backup::{Abandoned, BackupMeta, BackupSession, RecoveredBackup};
 pub use create::{Created, create_entry};
+pub use encoding::{DecodeOptions, ENCODING_CHOICES, EncodeError, TextEncoding};
 pub use entries::{EntryError, copy_entry, delete_entry, move_entry, rename_entry};
 pub use file::{
-  FileError, FileStamp, LoadedFile, MAX_FILE_BYTES, load_text_file, save_text_file,
+  FileError, FileStamp, LoadedFile, load_text_file, load_text_file_with, save_text_file,
   write_file_atomically,
 };
 pub use filters::{ExcludeFilter, FilterError, to_slash};

@@ -1,10 +1,11 @@
 //! Loading and saving text files.
 //!
-//! Files are read as UTF-8. A leading byte order mark is stripped on load and
-//! restored on save; all other bytes, including line endings, round-trip
-//! unchanged. Saving writes a temporary file beside the target, flushes it to
-//! disk, and renames it over the target, so a crash never leaves a partially
-//! written file.
+//! Files are read whole, in the encoding [`crate::encoding`] detects (or the
+//! one asked for), and saved in the same encoding. A byte order mark is
+//! stripped on load and restored on save; all other bytes, including line
+//! endings, round-trip unchanged. Saving writes a temporary file beside the
+//! target, flushes it to disk, and renames it over the target, so a crash
+//! never leaves a partially written file.
 
 use std::fs;
 use std::io::{self, BufWriter, Write};
@@ -13,11 +14,7 @@ use std::time::{Duration, SystemTime};
 
 use ferrite_text::TextSnapshot;
 
-/// Largest file that will be opened. Larger files are refused rather than
-/// partially loaded.
-pub const MAX_FILE_BYTES: u64 = 256 * 1024 * 1024;
-
-const UTF8_BOM: &[u8] = b"\xEF\xBB\xBF";
+use crate::encoding::{self, DecodeError, DecodeOptions, EncodeError, TextEncoding};
 
 /// The observable on-disk state of a file, recorded when it was read or
 /// written. A different stamp later means someone else changed the file.
@@ -48,7 +45,7 @@ impl FileStamp {
 #[derive(Debug)]
 pub struct LoadedFile {
   pub text: String,
-  pub has_bom: bool,
+  pub encoding: TextEncoding,
   pub stamp: FileStamp,
 }
 
@@ -62,14 +59,24 @@ pub enum FileError {
   IsDirectory { path: PathBuf },
   #[error("{} already exists", .path.display())]
   AlreadyExists { path: PathBuf },
-  #[error("{} is too large to open ({size} bytes; the limit is {limit} bytes)", .path.display())]
-  TooLarge {
+  #[error("{} is binary or uses an unsupported text encoding", .path.display())]
+  Binary { path: PathBuf },
+  #[error("{} isn't valid {encoding} text", .path.display())]
+  InvalidText { path: PathBuf, encoding: String },
+  #[error(
+    "{} can't be opened as {encoding}: saving it would change bytes you didn't edit",
+    .path.display()
+  )]
+  LossyEncoding { path: PathBuf, encoding: String },
+  #[error(
+    "{} can't be saved as {encoding}, which has no {character:?}. Save it with another encoding",
+    .path.display()
+  )]
+  Unencodable {
     path: PathBuf,
-    size: u64,
-    limit: u64,
+    encoding: String,
+    character: char,
   },
-  #[error("{} is not valid UTF-8 (first invalid byte at offset {offset})", .path.display())]
-  NotUtf8 { path: PathBuf, offset: usize },
   #[error("{} was changed on disk since it was opened", .path.display())]
   ModifiedOnDisk { path: PathBuf },
   #[error("could not access {}: {source}", .path.display())]
@@ -98,58 +105,57 @@ impl FileError {
       | Self::PermissionDenied { path }
       | Self::IsDirectory { path }
       | Self::AlreadyExists { path }
-      | Self::TooLarge { path, .. }
-      | Self::NotUtf8 { path, .. }
+      | Self::Binary { path }
+      | Self::InvalidText { path, .. }
+      | Self::LossyEncoding { path, .. }
+      | Self::Unencodable { path, .. }
       | Self::ModifiedOnDisk { path }
       | Self::Io { path, .. } => path,
     }
   }
 }
 
+/// Reads a text file whole, detecting its encoding. Files that look binary
+/// are refused with [`FileError::Binary`].
 pub fn load_text_file(path: &Path) -> Result<LoadedFile, FileError> {
-  load_with_limit(path, MAX_FILE_BYTES)
+  load_text_file_with(path, DecodeOptions::default())
 }
 
-fn load_with_limit(path: &Path, limit: u64) -> Result<LoadedFile, FileError> {
+/// Reads a text file whole, in the encoding `options` names (or detecting
+/// one), and if asked, even if it looks binary.
+pub fn load_text_file_with(path: &Path, options: DecodeOptions) -> Result<LoadedFile, FileError> {
   let metadata = fs::metadata(path).map_err(|error| FileError::from_io(path, error))?;
   if metadata.is_dir() {
     return Err(FileError::IsDirectory {
       path: path.to_path_buf(),
     });
   }
-  let too_large = |size| FileError::TooLarge {
-    path: path.to_path_buf(),
-    size,
-    limit,
-  };
-  if metadata.len() > limit {
-    return Err(too_large(metadata.len()));
-  }
-
   // Stamp from before the read: if the file changes in between, the next save
   // sees a mismatch and asks before overwriting.
   let stamp = FileStamp::of(&metadata);
-  let mut bytes = fs::read(path).map_err(|error| FileError::from_io(path, error))?;
-  if bytes.len() as u64 > limit {
-    return Err(too_large(bytes.len() as u64));
-  }
-
-  let has_bom = bytes.starts_with(UTF8_BOM);
-  if has_bom {
-    bytes.drain(..UTF8_BOM.len());
-  }
-  let text = String::from_utf8(bytes).map_err(|error| FileError::NotUtf8 {
-    path: path.to_path_buf(),
-    offset: error.utf8_error().valid_up_to() + if has_bom { UTF8_BOM.len() } else { 0 },
+  let bytes = fs::read(path).map_err(|error| FileError::from_io(path, error))?;
+  let path = path.to_path_buf();
+  let (text, encoding) = encoding::decode(bytes, options).map_err(|error| match error {
+    DecodeError::Binary => FileError::Binary { path },
+    DecodeError::Invalid(encoding) => FileError::InvalidText {
+      path,
+      encoding: encoding.label(),
+    },
+    DecodeError::Lossy(encoding) => FileError::LossyEncoding {
+      path,
+      encoding: encoding.label(),
+    },
   })?;
   Ok(LoadedFile {
     text,
-    has_bom,
+    encoding,
     stamp,
   })
 }
 
-/// Atomically writes `snapshot` to `path` and returns the new stamp.
+/// Atomically writes `snapshot` to `path` in `encoding` and returns the new
+/// stamp. Text the encoding can't represent fails with
+/// [`FileError::Unencodable`], and the file is left as it was.
 ///
 /// If `expected` is given and the file on disk no longer matches it, nothing
 /// is written and [`FileError::ModifiedOnDisk`] is returned. A file that was
@@ -158,7 +164,7 @@ fn load_with_limit(path: &Path, limit: u64) -> Result<LoadedFile, FileError> {
 pub fn save_text_file(
   path: &Path,
   snapshot: &TextSnapshot,
-  has_bom: bool,
+  encoding: TextEncoding,
   expected: Option<&FileStamp>,
 ) -> Result<FileStamp, FileError> {
   let target = resolve_link(path)?;
@@ -192,12 +198,17 @@ pub fn save_text_file(
     .map_err(io_error)?;
   {
     let mut writer = BufWriter::new(temp.as_file_mut());
-    if has_bom {
-      writer.write_all(UTF8_BOM).map_err(io_error)?;
-    }
-    for chunk in snapshot.chunks() {
-      writer.write_all(chunk.as_bytes()).map_err(io_error)?;
-    }
+    // On failure the temporary file is removed when dropped.
+    encoding
+      .write(snapshot.chunks(), &mut writer)
+      .map_err(|error| match error {
+        EncodeError::Unmappable(character) => FileError::Unencodable {
+          path: target.clone(),
+          encoding: encoding.label(),
+          character,
+        },
+        EncodeError::Io(error) => io_error(error),
+      })?;
     writer.flush().map_err(io_error)?;
   }
   #[cfg(unix)]
@@ -325,25 +336,46 @@ mod tests {
 
     let loaded = load_text_file(&plain).expect("loads");
     assert_eq!(loaded.text, "héllo\r\n");
-    assert!(!loaded.has_bom);
+    assert_eq!(loaded.encoding, TextEncoding::UTF8);
     let loaded = load_text_file(&bom).expect("loads");
     assert_eq!(loaded.text, "hi");
-    assert!(loaded.has_bom);
+    assert_eq!(loaded.encoding, TextEncoding::UTF8_BOM);
   }
 
   #[test]
-  fn reports_invalid_utf8_with_its_offset() {
+  fn loads_other_encodings_and_refuses_binary_files_unless_asked() {
     let dir = tempfile::tempdir().expect("temp dir");
-    let path = dir.path().join("latin1.txt");
-    fs::write(&path, b"caf\xE9").expect("write");
+    let latin1 = dir.path().join("latin1.txt");
+    fs::write(&latin1, b"caf\xE9 cr\xE8me").expect("write");
+    let loaded = load_text_file(&latin1).expect("loads");
+    assert_eq!(loaded.text, "café crème");
+    assert_eq!(loaded.encoding.id(), "windows-1252");
+
+    let binary = dir.path().join("image.png");
+    fs::write(&binary, b"\x89PNG\r\n\x1a\n\0\0\0\rIHDR").expect("write");
     assert!(matches!(
-      load_text_file(&path),
-      Err(FileError::NotUtf8 { offset: 3, .. })
+      load_text_file(&binary),
+      Err(FileError::Binary { .. })
+    ));
+    let anyway = DecodeOptions {
+      binary: true,
+      ..DecodeOptions::default()
+    };
+    let loaded = load_text_file_with(&binary, anyway).expect("loads");
+    assert_eq!(loaded.text.chars().count(), 16);
+
+    let as_utf8 = DecodeOptions {
+      encoding: Some(TextEncoding::UTF8),
+      binary: false,
+    };
+    assert!(matches!(
+      load_text_file_with(&latin1, as_utf8),
+      Err(FileError::InvalidText { encoding, .. }) if encoding == "UTF-8"
     ));
   }
 
   #[test]
-  fn reports_missing_files_directories_and_size_limits() {
+  fn reports_missing_files_and_directories() {
     let dir = tempfile::tempdir().expect("temp dir");
     assert!(matches!(
       load_text_file(&dir.path().join("missing")),
@@ -353,16 +385,40 @@ mod tests {
       load_text_file(dir.path()),
       Err(FileError::IsDirectory { .. })
     ));
-    let path = dir.path().join("big.txt");
-    fs::write(&path, "0123456789").expect("write");
+  }
+
+  #[test]
+  fn saves_in_the_files_encoding() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let path = dir.path().join("utf16.txt");
+    fs::write(&path, b"\xFF\xFEa\0\r\0\n\0").expect("write");
+    let loaded = load_text_file(&path).expect("loads");
+    let edited = snapshot(&format!("{}é", loaded.text));
+    save_text_file(&path, &edited, loaded.encoding, Some(&loaded.stamp)).expect("saves");
+    assert_eq!(fs::read(&path).expect("read"), b"\xFF\xFEa\0\r\0\n\0\xE9\0");
+  }
+
+  #[test]
+  fn refuses_to_save_characters_the_encoding_lacks() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let path = dir.path().join("latin1.txt");
+    fs::write(&path, b"caf\xE9").expect("write");
+    let loaded = load_text_file(&path).expect("loads");
+    let result = save_text_file(
+      &path,
+      &snapshot("snowman ☃"),
+      loaded.encoding,
+      Some(&loaded.stamp),
+    );
     assert!(matches!(
-      load_with_limit(&path, 4),
-      Err(FileError::TooLarge {
-        size: 10,
-        limit: 4,
-        ..
+      result,
+      Err(FileError::Unencodable {
+        character: '☃', ..
       })
     ));
+    assert_eq!(fs::read(&path).expect("read"), b"caf\xE9");
+    let entries: Vec<_> = fs::read_dir(dir.path()).expect("list").collect();
+    assert_eq!(entries.len(), 1, "the temporary file is removed");
   }
 
   #[test]
@@ -376,7 +432,7 @@ mod tests {
     save_text_file(
       &path,
       &buffer.snapshot(),
-      loaded.has_bom,
+      loaded.encoding,
       Some(&loaded.stamp),
     )
     .expect("saves");
@@ -387,7 +443,7 @@ mod tests {
   fn save_creates_new_files_and_leaves_no_temporary_files() {
     let dir = tempfile::tempdir().expect("temp dir");
     let path = dir.path().join("new.txt");
-    let stamp = save_text_file(&path, &snapshot("fresh"), false, None).expect("saves");
+    let stamp = save_text_file(&path, &snapshot("fresh"), TextEncoding::UTF8, None).expect("saves");
     assert_eq!(fs::read_to_string(&path).expect("read"), "fresh");
     assert_eq!(FileStamp::read(&path).expect("stat"), Some(stamp));
     let entries: Vec<_> = fs::read_dir(dir.path()).expect("list").collect();
@@ -402,7 +458,12 @@ mod tests {
     let loaded = load_text_file(&path).expect("loads");
 
     fs::write(&path, "changed by another program").expect("write");
-    let result = save_text_file(&path, &snapshot("mine"), false, Some(&loaded.stamp));
+    let result = save_text_file(
+      &path,
+      &snapshot("mine"),
+      TextEncoding::UTF8,
+      Some(&loaded.stamp),
+    );
     assert!(matches!(result, Err(FileError::ModifiedOnDisk { .. })));
     assert_eq!(
       fs::read_to_string(&path).expect("read"),
@@ -410,7 +471,7 @@ mod tests {
     );
 
     // Without an expected stamp (the user chose to overwrite) the save proceeds.
-    save_text_file(&path, &snapshot("mine"), false, None).expect("saves");
+    save_text_file(&path, &snapshot("mine"), TextEncoding::UTF8, None).expect("saves");
     assert_eq!(fs::read_to_string(&path).expect("read"), "mine");
   }
 
@@ -421,7 +482,13 @@ mod tests {
     fs::write(&path, "x").expect("write");
     let loaded = load_text_file(&path).expect("loads");
     fs::remove_file(&path).expect("remove");
-    save_text_file(&path, &snapshot("back"), false, Some(&loaded.stamp)).expect("saves");
+    save_text_file(
+      &path,
+      &snapshot("back"),
+      TextEncoding::UTF8,
+      Some(&loaded.stamp),
+    )
+    .expect("saves");
     assert_eq!(fs::read_to_string(&path).expect("read"), "back");
   }
 
@@ -434,7 +501,7 @@ mod tests {
     permissions.set_readonly(true);
     fs::set_permissions(&path, permissions.clone()).expect("chmod");
 
-    let result = save_text_file(&path, &snapshot("nope"), false, None);
+    let result = save_text_file(&path, &snapshot("nope"), TextEncoding::UTF8, None);
     assert!(matches!(result, Err(FileError::PermissionDenied { .. })));
 
     #[allow(clippy::permissions_set_readonly_false)]

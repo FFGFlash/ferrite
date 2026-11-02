@@ -152,6 +152,8 @@ export type AppEvent =
   | { type: 'languageServerChanged' }
   | { type: 'languagesChanged' }
   | { type: 'documentOpened'; document: DocumentSummary; active: boolean }
+  /** A file named at startup that isn't text, to open in a viewer or ask about. */
+  | { type: 'openFile'; path: string; active: boolean }
   | { type: 'indexStatus'; indexing: boolean; files: number; truncated: boolean }
   | { type: 'extensionsChanged' }
   /** `id` is the extension's id, `extension` its name. */

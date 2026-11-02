@@ -356,12 +356,12 @@ function renderNode(tree: Tree, index: number): ReactNode {
 const HIGHLIGHT_RETRY_MS = 300
 
 /**
- * Loads a preview's content whenever it changes. While one load is running,
+ * Loads a preview's (or viewer's) content whenever it changes. While one load is running,
  * changes only mark it stale, so a stream of edits causes one load at a
  * time. Content whose code blocks weren't all highlighted in time is
  * fetched once more.
  */
-function useContent(id: string): PreviewContent | null {
+export function useContent(id: string): PreviewContent | null {
   const version = useStore(previewVersions)[id] ?? 0
   const [content, setContent] = useState<PreviewContent | null>(null)
   const loading = useRef<{ id: string; stale: boolean } | null>(null)

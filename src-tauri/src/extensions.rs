@@ -479,7 +479,31 @@ pub async fn extension_readme_image(
   .map_err(CommandError::internal)?
 }
 
-/// The user closed a preview's tab.
+/// Opens a file in an extension's viewer (`<extension id>.<viewer id>`), or
+/// fills it in again, and waits for the extension to do so. Returns the
+/// viewer's preview id, by which its content and pictures are fetched and
+/// which `extension_preview_closed` closes.
+#[tauri::command]
+pub async fn extension_viewer_open(
+  app: AppHandle,
+  viewer: String,
+  path: String,
+) -> Result<String, CommandError> {
+  let path = crate::paths::normalize(Path::new(&path));
+  let ticket = {
+    let state = app.state::<ExtensionsState>();
+    host(&state)?
+      .open_viewer(&viewer, &path)
+      .map_err(|message| CommandError::new("extension", message))?
+  };
+  tauri::async_runtime::spawn_blocking(move || ticket.wait())
+    .await
+    .map_err(CommandError::internal)?
+    .map_err(|message| CommandError::new("extension", message))?;
+  Ok(ferrite_extension_host::viewer_id(&viewer, &path))
+}
+
+/// The user closed a preview's tab, or a viewer's.
 #[tauri::command]
 pub fn extension_preview_closed(state: State<'_, ExtensionsState>, preview: String) {
   if let Some(host) = state.host() {

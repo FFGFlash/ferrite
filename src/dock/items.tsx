@@ -17,6 +17,7 @@ import { EditorView } from '../editor/EditorView'
 import type { DocumentSummary } from '../ipc/editor'
 import type { PreviewInfo } from '../ipc/extensions'
 import { PreviewPane } from '../panels/PreviewPane'
+import { ViewerPane } from '../panels/ViewerPane'
 import { documentsStore } from '../state/documents'
 import { extensionsStore } from '../state/extensions'
 import { iconThemeStore } from '../state/iconTheme'
@@ -25,7 +26,7 @@ import { useStore } from '../state/store'
 import { openNewTerminalMenu } from '../terminal/profileMenu'
 import { closeTerminal, getSession, terminalsStore, type TerminalTab } from '../terminal/terminals'
 import { themeKind } from '../themes/theme'
-import { documentItem, itemId, showItem } from './dock'
+import { documentItem, itemId, parseViewerItem, showItem } from './dock'
 import { itemKind, type ItemId } from './model'
 
 export type ResolvedItem =
@@ -34,6 +35,10 @@ export type ResolvedItem =
   | { kind: 'terminal'; item: ItemId; terminal: TerminalTab }
   | { kind: 'preview'; item: ItemId; preview: PreviewInfo }
   | { kind: 'page'; item: ItemId; page: PageDescriptor }
+  /** A file in an extension's viewer, or (`viewer: null`) a binary file to open as text. */
+  | { kind: 'viewer'; item: ItemId; viewer: string | null; path: string }
+
+const fileName = (path: string) => path.split(/[/\\]/).pop() || path
 
 /** The items that exist now (open documents, known views, running terminals, open previews, pages). */
 export function useResolver(): (item: ItemId) => ResolvedItem | null {
@@ -65,6 +70,8 @@ export function useResolver(): (item: ItemId) => ResolvedItem | null {
         const page = findPage(id, extensions)
         return page ? { kind: 'page', item, page } : null
       }
+      case 'viewer':
+        return { kind: 'viewer', item, ...parseViewerItem(item) }
       default:
         return null
     }
@@ -83,6 +90,8 @@ export function itemTitle(resolved: ResolvedItem): string {
       return resolved.preview.title
     case 'page':
       return resolved.page.title
+    case 'viewer':
+      return fileName(resolved.path)
   }
 }
 
@@ -113,6 +122,8 @@ export function itemTooltip(resolved: ResolvedItem): string {
     }
     case 'page':
       return resolved.page.title
+    case 'viewer':
+      return resolved.path
   }
 }
 
@@ -156,6 +167,15 @@ export function ItemIcon({ resolved, className = 'dock-tab__icon', size = 16 }: 
       const PageIcon = resolved.page.icon
       return <PageIcon className={className} size={size} strokeWidth={1.5} aria-hidden="true" />
     }
+    case 'viewer':
+      return (
+        <FileIcon
+          className={className}
+          size={size}
+          kind="file"
+          icon={entryIcon(fileName(resolved.path), null, iconTheme, light)}
+        />
+      )
   }
 }
 
@@ -205,6 +225,19 @@ export function ItemContent({ resolved }: { resolved: ResolvedItem }): ReactNode
         </div>
       )
     }
+    case 'viewer':
+      return (
+        <div className="dock-view">
+          <ErrorBoundary name={`The viewer of ${fileName(resolved.path)}`} resetKey={resolved.item}>
+            <ViewerPane
+              key={resolved.item}
+              item={resolved.item}
+              viewer={resolved.viewer}
+              path={resolved.path}
+            />
+          </ErrorBoundary>
+        </div>
+      )
   }
 }
 

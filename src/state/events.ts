@@ -3,7 +3,7 @@ import { editorFor, mountedEditors } from '../editor/activeEditor'
 import { fileDrag } from '../components/drag'
 import { subscribeToEvents, type AppEvent } from '../ipc/workspace'
 import { applySettings } from './appearance'
-import { documentsStore, revealInDocument, setDirty, updateSummary } from './documents'
+import { documentsStore, openPath, revealInDocument, setDirty, updateSummary } from './documents'
 import {
   refreshExtensions,
   refreshStatusItems,
@@ -16,6 +16,7 @@ import { previewChanged, refreshPreviews, showPreviewRequested } from './preview
 import { fileProblemsChanged, refreshSettingsProblem } from './problems'
 import { refreshSettingsIfLoaded } from './settings'
 import { showView } from './viewRequests'
+import { filesChanged } from './viewers'
 import { refreshDirectories, setIndexing, setWorkspace } from './workspace'
 
 export function handleEvent(event: AppEvent): void {
@@ -25,6 +26,8 @@ export function handleEvent(event: AppEvent): void {
       break
     case 'filesChanged':
       refreshDirectories(event.directories)
+      // The changed files are listed too: viewers showing them reload.
+      filesChanged(event.directories)
       break
     case 'documentReloaded':
     case 'documentMoved':
@@ -71,6 +74,9 @@ export function handleEvent(event: AppEvent): void {
           : [...documents, event.document],
         activeId: event.active || activeId === null ? event.document.id : activeId,
       }))
+      break
+    case 'openFile':
+      void openPath(event.path)
       break
     case 'indexStatus':
       setIndexing(event.indexing)

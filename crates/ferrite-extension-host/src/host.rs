@@ -169,6 +169,20 @@ struct PreviewRecord {
   content: Arc<PreviewContent>,
   /// The picture files its content shows.
   images: BTreeSet<PathBuf>,
+  /// For a viewer, the file open in it. Viewers are the workbench's tabs,
+  /// so they stay open when their extension stops (only their content
+  /// goes) and aren't listed with the previews.
+  file: Option<Viewed>,
+}
+
+/// A file open in a viewer.
+struct Viewed {
+  path: PathBuf,
+  /// The viewer's command, which fills it in.
+  command: String,
+  /// Its content went when its extension stopped: the command runs again
+  /// when the extension starts.
+  stale: bool,
 }
 
 struct State {
@@ -285,6 +299,31 @@ impl Shared {
       worker,
       active: false,
     };
+    // Fill in again the viewers it showed before it stopped.
+    let entry = &state.extensions[index];
+    if let Run::Running { worker, .. } = &entry.run {
+      for record in state.previews.values_mut() {
+        let Some(viewed) = record.file.as_mut().filter(|viewed| viewed.stale) else {
+          continue;
+        };
+        if record.extension != entry.manifest.id {
+          continue;
+        }
+        viewed.stale = false;
+        // Nobody waits for the outcome: a failure leaves the tab without
+        // content, and the extension's log says why.
+        let (reply, _) = mpsc::channel();
+        let _ = worker.queue.push_command(Event::Command {
+          command: viewed.command.clone(),
+          context: CommandContext {
+            document: None,
+            selections: Vec::new(),
+          },
+          argument: Some(viewed.path.display().to_string()),
+          reply,
+        });
+      }
+    }
     outbox.push(Notification::ExtensionsChanged);
   }
 
@@ -331,9 +370,25 @@ impl Shared {
       outbox.push(Notification::ViewChanged(view));
     }
     let before = state.previews.len();
-    state.previews.retain(|_, preview| preview.extension != id);
+    state
+      .previews
+      .retain(|_, preview| preview.extension != id || preview.file.is_some());
     if state.previews.len() != before {
       outbox.push(Notification::PreviewsChanged);
+    }
+    for (viewer, record) in &mut state.previews {
+      if record.extension != id {
+        continue;
+      }
+      let Some(viewed) = record.file.as_mut() else {
+        continue;
+      };
+      viewed.stale = true;
+      if !record.content.nodes.is_empty() {
+        record.content = Arc::default();
+        record.images.clear();
+        outbox.push(Notification::PreviewChanged(viewer.clone()));
+      }
     }
   }
 
@@ -389,6 +444,7 @@ impl Shared {
               info,
               content: Arc::default(),
               images: BTreeSet::new(),
+              file: None,
             },
           );
           true
@@ -410,6 +466,11 @@ impl Shared {
       .previews
       .get(id)
       .map(|record| record.info.document.map(DocumentId::from_raw))
+  }
+
+  /// The file open in a viewer: `None` if the viewer isn't open.
+  pub fn viewed_file(&self, id: &str) -> Option<PathBuf> {
+    Some(self.lock().previews.get(id)?.file.as_ref()?.path.clone())
   }
 
   /// Replaces an open preview's content; false if it isn't open.
@@ -442,8 +503,8 @@ impl Shared {
 
   /// Closes a preview, if it's open.
   pub fn close_preview(&self, id: &str) {
-    let removed = self.lock().previews.remove(id).is_some();
-    if removed {
+    let removed = self.lock().previews.remove(id);
+    if removed.is_some_and(|record| record.file.is_none()) {
       self.embedder.notify(Notification::PreviewsChanged);
     }
   }
@@ -1352,15 +1413,85 @@ impl ExtensionHost {
       .unwrap_or_default()
   }
 
-  /// The open previews, in the order of their ids.
+  /// The open previews, in the order of their ids. Viewers aren't listed.
   pub fn previews(&self) -> Vec<PreviewInfo> {
     self
       .shared
       .lock()
       .previews
       .values()
+      .filter(|record| record.file.is_none())
       .map(|record| record.info.clone())
       .collect()
+  }
+
+  /// Opens `path` in the viewer `viewer` (`<extension id>.<viewer id>`),
+  /// or shows it again, and runs the viewer's command with the path as its
+  /// argument so the extension fills it in: when the tab opens, when the
+  /// file changes, and when the extension starts again. Its content and
+  /// pictures are then read like a preview's, by the viewer's preview id,
+  /// `<viewer>/<path>` ([`viewer_id`]).
+  pub fn open_viewer(&self, viewer: &str, path: &Path) -> Result<CommandTicket, String> {
+    let (extension, name, command) = {
+      let state = self.shared.lock();
+      let entry = state
+        .extensions
+        .iter()
+        .find(|entry| {
+          entry
+            .manifest
+            .contributions
+            .viewers
+            .iter()
+            .any(|v| v.full_id == viewer)
+        })
+        .ok_or_else(|| format!("No extension provides the viewer {viewer}."))?;
+      let command = entry
+        .manifest
+        .contributions
+        .viewers
+        .iter()
+        .find(|v| v.full_id == viewer)
+        .map(|v| v.command.clone())
+        .unwrap_or_default();
+      (
+        entry.manifest.id.clone(),
+        entry.manifest.name.clone(),
+        command,
+      )
+    };
+    let id = viewer_id(viewer, path);
+    {
+      let mut state = self.shared.lock();
+      let record = state
+        .previews
+        .entry(id.clone())
+        .or_insert_with(|| PreviewRecord {
+          extension,
+          info: PreviewInfo {
+            id,
+            extension: name,
+            title: path.file_name().map_or_else(
+              || path.display().to_string(),
+              |name| name.to_string_lossy().into_owned(),
+            ),
+            icon: "book".into(),
+            document: None,
+          },
+          content: Arc::default(),
+          images: BTreeSet::new(),
+          file: Some(Viewed {
+            path: path.to_path_buf(),
+            command: command.clone(),
+            stale: false,
+          }),
+        });
+      // It's about to be filled in.
+      if let Some(viewed) = &mut record.file {
+        viewed.stale = false;
+      }
+    }
+    self.run_command(&command, None, Some(path.display().to_string()))
   }
 
   /// A preview's content, as last set by its extension; `None` if it isn't
@@ -1586,6 +1717,12 @@ impl ExtensionHost {
 }
 
 /// Subfolders of `root` that contain a manifest, sorted by name.
+/// The preview id of a file open in a viewer: what the workbench fetches
+/// its content and pictures by.
+pub fn viewer_id(viewer: &str, path: &Path) -> String {
+  format!("{viewer}/{}", path.display())
+}
+
 fn installed_dirs(root: &Path) -> Vec<PathBuf> {
   let Ok(entries) = std::fs::read_dir(root) else {
     return Vec::new();

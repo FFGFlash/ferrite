@@ -31,17 +31,24 @@ const MAX_LANGUAGE_CHARS: usize = 64;
 pub const MAX_TITLE_CHARS: usize = 100;
 pub const MAX_KEY_BYTES: usize = 200;
 const MAX_ADDRESS_BYTES: usize = 4_000;
-/// Largest picture file a preview shows.
-pub const MAX_IMAGE_BYTES: u64 = 16 * 1024 * 1024;
+/// Largest picture file a preview or viewer shows. Pictures reach the
+/// webview as `data:` URLs.
+pub const MAX_IMAGE_BYTES: u64 = 64 * 1024 * 1024;
 
 /// Pictures a preview can show, by file extension.
 const IMAGE_TYPES: &[(&str, &str)] = &[
   ("png", "image/png"),
+  ("apng", "image/png"),
   ("jpg", "image/jpeg"),
   ("jpeg", "image/jpeg"),
+  ("jpe", "image/jpeg"),
+  ("jfif", "image/jpeg"),
   ("gif", "image/gif"),
   ("webp", "image/webp"),
   ("svg", "image/svg+xml"),
+  ("bmp", "image/bmp"),
+  ("ico", "image/x-icon"),
+  ("avif", "image/avif"),
 ];
 
 /// An open preview, for the workbench's tabs.
@@ -566,8 +573,8 @@ pub fn image_source(source: &str, base: Option<&Path>) -> ImageSource {
 /// Reads a picture file as a `data:` URL. SVG is shown as an image, so its
 /// scripts don't run.
 pub fn load_image(path: &Path) -> Result<String, String> {
-  let media =
-    image_type(path).ok_or("previews show only PNG, JPEG, GIF, WebP, and SVG pictures")?;
+  let media = image_type(path)
+    .ok_or("previews show only PNG, JPEG, GIF, WebP, SVG, BMP, ICO, and AVIF pictures")?;
   let size = std::fs::metadata(path)
     .map_err(|error| error.to_string())?
     .len();

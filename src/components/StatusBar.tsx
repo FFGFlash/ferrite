@@ -53,9 +53,21 @@ export const StatusBar = memo(function StatusBar({ appInfo }: StatusBarProps) {
             <span className="statusbar__item" title="Line ending">
               {active.lineEnding}
             </span>
-            <span className="statusbar__item" title="Encoding">
-              {active.encoding}
-            </span>
+            {active.path === null ? (
+              <span className="statusbar__item" title="Encoding">
+                {active.encoding}
+              </span>
+            ) : (
+              <button
+                type="button"
+                className="statusbar__item statusbar__button"
+                title="Change File Encoding"
+                aria-label={`Encoding: ${active.encoding}. Change File Encoding`}
+                onClick={() => void executeCommand('file.changeEncoding')}
+              >
+                {active.encoding}
+              </button>
+            )}
           </>
         )}
         {appInfo && (

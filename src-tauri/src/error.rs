@@ -44,8 +44,10 @@ impl From<FileError> for CommandError {
       FileError::PermissionDenied { .. } => "permissionDenied",
       FileError::IsDirectory { .. } => "isDirectory",
       FileError::AlreadyExists { .. } => "alreadyExists",
-      FileError::TooLarge { .. } => "tooLarge",
-      FileError::NotUtf8 { .. } => "notUtf8",
+      FileError::Binary { .. } => "binary",
+      FileError::InvalidText { .. } => "invalidText",
+      FileError::LossyEncoding { .. } => "lossyEncoding",
+      FileError::Unencodable { .. } => "unencodable",
       FileError::ModifiedOnDisk { .. } => "modifiedOnDisk",
       FileError::Io { .. } => "io",
     };

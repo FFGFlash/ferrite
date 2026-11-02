@@ -7,7 +7,7 @@ import { findFiles } from '../ipc/workspace'
 import { iconThemeStore } from '../state/iconTheme'
 import { workspaceStore } from '../state/workspace'
 import { Palette } from './Palette'
-import { openPalette, paletteStore } from './paletteState'
+import { openPalette, openQuickPick, paletteStore } from './paletteState'
 
 vi.mock('../ipc/workspace', async importOriginal => ({
   ...(await importOriginal<typeof import('../ipc/workspace')>()),
@@ -35,7 +35,7 @@ describe('Palette', () => {
   afterEach(() => {
     unregister()
     activeEditor.set(null)
-    act(() => paletteStore.set({ open: false, initial: '', session: 0 }))
+    act(() => paletteStore.set({ open: false, initial: '', session: 0, pick: null }))
     vi.clearAllMocks()
   })
 
@@ -142,5 +142,34 @@ describe('Palette', () => {
     render(<Palette />)
     act(() => openPalette(''))
     expect(screen.getByText('Open a folder to search its files')).toBeInTheDocument()
+  })
+
+  it('shows a quick pick, filtered by typing, and runs the chosen item', async () => {
+    const user = userEvent.setup()
+    const chosen = vi.fn()
+    render(<Palette />)
+    act(() =>
+      openQuickPick({
+        placeholder: 'Reopen with encoding',
+        items: [
+          { label: 'UTF-8', detail: 'Current', run: () => chosen('utf-8') },
+          { label: 'Western (Windows 1252)', detail: 'windows-1252', run: () => chosen('1252') },
+          { label: 'Japanese (Shift JIS)', detail: 'shift_jis', run: () => chosen('sjis') },
+        ],
+      }),
+    )
+    expect(screen.getByRole('dialog', { name: 'Reopen with encoding' })).toBeInTheDocument()
+    expect(screen.getAllByRole('option')).toHaveLength(3)
+    expect(screen.getByRole('option', { name: /UTF-8/ })).toHaveTextContent('Current')
+
+    await user.keyboard('shift')
+    expect(screen.getAllByRole('option')).toHaveLength(1)
+    await user.keyboard('{Enter}')
+    expect(chosen).toHaveBeenCalledWith('sjis')
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+
+    // Opening the palette as usual drops the pick.
+    act(() => openPalette('>'))
+    expect(screen.getByRole('option', { name: /File: Save/ })).toBeInTheDocument()
   })
 })

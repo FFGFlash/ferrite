@@ -1,6 +1,6 @@
 //! Workbench contributions declared in a manifest: themes, file icon themes,
 //! keybindings, menu items, status bar items, side bar views, decoration
-//! types, previews, languages, and language servers.
+//! types, previews, viewers, languages, and language servers.
 //!
 //! Contributions are data: the workbench renders them, and extensions only
 //! fill in content (status text, view items, decorated ranges, preview
@@ -184,6 +184,34 @@ pub struct PreviewContribution {
   pub icon: String,
 }
 
+/// When a viewer opens the files it's for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ViewerPriority {
+  /// Opening a matching file opens it in the viewer.
+  Default,
+  /// Only when the user chooses the viewer (Reopen Editor With).
+  Option,
+}
+
+/// A viewer: a tab that shows files whose names match its patterns the way
+/// the extension draws them (as preview content), instead of as text.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ViewerContribution {
+  /// The id the extension uses.
+  pub id: String,
+  /// `<extension id>.<viewer id>`.
+  pub full_id: String,
+  /// Shown when choosing how to open a file, e.g. "Image Viewer".
+  pub title: String,
+  /// File name patterns, as for menu items.
+  pub patterns: Vec<String>,
+  /// Run with the file's path as its argument to fill the viewer in.
+  pub command: String,
+  pub priority: ViewerPriority,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum UnderlineStyle {
@@ -290,6 +318,7 @@ pub struct Contributions {
   pub views: Vec<ViewContribution>,
   pub decorations: Vec<DecorationType>,
   pub previews: Vec<PreviewContribution>,
+  pub viewers: Vec<ViewerContribution>,
   pub languages: Vec<LanguageContribution>,
   pub language_servers: Vec<LanguageServerContribution>,
 }
@@ -302,11 +331,16 @@ impl Contributions {
       && self.status_items.is_empty()
       && self.views.is_empty()
       && self.decorations.is_empty()
-      && self.previews.is_empty())
+      && self.previews.is_empty()
+      && self.viewers.is_empty())
   }
 
   pub fn preview(&self, id: &str) -> Option<&PreviewContribution> {
     self.previews.iter().find(|preview| preview.id == id)
+  }
+
+  pub fn viewer(&self, id: &str) -> Option<&ViewerContribution> {
+    self.viewers.iter().find(|viewer| viewer.id == id)
   }
 
   pub fn view(&self, id: &str) -> Option<&ViewContribution> {
@@ -387,6 +421,16 @@ pub struct RawPreview {
   icon: Option<String>,
 }
 
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RawViewer {
+  id: String,
+  title: String,
+  patterns: Vec<String>,
+  command: String,
+  priority: Option<String>,
+}
+
 #[derive(Deserialize, Default)]
 #[serde(deny_unknown_fields)]
 pub struct RawDecorationColors {
@@ -452,6 +496,7 @@ pub struct RawContributions {
   pub views: Vec<RawView>,
   pub decorations: BTreeMap<String, RawDecoration>,
   pub previews: Vec<RawPreview>,
+  pub viewers: Vec<RawViewer>,
   pub languages: Vec<RawLanguage>,
   pub language_servers: Vec<RawLanguageServer>,
 }
@@ -487,6 +532,7 @@ pub fn parse(
   limit("views", raw.views.len(), 10)?;
   limit("decorations", raw.decorations.len(), 20)?;
   limit("previews", raw.previews.len(), 10)?;
+  limit("viewers", raw.viewers.len(), 10)?;
   limit("languages", raw.languages.len(), 20)?;
   limit("language_servers", raw.language_servers.len(), 10)?;
 
@@ -738,6 +784,42 @@ pub fn parse(
       full_id: format!("{extension}.{}", preview.id),
       id: preview.id,
       icon,
+    });
+  }
+
+  for viewer in raw.viewers {
+    local_id("viewers", &viewer.id)?;
+    unique(
+      "viewers",
+      contributions.viewers.iter().map(|v| &v.id),
+      &viewer.id,
+    )?;
+    let section = format!("viewers: {}", viewer.id);
+    if viewer.patterns.is_empty() || viewer.patterns.len() > MAX_MENU_PATTERNS {
+      return Err(invalid(format!(
+        "{section}: patterns must list 1 to {MAX_MENU_PATTERNS} file name patterns"
+      )));
+    }
+    for pattern in &viewer.patterns {
+      check_pattern(pattern)
+        .map_err(|problem| invalid(format!("{section}: pattern {pattern:?} {problem}")))?;
+    }
+    let priority = match viewer.priority.as_deref() {
+      None | Some("default") => ViewerPriority::Default,
+      Some("option") => ViewerPriority::Option,
+      Some(other) => {
+        return Err(invalid(format!(
+          "{section}: priority {other:?} must be \"default\" or \"option\""
+        )));
+      }
+    };
+    contributions.viewers.push(ViewerContribution {
+      full_id: format!("{extension}.{}", viewer.id),
+      title: text("viewers", "title", &viewer.title, 40)?,
+      command: declared("viewers", &viewer.command)?,
+      id: viewer.id,
+      patterns: viewer.patterns,
+      priority,
     });
   }
 

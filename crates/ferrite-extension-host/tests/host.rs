@@ -97,7 +97,7 @@ impl Embedder for Fake {
     let document = editor.document_mut(document).map_err(|e| e.to_string())?;
     let point = document.save_point();
     let path = document.path().expect("a file").to_path_buf();
-    let stamp = ferrite_workspace::save_text_file(&path, &point.snapshot, point.has_bom, None)
+    let stamp = ferrite_workspace::save_text_file(&path, &point.snapshot, point.encoding, None)
       .map_err(|e| e.to_string())?;
     document.mark_saved(&point, path, stamp);
     self
@@ -892,7 +892,8 @@ fn tidy_folder(s: &Setup) -> PathBuf {
   write("src/clean.rs", b"fn clean() {}\n");
   write("src/open.rs", b"open  \n");
   write("src/edited.rs", b"edited  \n");
-  write("src/image.bin", b"\xff\xfe  \n");
+  write("src/image.bin", b"\x89PNG\0\0  \n");
+  write("src/latin1.rs", b"// caf\xe9  \n");
   write("notes.md", b"hard break  \n");
   write("excluded/x.rs", b"x  \n");
   *s.fake.folder.lock().unwrap_or_else(PoisonError::into_inner) = Some(root.clone());
@@ -920,14 +921,16 @@ fn tidy_trims_files_in_a_folder_from_the_explorer() {
     .expect("trimmed");
   assert_eq!(
     s.fake.wait_for_message("Trimmed"),
-    "Trimmed trailing whitespace in 3 files."
+    "Trimmed trailing whitespace in 4 files."
   );
   let read = |path: &Path| std::fs::read(path).expect("reads");
   // Line breaks are kept.
   assert_eq!(read(&src.join("a.rs")), b"fn a() {\r\n}\r\n");
   assert_eq!(read(&src.join("clean.rs")), b"fn clean() {}\n");
+  // Written back in its own encoding.
+  assert_eq!(read(&src.join("latin1.rs")), b"// caf\xe9\n");
   // Skipped: not text, Markdown, and excluded.
-  assert_eq!(read(&src.join("image.bin")), b"\xff\xfe  \n");
+  assert_eq!(read(&src.join("image.bin")), b"\x89PNG\0\0  \n");
   assert_eq!(read(&root.join("notes.md")), b"hard break  \n");
   assert_eq!(read(&root.join("excluded/x.rs")), b"x  \n");
 
@@ -1442,4 +1445,121 @@ fn markdown_previews_only_markdown_documents() {
     .expect_err("no document");
   assert!(error.contains("Open a Markdown file"), "{error}");
   assert!(s.host.previews().is_empty());
+}
+
+/// A 3 × 2 PNG with alpha: the signature, the IHDR chunk, and the end.
+const PNG_HEADER: &[u8] =
+  b"\x89PNG\r\n\x1a\n\0\0\0\rIHDR\0\0\0\x03\0\0\0\x02\x08\x06\0\0\0\0\0\0\0\0\0\0\0IEND";
+
+#[test]
+fn the_images_example_shows_files_in_its_viewer() {
+  let s = setup("images", "images", None, "", |m| m);
+  s.host.load();
+  let status = &s.host.statuses()[0];
+  let viewers = &status.contributions.viewers;
+  assert_eq!(viewers.len(), 2);
+  assert_eq!(viewers[0].full_id, "example.images.image");
+  assert!(viewers[0].patterns.contains(&"*.png".to_owned()));
+
+  let pictures = s._dir.path().join("my pictures");
+  std::fs::create_dir_all(&pictures).expect("mkdir");
+  let path = pictures.join("dot #1.png");
+  std::fs::write(&path, PNG_HEADER).expect("write");
+
+  s.host
+    .open_viewer("example.images.image", &path)
+    .expect("runs")
+    .wait()
+    .expect("fills the viewer in");
+  let id = ferrite_extension_host::viewer_id("example.images.image", &path);
+  assert!(s.host.previews().is_empty(), "viewers aren't previews");
+  let content = s.host.preview_content(&id).expect("open");
+  let texts: Vec<_> = content
+    .nodes
+    .iter()
+    .filter_map(|node| match &node.element {
+      PreviewElement::Text { text } => Some(text.as_str()),
+      _ => None,
+    })
+    .collect();
+  assert_eq!(
+    texts,
+    [format!(
+      "PNG · 3 × 2 pixels · 8-bit RGBA · {} bytes",
+      PNG_HEADER.len()
+    )]
+  );
+  // The picture is the file itself, whatever its name, and loads.
+  assert!(content.nodes.iter().any(|node| matches!(
+    &node.element,
+    PreviewElement::Image { source: ImageSource::File { path: shown }, .. }
+      if Path::new(shown) == path
+  )));
+  assert!(
+    s.host
+      .preview_image(&id, &path)
+      .expect("loads")
+      .starts_with("data:image/png;base64,")
+  );
+
+  // Closed: the extension can't read it or fill it in any more.
+  s.host.preview_closed(&id);
+  assert!(s.host.preview_content(&id).is_none());
+  let other = pictures.join("other.png");
+  std::fs::write(&other, b"not really a PNG").expect("write");
+  let error = s
+    .host
+    .open_viewer("example.images.missing", &other)
+    .err()
+    .expect("no such viewer");
+  assert!(error.contains("No extension provides"), "{error}");
+}
+
+#[test]
+fn a_viewer_keeps_its_tab_but_not_its_content_when_its_extension_stops() {
+  let s = setup("images", "images", None, "", |m| m);
+  s.host.load();
+  let path = s._dir.path().join("a.png");
+  std::fs::write(&path, PNG_HEADER).expect("write");
+  s.host
+    .open_viewer("example.images.image", &path)
+    .expect("runs")
+    .wait()
+    .expect("fills it in");
+  let id = ferrite_extension_host::viewer_id("example.images.image", &path);
+  assert!(!s.host.preview_content(&id).expect("open").nodes.is_empty());
+
+  s.host.set_enabled("example.images", false);
+  assert!(
+    s.host
+      .preview_content(&id)
+      .expect("still open")
+      .nodes
+      .is_empty()
+  );
+  let error = s
+    .host
+    .open_viewer("example.images.image", &path)
+    .err()
+    .expect("disabled");
+  assert!(error.contains("disabled"), "{error}");
+
+  s.host.set_enabled("example.images", true);
+  s.host
+    .open_viewer("example.images.image", &path)
+    .expect("runs")
+    .wait()
+    .expect("fills it in again");
+  assert!(!s.host.preview_content(&id).expect("open").nodes.is_empty());
+
+  // Restarted, it fills in the viewers it showed without being asked.
+  s.host.restart("example.images");
+  let deadline = Instant::now() + Duration::from_secs(30);
+  while s.host.preview_content(&id).expect("open").nodes.is_empty() {
+    assert!(
+      Instant::now() < deadline,
+      "the viewer wasn't filled in again"
+    );
+    std::thread::sleep(Duration::from_millis(20));
+  }
 }

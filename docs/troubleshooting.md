@@ -96,8 +96,20 @@ language extensions, which ask before running one: if you chose **Don't Allow**,
 
 - **See what's busy.** Open **Developer: Toggle Performance Overlay**: it shows input-to-paint
   latency, backend timings, background tasks, memory, open documents, and extensions.
-- **Large files.** Files up to 256 MiB open completely in memory. Lines longer than 16 KiB are
-  shown only up to that point.
+- **Large files.** Files of any size open completely in memory, which takes about twice the file's
+  size while it loads. Lines longer than 16 KiB are shown only up to that point, and in a file of
+  more than about 1.6 million lines the ones after that can't be scrolled into view yet, though
+  the cursor, editing, search, and saving still reach them.
+
+## A file shows as binary, or in the wrong encoding
+
+- **Binary.** A file with NUL bytes near its start opens in a tab that asks first. **Open Anyway**
+  opens it as text; it's saved back byte for byte unless you change it.
+- **Wrong encoding.** Encodings other than UTF-8 and UTF-16 are guessed. If the guess is wrong,
+  click the encoding in the status bar and choose **Reopen with Encoding**. To convert the file,
+  choose **Save with Encoding**.
+- **"Can't be saved as …".** The file's encoding has no way to write a character you typed. Save
+  it with an encoding that has it, such as UTF-8.
 - **Extensions.** Disable extensions one at a time to rule them out. Benchmarks
   (`pnpm bench:app`) skip extensions unless you pass `--extensions`.
 

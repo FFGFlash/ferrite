@@ -10,7 +10,8 @@
  * The layout is saved with the rest of the workbench layout. Documents are
  * saved by path (`file:<path>`), because document ids change between
  * runs; they hold their place until the documents load. Previews aren't
- * saved: their extensions open them again.
+ * saved: their extensions open them again. Files in viewers (and binary
+ * files waiting to be opened as text) are saved as they are.
  */
 import { setDropFallback } from '../components/drag'
 import { activeEditor, editorFor } from '../editor/activeEditor'
@@ -31,6 +32,7 @@ import {
 } from '../state/previews'
 import { createStore } from '../state/store'
 import { setPageHandler, setViewHandler } from '../state/viewRequests'
+import { setFileTabHandler, showFileTab, viewerClosed } from '../state/viewers'
 import {
   closeTerminal,
   focusTerminal,
@@ -74,6 +76,19 @@ export const previewItem = (id: string): ItemId => `preview:${id}`
 export const pageItem = (id: string): ItemId => `page:${id}`
 /** A saved document, until the documents load. */
 const fileItem = (path: string): ItemId => `file:${path}`
+/**
+ * A file in an extension's viewer (its full id), or, for `null`, a binary
+ * file waiting for the user to open it as text.
+ */
+export const viewerItem = (viewer: string | null, path: string): ItemId =>
+  `viewer:${viewer ?? ''}:${path}`
+
+/** The viewer and file of a viewer item. Viewer ids have no `:`; paths may. */
+export function parseViewerItem(item: ItemId): { viewer: string | null; path: string } {
+  const rest = itemId(item)
+  const colon = rest.indexOf(':')
+  return { viewer: rest.slice(0, colon) || null, path: rest.slice(colon + 1) }
+}
 
 /** The id after the kind: a document or terminal number, or a view, preview, or page id. */
 export function itemId(item: ItemId): string {
@@ -174,6 +189,7 @@ function placementFor(layout: DockLayout, item: ItemId): { target: DropTarget; s
   })
   switch (itemKind(item)) {
     case 'document':
+    case 'viewer':
     case 'page': {
       const group = findGroup(layout, documentGroup) ?? findGroup(layout, layout.main)!
       return { target: appendTo(group, true), size: 0.5 }
@@ -415,7 +431,7 @@ export function serializeDock(layout: DockLayout = dockStore.get()): DockLayout 
   return result
 }
 
-const SAVED_ITEM = /^(file:.+|view:.+|terminal:\d+|page:.+)$/s
+const SAVED_ITEM = /^(file:.+|view:.+|terminal:\d+|page:.+|viewer:[^:]*:.+)$/s
 
 /**
  * Restores the saved layout (or the default, honouring the side bar
@@ -564,6 +580,86 @@ function showPreview(id: string, beside: boolean): void {
 }
 
 setPreviewHandler(showPreview)
+
+/** The tab showing `path` without a document, if any. */
+function fileTabOf(layout: DockLayout, path: string): ItemId | undefined {
+  return allItems(layout).find(
+    item => itemKind(item) === 'viewer' && parseViewerItem(item).path === path,
+  )
+}
+
+// A file showing in a viewer, or waiting to be opened as text: one tab per
+// file, which changes viewer in place. A new one takes the place its file
+// held, if any (reopening, dropping, restoring), as documents do.
+setFileTabHandler((path, tab) => {
+  const layout = dockStore.get()
+  const existing = fileTabOf(layout, path)
+  if (!tab) {
+    if (existing) {
+      showItem(existing)
+    }
+    return existing !== undefined
+  }
+  const item = viewerItem(tab.viewer, tab.path)
+  const saved = fileItem(path)
+  let next = layout
+  if (existing && existing !== item) {
+    viewerClosed(existing)
+    next = replaceItem(next, existing, item)
+  } else if (!existing) {
+    next = groupOf(next, saved) ? replaceItem(next, saved, item) : ensure(next, item)
+  }
+  setLayout(next)
+  showItem(item)
+  return true
+})
+
+/**
+ * Shows the file of a document's tab or a viewer's tab another way, in the
+ * same place: in an extension's viewer (`viewer`), or as text (`null`),
+ * even if it's binary. A document with unsaved changes asks first.
+ */
+export async function reopenWith(item: ItemId, viewer: string | null): Promise<void> {
+  const layout = dockStore.get()
+  const group = groupOf(layout, item)
+  if (!group) {
+    return
+  }
+  if (itemKind(item) === 'document') {
+    const id = Number(itemId(item))
+    const path = documentsStore.get().documents.find(document => document.id === id)?.path
+    if (viewer === null || !path) {
+      return
+    }
+    // The viewer waits beside the document while it closes, which may ask.
+    const tab = viewerItem(viewer, path)
+    const index = group.items.indexOf(item) + 1
+    setLayout(placeItem(layout, tab, { kind: 'tabs', group: group.id, index }, 0.5))
+    await closeDocument(id)
+    if (isOpen(id)) {
+      setLayout(removeItem(dockStore.get(), tab))
+    } else {
+      showItem(tab)
+    }
+    return
+  }
+  if (itemKind(item) !== 'viewer') {
+    return
+  }
+  const { path } = parseViewerItem(item)
+  if (viewer !== null) {
+    showFileTab({ viewer, path })
+    return
+  }
+  // The document takes the place when it opens (`syncDocuments`).
+  const saved = fileItem(path)
+  viewerClosed(item)
+  setLayout(replaceItem(layout, item, saved))
+  const summary = await openPath(path, undefined, { asText: true })
+  if (!summary && groupOf(dockStore.get(), saved)) {
+    setLayout(replaceItem(dockStore.get(), saved, item))
+  }
+}
 
 // Files from other programs dropped where nothing takes them open where documents do.
 setDropFallback(drag => {
@@ -764,6 +860,13 @@ async function closeTab(item: ItemId): Promise<boolean> {
       closePreview(id)
       setLayout(removeItem(dockStore.get(), item))
       break
+    case 'viewer':
+      viewerClosed(item)
+      if (place) {
+        rememberClosed({ item, ...place })
+      }
+      setLayout(removeItem(dockStore.get(), item))
+      break
     case 'page':
       if (place) {
         rememberClosed({ item, ...place })
@@ -794,6 +897,11 @@ function current(): DockGroup | undefined {
   return findGroup(dockStore.get(), currentGroup.get())
 }
 
+/** The current group's active tab, if any. */
+export function currentTab(): ItemId | null {
+  return current()?.active ?? null
+}
+
 export function hasCurrentTab(): boolean {
   return current()?.active != null
 }
@@ -817,10 +925,10 @@ async function closeTabs(items: readonly ItemId[]): Promise<void> {
   }
 }
 
-/** Tabs that are editors: documents, previews, and pages, rather than views and terminals. */
+/** Tabs that are editors: documents, viewers, previews, and pages, rather than views and terminals. */
 const isEditorTab = (item: ItemId) => {
   const kind = itemKind(item)
-  return kind === 'document' || kind === 'preview' || kind === 'page'
+  return kind === 'document' || kind === 'viewer' || kind === 'preview' || kind === 'page'
 }
 
 const isDirty = (item: ItemId) =>
@@ -895,15 +1003,19 @@ async function openPathAt(path: string, target: DropTarget | null): Promise<Item
     setLayout(placeItem(dockStore.get(), saved, target, 0.5))
   }
   const summary = await openPath(path)
+  // In a viewer instead, or asking whether to open it as text.
+  const tab = summary ? undefined : fileTabOf(dockStore.get(), path)
   if (groupOf(dockStore.get(), saved)) {
-    // It didn't open (`openPath` reported why), or opened under another
-    // spelling of its path; then it moves to the place.
+    // It didn't open (`openPath` reported why), opened under another
+    // spelling of its path, or showed in a tab it already had; then that
+    // moves to the place.
     setLayout(removeItem(dockStore.get(), saved))
-    if (summary && target) {
-      moveItem(documentItem(summary.id), target)
+    const opened = summary ? documentItem(summary.id) : tab
+    if (opened && target) {
+      moveItem(opened, target)
     }
   }
-  return summary ? documentItem(summary.id) : null
+  return summary ? documentItem(summary.id) : (tab ?? null)
 }
 
 /**
@@ -1078,6 +1190,7 @@ export function resetLayout(): void {
   currentGroup.set(MAIN_GROUP)
   placeAll('view')
   placeAll('document')
+  placeAll('viewer')
   placeAll('page')
   placeAll('preview')
   placeAll('terminal')

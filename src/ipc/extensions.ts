@@ -103,6 +103,19 @@ export interface PreviewContribution {
   icon: string
 }
 
+/** A viewer: a tab that shows matching files the extension's way, not as text. */
+export interface ViewerContribution {
+  id: string
+  /** `<extension id>.<viewer id>`. */
+  fullId: string
+  title: string
+  /** File name patterns, as for menu items. */
+  patterns: string[]
+  command: string
+  /** `default`: matching files open in it; `option`: only when chosen. */
+  priority: 'default' | 'option'
+}
+
 export interface DecorationColors {
   background: string | null
   color: string | null
@@ -147,6 +160,7 @@ export interface Contributions {
   views: ViewContribution[]
   decorations: DecorationType[]
   previews: PreviewContribution[]
+  viewers: ViewerContribution[]
   languages: LanguageContribution[]
   languageServers: LanguageServerContribution[]
 }
@@ -310,6 +324,13 @@ export const getPreviewContent = (preview: string) =>
 export const previewClosed = (preview: string) =>
   call<void>('extension_preview_closed', { preview })
 /** A picture a preview shows, as a `data:` URL. */
+/**
+ * Opens a file in an extension's viewer, or fills it in again, and resolves
+ * to the viewer's preview id once the extension has, for
+ * `getPreviewContent`, `getPreviewImage`, and `previewClosed`.
+ */
+export const openViewer = (viewer: string, path: string) =>
+  call<string>('extension_viewer_open', { viewer, path })
 export const getPreviewImage = (preview: string, path: string) =>
   call<string>('extension_preview_image', { preview, path })
 /** An extension's icon as a `data:` URL; `null` if it has none. */

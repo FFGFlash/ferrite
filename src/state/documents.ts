@@ -10,6 +10,7 @@ import { reportError } from './notifications'
 import { refreshSettingsProblem } from './problems'
 import { refreshSettingsIfLoaded } from './settings'
 import { createStore } from './store'
+import { defaultViewerFor, showExistingFileTab, showFileTab } from './viewers'
 
 export interface DocumentsState {
   documents: readonly DocumentSummary[]
@@ -95,14 +96,32 @@ export function activate(id: number): void {
 /**
  * Opens (or switches to) the file at `path`, optionally selecting a range
  * once its editor is showing. Resolves to the document, or `null` if it
- * couldn't be opened (the error is reported).
+ * didn't open as one: it showed in a viewer, or in a tab asking whether to
+ * open it as text (a binary file), or it couldn't be opened (the error is
+ * reported).
+ *
+ * A file already open as text shows there. Otherwise one already in a tab
+ * of its own shows there, and a file an extension's viewer is the default
+ * for opens in it. With `asText`, it opens as text even if it's binary.
  */
 export async function openPath(
   path: string,
   selection?: { start: Position; end?: Position },
+  { asText = false }: { asText?: boolean } = {},
 ): Promise<DocumentSummary | null> {
+  const isOpen = documentsStore.get().documents.some(document => document.path === path)
+  if (!isOpen && !asText) {
+    if (showExistingFileTab(path)) {
+      return null
+    }
+    const viewer = defaultViewerFor(path)
+    if (viewer) {
+      showFileTab({ viewer: viewer.fullId, path })
+      return null
+    }
+  }
   try {
-    const summary = await ipc.openDocument(path)
+    const summary = await ipc.openDocument(path, asText)
     const editor = editorFor(summary.id)
     if (selection) {
       const range = { start: selection.start, end: selection.end ?? selection.start }
@@ -115,7 +134,11 @@ export async function openPath(
     upsert(summary, true)
     return summary
   } catch (error) {
-    reportError('Opening the file', error)
+    if (error instanceof CommandError && error.code === 'binary') {
+      showFileTab({ viewer: null, path })
+    } else {
+      reportError('Opening the file', error)
+    }
     return null
   }
 }
@@ -145,12 +168,37 @@ export function revealInDocument(id: number, start: Position, end: Position): vo
 
 export async function openFile(): Promise<void> {
   try {
-    const summary = await ipc.openDocumentDialog()
-    if (summary) {
-      upsert(summary, true)
+    const path = await ipc.pickFile()
+    if (path) {
+      await openPath(path)
     }
   } catch (error) {
     reportError('Opening the file', error)
+  }
+}
+
+/** Reads a document's file again in another encoding (it must have no unsaved changes). */
+export async function reopenWithEncoding(id: number, encoding: string): Promise<void> {
+  try {
+    await beforeSave.get(id)?.()
+    const summary = await ipc.reopenWithEncoding(id, encoding)
+    upsert(summary, false)
+    editorFor(id)?.refresh()
+  } catch (error) {
+    reportError('Reopening the file', error)
+  }
+}
+
+/** Saves a document in another encoding, which it keeps from then on. */
+export async function saveWithEncoding(id: number, encoding: string): Promise<void> {
+  try {
+    await beforeSave.get(id)?.()
+    const summary = await ipc.saveWithEncoding(id, encoding)
+    if (summary) {
+      upsert(summary, false)
+    }
+  } catch (error) {
+    reportError('Saving', error)
   }
 }
 

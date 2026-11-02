@@ -57,7 +57,7 @@ pub use api::{MAX_DIAGNOSTICS, MAX_EDITS, MAX_READ_BYTES, MAX_READ_LINES};
 pub use config::{ConfigProperty, ConfigType, ConfigValue};
 pub use contributions::Contributions;
 pub use files::{MAX_FILE_BYTES, MAX_LISTED_FILES};
-pub use host::{CommandTicket, ExtensionHost};
+pub use host::{CommandTicket, ExtensionHost, viewer_id};
 pub use manifest::{MANIFEST_FILE, Manifest, ManifestError};
 pub use permissions::{Decision, Permission};
 pub use preview::{PreviewContent, PreviewInfo};

@@ -56,6 +56,7 @@ function extension(overrides: Partial<ExtensionStatus> = {}): ExtensionStatus {
       views: [],
       decorations: [],
       previews: [],
+      viewers: [],
       languages: [],
       languageServers: [],
     },

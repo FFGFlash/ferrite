@@ -1,11 +1,11 @@
 /// The Ferrite extension API, version 1 (1.1: workbench contributions;
-/// 1.2: previews; 1.3: files).
+/// 1.2: previews; 1.3: files; 1.4: viewers).
 ///
 /// An extension is a WebAssembly component targeting the `extension` world.
 /// It can call only the functions it imports here; there is no other
 /// filesystem, network, environment, or clock access. See
 /// `docs/extensions.md`.
-package ferrite:extension@1.3.0;
+package ferrite:extension@1.4.0;
 
 /// Types shared by the host functions and the extension's exports.
 interface types {
@@ -206,8 +206,9 @@ interface types {
 
   /// A picture in a preview. (1.2)
   record preview-image {
-    /// A PNG, JPEG, GIF, WebP, or SVG file relative to the preview's
-    /// document. Web addresses aren't loaded: `description` is shown.
+    /// A PNG, JPEG, GIF, WebP, SVG, BMP, ICO, or AVIF file (BMP, ICO, and
+    /// AVIF since 1.4) relative to the preview's document, at most 64 MiB.
+    /// Web addresses aren't loaded: `description` is shown.
     source: string,
     /// Text describing the picture, shown when it can't be.
     description: string,
@@ -377,7 +378,8 @@ interface files {
     not-found,
     /// A folder was given where a file is needed, or the other way round.
     wrong-kind,
-    /// The file isn't UTF-8 text.
+    /// The file isn't text: it looks binary. (Text in other encodings
+    /// than UTF-8 is read and written in its own encoding.)
     not-text,
     /// The request exceeds one of the host's limits.
     too-large(string),
@@ -413,12 +415,44 @@ interface files {
   write-file: func(path: string, text: string) -> result<_, file-error>;
 }
 
+/// Files opened in one of the extension's viewers: tabs that show a file
+/// the way the extension draws it, such as an image, instead of as text.
+/// A viewer is declared in the manifest with the file names it opens and
+/// the command that fills it in, which runs with the file's path as its
+/// argument (see `command-argument`) whenever the file is opened in the
+/// viewer or changes on disk. Viewers need no permission: a viewer can
+/// read only the files open in it. (1.4)
+interface viewers {
+  use types.{api-error, preview-node};
+
+  /// Bytes read from a file open in a viewer.
+  record file-bytes {
+    /// The size of the whole file.
+    size: u64,
+    /// The bytes from the offset asked for: fewer than asked for at the
+    /// end of the file.
+    bytes: list<u8>,
+  }
+
+  /// Replaces what one of the extension's viewers shows for a file, with
+  /// the same content a preview has: at most 100,000 nodes and 8 MiB of
+  /// text. Pictures and links are found from the file's folder, so a
+  /// picture of the file itself is its name. Returns false, changing
+  /// nothing, if the file isn't open in the viewer (the user closed it).
+  set-viewer-content: func(viewer: string, path: string, nodes: list<preview-node>) -> result<bool, api-error>;
+
+  /// Reads up to `length` bytes (at most 16 MiB) of a file open in one of
+  /// the extension's viewers, starting at `offset`.
+  read-viewed-file: func(viewer: string, path: string, offset: u64, length: u32) -> result<file-bytes, api-error>;
+}
+
 world extension {
   use types.{activation, command-context, document-change, document-id, document-info};
 
   import host;
   import workbench;
   import files;
+  import viewers;
 
   /// Called once before any other export. An error fails the extension.
   export activate: func(context: activation) -> result<_, string>;

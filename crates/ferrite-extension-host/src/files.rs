@@ -26,8 +26,6 @@ pub const MAX_LISTED_FILES: usize = 10_000;
 /// Largest file read or written.
 pub const MAX_FILE_BYTES: usize = 16 * 1024 * 1024;
 
-const UTF8_BOM: &[u8] = b"\xEF\xBB\xBF";
-
 impl ApiContext {
   fn require_files(&self, permission: Permission) -> Result<std::sync::Arc<Shared>, FileError> {
     if !self.has(permission) {
@@ -54,8 +52,7 @@ fn disk_error(error: DiskError) -> FileError {
   match error {
     DiskError::NotFound { .. } => FileError::NotFound,
     DiskError::IsDirectory { .. } => FileError::WrongKind,
-    DiskError::NotUtf8 { .. } => FileError::NotText,
-    DiskError::TooLarge { .. } => too_large(),
+    DiskError::Binary { .. } => FileError::NotText,
     other => FileError::Failed(other.to_string()),
   }
 }
@@ -211,8 +208,13 @@ impl Host for StoreState {
         if text == existing.text {
           return Ok(());
         }
-        let bom: &[u8] = if existing.has_bom { UTF8_BOM } else { b"" };
-        [bom, text.as_bytes()].concat()
+        // In the file's own encoding.
+        existing.encoding.encode(&text).map_err(|character| {
+          FileError::Failed(format!(
+            "the file's encoding, {}, has no {character:?}",
+            existing.encoding.label()
+          ))
+        })?
       }
       Err(DiskError::NotFound { .. }) => text.into_bytes(),
       Err(error) => return Err(disk_error(error)),

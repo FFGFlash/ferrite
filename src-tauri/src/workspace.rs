@@ -15,8 +15,9 @@ use std::sync::{Arc, Mutex, MutexGuard, PoisonError, RwLock};
 use ferrite_tasks::{Priority, TaskHandle};
 use ferrite_text::{SearchQuery, TextSnapshot};
 use ferrite_workspace::{
-  DirEntry, EntryKind, FileIndex, FileMatches, FileStamp, SearchLimits, SearchSummary,
-  WorkspaceWatcher, create_entry, list_directory, load_text_file, scan_files, search_workspace,
+  DecodeOptions, DirEntry, EntryKind, FileIndex, FileMatches, FileStamp, SearchLimits,
+  SearchSummary, WorkspaceWatcher, create_entry, list_directory, load_text_file_with, scan_files,
+  search_workspace,
 };
 use serde::Serialize;
 use tauri::ipc::Channel;
@@ -235,7 +236,7 @@ fn on_files_changed(app: &AppHandle, changed: Vec<PathBuf>) {
 /// the user is told.
 fn reload_if_open(app: &AppHandle, path: &Path) {
   let editor_state = app.state::<EditorState>();
-  let (id, dirty, stamp) = {
+  let (id, dirty, stamp, encoding) = {
     let editor = editor_state.lock();
     let Some(id) = editor.find_by_path(path) else {
       return;
@@ -243,7 +244,12 @@ fn reload_if_open(app: &AppHandle, path: &Path) {
     let Ok(document) = editor.document(id) else {
       return;
     };
-    (id, document.is_dirty(), document.disk_stamp().cloned())
+    (
+      id,
+      document.is_dirty(),
+      document.disk_stamp().cloned(),
+      document.encoding(),
+    )
   };
   let current = match FileStamp::read(path) {
     Ok(Some(current)) => current,
@@ -266,7 +272,18 @@ fn reload_if_open(app: &AppHandle, path: &Path) {
     }
     return;
   }
-  let loaded = match load_text_file(path) {
+  // In the encoding it has (which the user may have chosen), else whatever
+  // the new contents are in. It's open already, so binary or not.
+  let read = |encoding| {
+    load_text_file_with(
+      path,
+      DecodeOptions {
+        encoding,
+        binary: true,
+      },
+    )
+  };
+  let loaded = match read(Some(encoding)).or_else(|_| read(None)) {
     Ok(loaded) => loaded,
     Err(error) => {
       tracing::warn!(%error, "could not reload changed file");
@@ -281,7 +298,7 @@ fn reload_if_open(app: &AppHandle, path: &Path) {
   if document.is_dirty() {
     return;
   }
-  match document.reload(&loaded.text, loaded.has_bom, loaded.stamp) {
+  match document.reload(&loaded.text, loaded.encoding, loaded.stamp) {
     Ok(_) => {
       tracing::info!(document = %id, "reloaded document changed on disk");
       events::emit(

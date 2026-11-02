@@ -40,8 +40,14 @@ Files passed on the command line open as tabs, for example
 
 ## Editing
 
-Ferrite currently opens UTF-8 text files of up to 256 MiB. Line endings and a UTF-8 BOM are
-preserved exactly, and new lines use the file's existing line ending.
+Ferrite opens text files of any size, in UTF-8, UTF-16, or a legacy encoding such as Windows-1252
+or Shift JIS, which it detects and shows in the status bar. Click the encoding to reopen or save the
+file with another one. Files are saved in the encoding they were read in, and line endings and a
+byte order mark are preserved exactly; new lines use the file's existing line ending. A file that
+looks binary opens in a tab that asks first (**Open Anyway** opens it as text), unless an
+extension's viewer shows that kind of file: the [Images](extensions/images/) example shows PNG,
+JPEG, GIF, WebP, BMP, ICO, and AVIF files as pictures. **View: Reopen Editor With…** switches a
+file between text and the viewers that can show it.
 
 | Action                              | Windows / Linux                  | macOS                    |
 | ----------------------------------- | -------------------------------- | ------------------------ |

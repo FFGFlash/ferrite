@@ -45,6 +45,7 @@ const doc = (id: number, path: string | null = `/w/file${id}.rs`): DocumentSumma
   dirty: false,
   lineEnding: 'LF',
   encoding: 'UTF-8',
+  encodingId: 'utf-8',
 })
 
 const preview = (id: string, document: number | null) => ({
@@ -429,7 +430,7 @@ describe('dock', () => {
     await vi.waitFor(() => expect(groupItems('main')).toEqual(['document:2']))
 
     await dock.reopenClosedTab()
-    expect(editorIpc.openDocument).toHaveBeenCalledWith('/w/file1.rs')
+    expect(editorIpc.openDocument).toHaveBeenCalledWith('/w/file1.rs', false)
     expect(groupItems('main')).toEqual(['document:100', 'document:2'])
     expect(findGroup(layout(), 'main')!.active).toBe('document:100')
     await dock.reopenClosedTab()
@@ -537,5 +538,42 @@ describe('dock', () => {
     expect(workspaceIpc.openWorkspace).toHaveBeenCalledTimes(1)
     expect(workspaceStore.get().info?.root).toBe('/p/one')
     expect(notifications.get().at(-1)?.message).toContain('one folder at a time')
+  })
+
+  it('shows binary files in a tab of their own, which opens them as text in place', async () => {
+    const { CommandError } = await import('../ipc')
+    const { openPath } = await import('../state/documents')
+    documentsStore.set({ documents: [doc(1), doc(2)], activeId: 1 })
+    vi.mocked(editorIpc.openDocument).mockRejectedValueOnce(new CommandError('binary', 'binary'))
+    expect(await openPath('C:\\w\\data.bin')).toBeNull()
+    const tab = dock.viewerItem(null, 'C:\\w\\data.bin')
+    expect(dock.parseViewerItem(tab)).toEqual({ viewer: null, path: 'C:\\w\\data.bin' })
+    expect(groupItems('main')).toEqual(['document:1', tab, 'document:2'])
+    expect(findGroup(layout(), 'main')!.active).toBe(tab)
+
+    // Opening it again shows the same tab, and it's saved with the layout.
+    expect(await openPath('C:\\w\\data.bin')).toBeNull()
+    expect(groupItems('main')).toEqual(['document:1', tab, 'document:2'])
+    expect(JSON.stringify(dock.serializeDock())).toContain(JSON.stringify(tab))
+
+    await dock.reopenWith(tab, null)
+    expect(editorIpc.openDocument).toHaveBeenLastCalledWith('C:\\w\\data.bin', true)
+    expect(groupItems('main')).toEqual(['document:1', 'document:100', 'document:2'])
+  })
+
+  it('switches a file between a viewer and text in place', async () => {
+    documentsStore.set({ documents: [doc(1), doc(2, '/w/cat.png')], activeId: 2 })
+    await dock.reopenWith('document:2', 'example.images.image')
+    const viewer = dock.viewerItem('example.images.image', '/w/cat.png')
+    expect(groupItems('main')).toEqual(['document:1', viewer])
+    expect(findGroup(layout(), 'main')!.active).toBe(viewer)
+
+    await dock.reopenWith(viewer, null)
+    expect(groupItems('main')).toEqual(['document:1', 'document:100'])
+
+    // A document whose closing is cancelled stays, without the viewer.
+    vi.mocked(editorIpc.closeDocument).mockResolvedValueOnce(false)
+    await dock.reopenWith('document:100', 'example.images.image')
+    expect(groupItems('main')).toEqual(['document:1', 'document:100'])
   })
 })

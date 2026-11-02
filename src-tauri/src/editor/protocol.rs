@@ -391,22 +391,23 @@ pub struct DocumentSummary {
   pub path: Option<String>,
   pub dirty: bool,
   pub line_ending: &'static str,
-  pub encoding: &'static str,
+  /// The encoding's label, e.g. `UTF-8` or `Western (Windows 1252)`.
+  pub encoding: String,
+  /// Its id, for Reopen and Save with Encoding (`utf-8`, `windows-1252`).
+  pub encoding_id: String,
 }
 
 impl DocumentSummary {
   pub fn of(document: &Document) -> Self {
+    let encoding = document.encoding();
     Self {
       id: document.id().get(),
       title: document.title(),
       path: document.path().map(|path| path.display().to_string()),
       dirty: document.is_dirty(),
       line_ending: document.line_ending().label(),
-      encoding: if document.has_bom() {
-        "UTF-8 with BOM"
-      } else {
-        "UTF-8"
-      },
+      encoding: encoding.label(),
+      encoding_id: encoding.id(),
     }
   }
 }

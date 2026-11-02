@@ -45,7 +45,7 @@ impl Editor {
   /// opening the same file twice.
   pub fn open(&mut self, path: PathBuf, file: LoadedFile) -> DocumentId {
     let id = self.allocate_id();
-    let backing = Some((path, file.has_bom, file.stamp));
+    let backing = Some((path, file.encoding, file.stamp));
     self
       .documents
       .insert(id, Document::new(id, &file.text, backing, 0, &self.config));

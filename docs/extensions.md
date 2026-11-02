@@ -12,6 +12,8 @@ do only what the [extension API](../crates/ferrite-extension-api/wit/extension.w
 - customize the workbench: color themes, keybindings, context menu items, status bar items,
   side bar views, editor decorations, and previews (formatted pages, such as rendered
   Markdown);
+- show kinds of files in viewers: tabs that show a file the extension's way, such as an image,
+  instead of as text;
 - add languages: syntax highlighting from Tree-sitter grammars, and language servers;
 - read their own settings;
 - log, and show messages.
@@ -37,6 +39,7 @@ This guide uses these examples:
   [TOML](../extensions/toml/), and [Python](../extensions/python/) are extensions like it.
 - [Markdown](../extensions/markdown/) is a language too, and has code: a preview that renders
   the document as you type.
+- [Images](../extensions/images/) shows image files in a viewer, with their format and size.
 
 ## Quick start
 
@@ -183,7 +186,7 @@ as its text. A README can be at most 1 MiB. Tidy, TODOs, and Markdown have both.
 | `files_write`      | Changing and creating files in the open folder (API 1.3)                         |
 | `language_servers` | Ferrite running the extension's [language servers](#language-servers)            |
 
-Commands, settings, logging, messages, and languages need no permission.
+Commands, settings, logging, messages, languages, and viewers need no permission.
 
 **Requesting a permission doesn't grant it.** When an extension requests permissions the user
 hasn't decided about, Ferrite asks before starting it. The user can allow or deny each
@@ -200,7 +203,7 @@ and `files_write`, which the API 1.0 `permission` type can't name: a call tells 
 
 The full interface, with comments, is
 [`extension.wit`](../crates/ferrite-extension-api/wit/extension.wit). Functions the extension
-calls are in `host`, `workbench`, and `files`; the extension exports the rest.
+calls are in `host`, `workbench`, `files`, and `viewers`; the extension exports the rest.
 
 ### Positions and versions
 
@@ -274,10 +277,13 @@ file in a folder the user chose in the explorer. Paths are absolute.
 - `list-files(folder)` returns the files in a folder and its subfolders, sorted: at most 10,000,
   with `truncated` set if there were more. Like Go to File, it leaves out what `files.exclude`
   hides and what Git ignores.
-- `read-file(path)` returns a file's text, line breaks included. A file open in the editor is
-  read from its document, unsaved changes included, so the extension sees what the user sees.
+- `read-file(path)` returns a file's text, line breaks included, decoded from its encoding (UTF-8,
+  UTF-16, or a legacy one such as Windows-1252, detected as the editor does). A file open in the
+  editor is read from its document, unsaved changes included, so the extension sees what the
+  user sees.
 - `write-file(path, text)` replaces a file's text, or creates the file in an existing folder.
-  Line breaks are converted to the file's line ending (a new file gets them as written). A file
+  Line breaks are converted to the file's line ending (a new file gets them as written), and the
+  text is written in the file's encoding (a new file in UTF-8). A file
   open in the editor is changed in its document, as one undo step, and saved unless it had
   unsaved changes (those stay the user's to save). Writing the text a file already has changes
   nothing.
@@ -286,8 +292,9 @@ Reading needs `files_read`, and writing `files_write`. Only files inside the ope
 used: paths are resolved (links and `..` included) first, and files that `files.exclude` hides,
 and anything in a `.git` folder, are refused too. Failures are a `file-error`:
 `permission-denied` (naming the permission), `outside-folder`, `not-found`, `wrong-kind` (a
-folder where a file is needed, or the other way round), `not-text` (not UTF-8), `too-large`
-(more than 16 MiB), or `failed` with the reason.
+folder where a file is needed, or the other way round), `not-text` (binary), `too-large`
+(more than 16 MiB), or `failed` with the reason (such as a character the file's encoding
+lacks).
 
 A command has 10 s, so a command that works through many files should do little per file. Tidy's
 **Trim Trailing Whitespace in Files** trims a few thousand files well within that.
@@ -581,8 +588,9 @@ The top level holds blocks and inline nodes. Anything out of place is rejected w
   to a heading in the preview (`#name`, matched like GitHub's anchors); or to a file relative to
   the preview's document (`setup.md#install`), which opens in the editor. Other schemes and
   absolute paths are shown as text and can't be followed.
-- **Pictures** are PNG, JPEG, GIF, WebP, or SVG files relative to the preview's document, up to
-  16 MiB, and the workbench can read only the files the content names. Web pictures aren't
+- **Pictures** are PNG, JPEG, GIF, WebP, SVG, BMP, ICO, or AVIF files (the last three since API
+  1.4) relative to the preview's document, up to 64 MiB, and the workbench can read only the
+  files the content names. Web pictures aren't
   loaded, so opening a preview sends no requests; their description is shown instead.
 - **Code blocks** name their language by id or file extension (`rust` or `rs`). Code in a
   language Ferrite has is highlighted with the editor's colors.
@@ -590,6 +598,46 @@ The top level holds blocks and inline nodes. Anything out of place is rejected w
   aren't restored when Ferrite restarts: their extension opens them again.
 - **Updates.** Unchanged content sends no event, and the tab loads at most one update at a time,
   so an extension can render on every change. Markdown does.
+
+### Viewers
+
+A viewer shows a kind of file the extension's way instead of as text, such as a picture of an
+image file. [Images](../extensions/images/) is the example. Viewers are API 1.4.
+
+```toml
+[[commands]]
+id = "example.images.show"
+title = "Show Image"
+hidden = true                     # run by the viewer, not from the palette
+
+[[viewers]]
+id = "image"                      # used as "example.images.image"
+title = "Image Viewer"            # shown when choosing how to open a file
+patterns = ["*.png", "*.{jpg,jpeg}", "*.gif"]   # file names, as for menu items
+command = "example.images.show"   # fills the viewer in
+priority = "default"              # or "option"
+```
+
+- **Which files.** A file whose name matches a `default` viewer's patterns opens in it: from the
+  explorer, Go to File, the open dialog, links, or a drop. An `option` viewer is used only when
+  the user chooses it with **View: Reopen Editor With…**, which also switches back to text. A
+  file already open as text stays in its text tab. A binary file that no viewer is the default
+  for opens in a tab that offers **Open Anyway** and the viewers that match it.
+- **Filling it in.** The workbench runs the viewer's `command` with the file's path as its
+  argument (`workbench::command-argument()`): when the tab shows, when the file changes on disk
+  (files in the open folder), and when the extension starts again after stopping. The command
+  reads the file with **`viewers::read-viewed-file(viewer, path, offset, length)`**, which
+  returns the file's size and up to 16 MiB from `offset`, and sets what the tab shows with
+  **`viewers::set-viewer-content(viewer, path, nodes)`**. A command that fails shows its error in
+  the tab, with **Try Again**.
+- **Content** is [preview](#previews) content, checked and drawn the same way. Pictures and
+  links are found from the file's folder, so the file's own picture is its name: escape `%`,
+  `#`, `?`, and spaces (`%25`, `%23`, `%3F`, `%20`), and start it with `./`. In a viewer,
+  pictures are centered and drawn on a checkerboard, so transparent parts show.
+- **Access.** A viewer needs no permission. It can read only files open in one of its viewers,
+  and `set-viewer-content` returns `false` once the user has closed the tab.
+- **Lifetime.** A viewer tab is the workbench's: it's saved with the layout and stays open when
+  the extension stops, which removes only its content. Viewers can't edit their files.
 
 ### Limits
 
@@ -601,6 +649,8 @@ The top level holds blocks and inline nodes. Anything out of place is rejected w
 | Icon associations                  | 10,000 per theme                        |
 | Status items / views / decorations | 20 / 10 / 20 types per extension        |
 | Previews                           | 10 types per extension                  |
+| Viewers                            | 10 per extension, 20 patterns each      |
+| Viewed file reads                  | 16 MiB per call                         |
 | Preview content                    | 100,000 nodes, 8 MiB of text            |
 | Status text / tooltip              | 100 / 500 characters (cut, not refused) |
 | View items                         | 5,000 per view                          |
@@ -888,16 +938,17 @@ model for testing an extension end to end. Run them with
 
 Any language that can produce a WebAssembly component for the `extension` world works. The
 component must import nothing but the Ferrite interfaces (`ferrite:extension/host`,
-`ferrite:extension/workbench`, and `ferrite:extension/files`). The host provides no WASI, so
+`ferrite:extension/workbench`, `ferrite:extension/files`, and `ferrite:extension/viewers`). The host provides no WASI, so
 a component that imports `wasi:*` interfaces (most toolchains' defaults) fails to start, with a
 message saying so. Rust on `wasm32-unknown-unknown` is the supported path for now.
 
 ## Versioning
 
-The WIT package is versioned: `ferrite:extension@1.3.0`, `api_version = "1"`.
+The WIT package is versioned: `ferrite:extension@1.4.0`, `api_version = "1"`.
 
 - **Additions.** New host functions arrive as minor versions of the package. Version 1.1 added the
-  `workbench` interface, 1.2 added previews to it, and 1.3 added the `files` interface. Wasmtime
+  `workbench` interface, 1.2 added previews to it, 1.3 added the `files` interface, and 1.4 the
+  `viewers` interface. Wasmtime
   links components built against an older minor version: the host's tests load Tidy builds made
   against 1.0 and 1.2 and a TODOs build made against 1.1.
 - **Breaking changes.** Changes that break existing extensions get a new major version and a new

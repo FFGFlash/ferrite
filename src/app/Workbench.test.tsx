@@ -44,6 +44,7 @@ const doc = (id: number, path: string) => ({
   dirty: false,
   lineEnding: 'LF' as const,
   encoding: 'UTF-8',
+  encodingId: 'utf-8',
 })
 
 describe('Workbench', () => {
@@ -292,7 +293,7 @@ describe('Workbench', () => {
     const content = within(screen.getByRole('region', { name: 'main.rs' })).getByRole('tabpanel')
     dragFilesTo({ element: content, x: 900, y: 500 }, { files: ['C:\\elsewhere\\notes.txt'] })
     await act(async () => {})
-    expect(editorIpc.openDocument).toHaveBeenCalledWith('C:\\elsewhere\\notes.txt')
+    expect(editorIpc.openDocument).toHaveBeenCalledWith('C:\\elsewhere\\notes.txt', false)
     const group = groupHolding('document:7')!
     expect(group.items).toEqual(['document:7'])
     expect(group.id).not.toBe('main')

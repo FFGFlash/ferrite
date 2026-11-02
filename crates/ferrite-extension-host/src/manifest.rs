@@ -157,6 +157,8 @@ struct RawManifest {
   #[serde(default)]
   previews: Vec<contributions::RawPreview>,
   #[serde(default)]
+  viewers: Vec<contributions::RawViewer>,
+  #[serde(default)]
   languages: Vec<contributions::RawLanguage>,
   #[serde(default)]
   language_servers: Vec<contributions::RawLanguageServer>,
@@ -437,6 +439,7 @@ pub fn parse(
       views: raw.views,
       decorations: raw.decorations,
       previews: raw.previews,
+      viewers: raw.viewers,
       languages: raw.languages,
       language_servers: raw.language_servers,
     },
@@ -774,6 +777,19 @@ icon = "bug"
 
 [[previews]]
 id = "summary"
+
+[[viewers]]
+id = "image"
+title = "Image Viewer"
+patterns = ["*.png", "*.{jpg,jpeg}"]
+command = "example.tidy.trim"
+
+[[viewers]]
+id = "vector"
+title = "Vector Viewer"
+patterns = ["*.svg"]
+command = "example.tidy.trim"
+priority = "option"
 "##;
 
   #[test]
@@ -799,6 +815,17 @@ id = "summary"
     assert_eq!(contributions.previews[0].full_id, "example.tidy.report");
     assert_eq!(contributions.previews[0].icon, "bug");
     assert_eq!(contributions.previews[1].icon, "book", "the default");
+    let viewer = &contributions.viewers[0];
+    assert_eq!(viewer.full_id, "example.tidy.image");
+    assert_eq!(viewer.patterns, ["*.png", "*.{jpg,jpeg}"]);
+    assert_eq!(
+      viewer.priority,
+      crate::contributions::ViewerPriority::Default
+    );
+    assert_eq!(
+      contributions.viewers[1].priority,
+      crate::contributions::ViewerPriority::Option
+    );
   }
 
   #[test]
@@ -820,6 +847,18 @@ id = "summary"
     assert!(with("icon = \"bug\"", "icon = \"globe\"").contains("previews: icon"));
     assert!(with("id = \"summary\"", "id = \"report\"").contains("declared twice"));
     assert!(with("id = \"summary\"", "id = \"Sum mary\"").contains("previews: id"));
+    assert!(with("[\"*.svg\"]", "[]").contains("patterns must list"));
+    assert!(with("[\"*.svg\"]", "[\"img/*.svg\"]").contains("pattern \"img/*.svg\""));
+    assert!(with("\"option\"", "\"always\"").contains("priority"));
+    assert!(
+      with(
+        "command = \"example.tidy.trim\"
+priority",
+        "command = \"other.open\"
+priority"
+      )
+      .contains("not one of")
+    );
     let view = VALID.replace("\"on-startup\"", "\"on-view:missing\"");
     assert!(error_of(&view).contains("view that is not declared"));
   }

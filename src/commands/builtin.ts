@@ -1,10 +1,21 @@
 /** The workbench's built-in commands and their default keybindings. */
-import { openPalette } from '../components/paletteState'
+import { openPalette, openQuickPick } from '../components/paletteState'
 import { togglePerfOverlay } from '../components/PerfOverlay'
 import { resetPerf } from '../state/perf'
 import { activeEditor } from '../editor/activeEditor'
-import { documentsStore, newFile, openFile, openPath, save, saveAll } from '../state/documents'
+import {
+  documentsStore,
+  newFile,
+  openFile,
+  openPath,
+  reopenWithEncoding,
+  save,
+  saveAll,
+  saveWithEncoding,
+} from '../state/documents'
+import { viewersFor } from '../state/viewers'
 import { addDevelopmentExtension, reloadExtensions } from '../ipc/extensions'
+import { listEncodings, type EncodingChoice } from '../ipc/editor'
 import { setIconTheme, setTheme, settingsFilePath } from '../ipc/workspace'
 import { showOutput, showProblems } from '../state/output'
 import { forgetExtensionIcons } from '../state/extensions'
@@ -34,6 +45,7 @@ import {
   closeItem,
   closeOtherTabs,
   closeSavedTabs,
+  currentTab,
   cycleTab,
   documentItem,
   focusActiveTerminal,
@@ -43,7 +55,9 @@ import {
   hasCurrentTab,
   moveCurrentTab,
   openTerminal,
+  parseViewerItem,
   reopenClosedTab,
+  reopenWith,
   resetLayout,
   showView,
   splitCurrentTab,
@@ -52,6 +66,7 @@ import {
   toggleTerminals,
 } from '../dock/dock'
 import type { EditorOp } from '../ipc/editor'
+import { itemKind } from '../dock/model'
 import {
   bindingsOf,
   commandLabel,
@@ -63,6 +78,90 @@ import {
 
 const hasEditor = () => activeEditor.get() !== null
 const hasDocument = () => documentsStore.get().activeId !== null
+
+/** The active document, if it has a file (and so an encoding to change). */
+function activeFileDocument() {
+  const { documents, activeId } = documentsStore.get()
+  return documents.find(document => document.id === activeId && document.path !== null)
+}
+
+let encodings: Promise<EncodingChoice[]> | null = null
+
+/** Asks for an encoding, then reopens or saves the active document with it. */
+async function pickEncoding(action: 'reopen' | 'save'): Promise<void> {
+  const document = activeFileDocument()
+  if (!document) {
+    return
+  }
+  encodings ??= listEncodings()
+  let choices: EncodingChoice[]
+  try {
+    choices = await encodings
+  } catch (error) {
+    encodings = null
+    notify('error', `Listing the encodings failed: ${String(error)}`)
+    return
+  }
+  const run = action === 'reopen' ? reopenWithEncoding : saveWithEncoding
+  openQuickPick({
+    placeholder: action === 'reopen' ? 'Reopen with encoding' : 'Save with encoding',
+    items: choices.map(choice => ({
+      label: choice.label,
+      detail: choice.id === document.encodingId ? 'Current' : choice.id,
+      run: () => void run(document.id, choice.id),
+    })),
+  })
+}
+
+/** Reopening or saving the active document with another encoding, as the status bar offers. */
+function changeEncoding(): void {
+  openQuickPick({
+    placeholder: 'Change the file encoding',
+    items: [
+      { label: 'Reopen with Encoding', run: () => void pickEncoding('reopen') },
+      { label: 'Save with Encoding', run: () => void pickEncoding('save') },
+    ],
+  })
+}
+
+/** The file of the current tab, if it's a document's or a viewer's. */
+function currentFile(): string | null {
+  const item = currentTab()
+  if (!item) {
+    return null
+  }
+  if (itemKind(item) === 'viewer') {
+    return parseViewerItem(item).path
+  }
+  if (itemKind(item) === 'document') {
+    const id = Number(item.slice(item.indexOf(':') + 1))
+    return documentsStore.get().documents.find(document => document.id === id)?.path ?? null
+  }
+  return null
+}
+
+/** Asks how to show the current tab's file: as text, or in a viewer that can show it. */
+function pickEditor(): void {
+  const item = currentTab()
+  const path = currentFile()
+  if (!item || !path) {
+    return
+  }
+  const showing = itemKind(item) === 'viewer' ? parseViewerItem(item).viewer : null
+  const current = (viewer: string | null) =>
+    viewer === showing && (viewer !== null || itemKind(item) === 'document') ? 'Current' : undefined
+  openQuickPick({
+    placeholder: 'Reopen the editor with',
+    items: [
+      { label: 'Text Editor', detail: current(null), run: () => void reopenWith(item, null) },
+      ...viewersFor(path).map(viewer => ({
+        label: viewer.title,
+        detail: current(viewer.fullId) ?? (viewer.priority === 'default' ? 'Default' : undefined),
+        run: () => void reopenWith(item, viewer.fullId),
+      })),
+    ],
+  })
+}
 const hasWorkspace = () => workspaceStore.get().info !== null
 /** Runs `action` on the explorer's focused file or folder. */
 const onFocusedEntry = (action: (path: string) => void | Promise<void>) => () => {
@@ -129,6 +228,34 @@ export const builtinCommands: Command[] = [
     keybinding: 'mod+shift+s',
     enabled: hasDocument,
     run: () => save(undefined, true),
+  },
+  {
+    id: 'file.changeEncoding',
+    category: 'File',
+    title: 'Change File Encoding',
+    enabled: () => activeFileDocument() !== undefined,
+    run: changeEncoding,
+  },
+  {
+    id: 'file.reopenWithEncoding',
+    category: 'File',
+    title: 'Reopen with Encoding…',
+    enabled: () => activeFileDocument() !== undefined,
+    run: () => pickEncoding('reopen'),
+  },
+  {
+    id: 'file.saveWithEncoding',
+    category: 'File',
+    title: 'Save with Encoding…',
+    enabled: () => activeFileDocument() !== undefined,
+    run: () => pickEncoding('save'),
+  },
+  {
+    id: 'view.reopenWith',
+    category: 'View',
+    title: 'Reopen Editor With…',
+    enabled: () => currentFile() !== null,
+    run: pickEditor,
   },
   {
     id: 'file.saveAll',

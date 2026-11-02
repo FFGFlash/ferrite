@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use ferrite_text::{
   Bias, ChangeSet, Edit, LineEnding, TextBuffer, TextSnapshot, Version, normalize_line_endings,
 };
-use ferrite_workspace::FileStamp;
+use ferrite_workspace::{FileStamp, TextEncoding};
 
 use crate::error::CoreError;
 use crate::folds::Folds;
@@ -63,7 +63,7 @@ impl Default for EditorConfig {
 #[derive(Debug, Clone)]
 struct FileBacking {
   path: PathBuf,
-  has_bom: bool,
+  encoding: TextEncoding,
   /// Disk state when last loaded or saved; `None` if unknown.
   stamp: Option<FileStamp>,
 }
@@ -74,7 +74,9 @@ struct FileBacking {
 #[derive(Debug, Clone)]
 pub struct SavePoint {
   pub snapshot: TextSnapshot,
-  pub has_bom: bool,
+  /// The encoding to write it in: the document's, unless changed to save
+  /// it with another one.
+  pub encoding: TextEncoding,
   /// Disk stamp the file is expected to still have, if known.
   pub expected_stamp: Option<FileStamp>,
   state: StateId,
@@ -102,7 +104,7 @@ impl Document {
   pub(crate) fn new(
     id: DocumentId,
     text: &str,
-    file: Option<(PathBuf, bool, FileStamp)>,
+    file: Option<(PathBuf, TextEncoding, FileStamp)>,
     untitled_number: u32,
     config: &EditorConfig,
   ) -> Self {
@@ -121,9 +123,9 @@ impl Document {
       line_ending,
       tab_size: config.tab_size.max(1),
       insert_spaces: config.insert_spaces,
-      file: file.map(|(path, has_bom, stamp)| FileBacking {
+      file: file.map(|(path, encoding, stamp)| FileBacking {
         path,
-        has_bom,
+        encoding,
         stamp: Some(stamp),
       }),
       untitled_number,
@@ -157,8 +159,13 @@ impl Document {
     self.file.as_ref().map(|file| file.path.as_path())
   }
 
-  pub fn has_bom(&self) -> bool {
-    self.file.as_ref().is_some_and(|file| file.has_bom)
+  /// How the text is stored in its file: the encoding it was read in or
+  /// last saved in. Untitled documents are saved as UTF-8.
+  pub fn encoding(&self) -> TextEncoding {
+    self
+      .file
+      .as_ref()
+      .map_or(TextEncoding::UTF8, |file| file.encoding)
   }
 
   /// File name for file-backed documents, `Untitled-N` otherwise.
@@ -187,7 +194,7 @@ impl Document {
   pub fn save_point(&self) -> SavePoint {
     SavePoint {
       snapshot: self.buffer.snapshot(),
-      has_bom: self.has_bom(),
+      encoding: self.encoding(),
       expected_stamp: self.file.as_ref().and_then(|file| file.stamp.clone()),
       state: self.history.current_state(),
     }
@@ -199,7 +206,7 @@ impl Document {
     self.saved_state = point.state;
     self.file = Some(FileBacking {
       path,
-      has_bom: point.has_bom,
+      encoding: point.encoding,
       stamp: Some(stamp),
     });
     self.history.seal();
@@ -222,11 +229,16 @@ impl Document {
   /// document saved. Only the differing middle section is replaced, so
   /// cursors before and after it stay put, and the reload can be undone.
   /// Returns whether the text changed.
-  pub fn reload(&mut self, text: &str, has_bom: bool, stamp: FileStamp) -> Result<bool, CoreError> {
+  pub fn reload(
+    &mut self,
+    text: &str,
+    encoding: TextEncoding,
+    stamp: FileStamp,
+  ) -> Result<bool, CoreError> {
     let changed = self.replace_text(text)?;
     self.saved_state = self.history.current_state();
     if let Some(file) = &mut self.file {
-      file.has_bom = has_bom;
+      file.encoding = encoding;
       file.stamp = Some(stamp);
     }
     self.history.seal();
@@ -462,7 +474,7 @@ mod tests {
       "head
 old middle
 tail",
-      Some((path, false, stamp.clone())),
+      Some((path, TextEncoding::UTF8, stamp.clone())),
       0,
       &EditorConfig::default(),
     );
@@ -473,7 +485,7 @@ tail",
           "head
 new
 tail",
-          false,
+          TextEncoding::UTF8,
           stamp.clone()
         )
         .expect("reloads")
@@ -510,7 +522,7 @@ tail"
           "head
 old middle
 tail",
-          false,
+          TextEncoding::UTF8,
           stamp
         )
         .expect("reloads")

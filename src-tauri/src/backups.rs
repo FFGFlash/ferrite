@@ -18,7 +18,8 @@ use std::time::{Duration, Instant};
 use ferrite_core::{DocumentId, Editor, EditorOp};
 use ferrite_text::{TextSnapshot, Version};
 use ferrite_workspace::{
-  Abandoned, BackupMeta, BackupSession, FileError, RecoveredBackup, load_text_file,
+  Abandoned, BackupMeta, BackupSession, DecodeOptions, FileError, RecoveredBackup, TextEncoding,
+  load_text_file_with,
 };
 use tauri::{AppHandle, Manager};
 
@@ -107,6 +108,7 @@ impl Writer {
             path: document.path().map(Path::to_path_buf),
             title: document.title(),
             cursor: document.selections().primary().head,
+            encoding: document.path().map(|_| document.encoding().id()),
           },
           text: document.buffer().snapshot(),
         });
@@ -456,7 +458,16 @@ fn restore_one(app: &AppHandle, backup: &RecoveredBackup) -> Result<Restored, St
     if state.lock().find_by_path(&path).is_some() {
       was_open = true;
     } else {
-      match load_text_file(&path) {
+      // As it was read before, else as it reads now.
+      let options = DecodeOptions {
+        encoding: backup
+          .meta
+          .encoding
+          .as_deref()
+          .and_then(TextEncoding::from_id),
+        binary: true,
+      };
+      match load_text_file_with(&path, options) {
         Ok(file) if file.text == backup.text => return Ok(Restored::Unchanged),
         Ok(file) => loaded = Some((path, file)),
         // Deleted since: restore the text as an untitled document.

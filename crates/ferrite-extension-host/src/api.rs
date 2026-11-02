@@ -20,6 +20,7 @@ use crate::bindings::ferrite::extension::types::{
   MessageLevel, Permission as WitPermission, Position, PreviewNode, PreviewOptions, Range,
   StatusItem, TextEdit, TextSlice, ViewItem,
 };
+use crate::bindings::ferrite::extension::viewers::{FileBytes, Host as ViewersHost};
 use crate::bindings::ferrite::extension::workbench::Host as WorkbenchHost;
 use crate::config::ConfigValue;
 use crate::host::{Shared, StoredDiagnostic};
@@ -507,6 +508,21 @@ impl ApiContext {
     Ok((format!("{}/{key}", declared.full_id), declared.icon.clone()))
   }
 
+  /// The preview id of `path` open in one of the extension's viewers, and
+  /// the file, or an error if it isn't open there.
+  fn viewed(&self, viewer: &str, path: &str) -> Result<(String, std::path::PathBuf), ApiError> {
+    let declared = self
+      .manifest
+      .contributions
+      .viewer(viewer)
+      .ok_or_else(|| ApiError::InvalidArgument(format!("no viewer {viewer:?} is declared")))?;
+    let id = crate::host::viewer_id(&declared.full_id, Path::new(path));
+    let file = self.shared()?.viewed_file(&id).ok_or_else(|| {
+      ApiError::InvalidArgument(format!("{path} isn't open in the viewer {viewer:?}"))
+    })?;
+    Ok((id, file))
+  }
+
   fn view(&self, view: &str) -> Result<String, ApiError> {
     self
       .manifest
@@ -731,6 +747,61 @@ impl WorkbenchHost for StoreState {
     let (id, _) = self.api.preview(&preview, &key)?;
     self.api.shared()?.close_preview(&id);
     Ok(())
+  }
+}
+
+/// Most bytes one `read-viewed-file` call returns.
+pub const MAX_VIEWED_READ_BYTES: u32 = 16 * 1024 * 1024;
+
+impl ViewersHost for StoreState {
+  fn set_viewer_content(
+    &mut self,
+    viewer: String,
+    path: String,
+    nodes: Vec<PreviewNode>,
+  ) -> Result<bool, ApiError> {
+    let (id, file) = match self.api.viewed(&viewer, &path) {
+      Ok(viewed) => viewed,
+      // Closed since the command started.
+      Err(ApiError::InvalidArgument(_))
+        if self.api.manifest.contributions.viewer(&viewer).is_some() =>
+      {
+        return Ok(false);
+      }
+      Err(error) => return Err(error),
+    };
+    // Pictures and links are found from the file's folder.
+    let converted = preview::convert(nodes, file.parent())?;
+    Ok(
+      self
+        .api
+        .shared()?
+        .set_preview_content(&id, converted.content, converted.images),
+    )
+  }
+
+  fn read_viewed_file(
+    &mut self,
+    viewer: String,
+    path: String,
+    offset: u64,
+    length: u32,
+  ) -> Result<FileBytes, ApiError> {
+    use std::io::{Read, Seek, SeekFrom};
+    let (_, file) = self.api.viewed(&viewer, &path)?;
+    let failed = |error: std::io::Error| {
+      ApiError::InvalidArgument(format!("{} couldn't be read: {error}", file.display()))
+    };
+    let mut handle = std::fs::File::open(&file).map_err(failed)?;
+    let size = handle.metadata().map_err(failed)?.len();
+    let length = u64::from(length.min(MAX_VIEWED_READ_BYTES)).min(size.saturating_sub(offset));
+    let mut bytes = Vec::with_capacity(usize::try_from(length).unwrap_or(0));
+    handle.seek(SeekFrom::Start(offset)).map_err(failed)?;
+    handle
+      .take(length)
+      .read_to_end(&mut bytes)
+      .map_err(failed)?;
+    Ok(FileBytes { size, bytes })
   }
 }
 

@@ -62,7 +62,8 @@ workspace, `extensions/`. The design brief's `editor-app` and `src-tauri` are on
 and hardening decisions (crash recovery, accessibility, regression checks) in
 [ADR 0008](adr/0008-hardening.md), and the integrated terminal in
 [ADR 0011](adr/0011-integrated-terminal.md), and docking in
-[ADR 0012](adr/0012-docking.md). Measurements are in
+[ADR 0012](adr/0012-docking.md), and encodings, binary files, and extensions' viewers in
+[ADR 0023](adr/0023-encodings-and-viewers.md). Measurements are in
 [`performance.md`](performance.md).
 
 ## Background work
@@ -163,13 +164,26 @@ See [ADR 0002](adr/0002-text-model-and-editor-protocol.md) for the reasoning.
 `ferrite-workspace` reads and writes files. `ferrite-app` coordinates, so the core stays free of
 I/O.
 
-- **Loading** accepts UTF-8 only. Other encodings are refused with an error that names the first
-  invalid byte, rather than being decoded lossily. Files over 256 MiB are refused (`TooLarge`)
-  until M4's large-file strategy.
+- **Loading** reads the whole file, of any size, and decodes it
+  (`ferrite-workspace/src/encoding.rs`, [ADR 0023](adr/0023-encodings-and-viewers.md)). A byte
+  order mark picks UTF-8 or UTF-16. Without one, NUL bytes in the first 8 KiB mean a binary file
+  (`Binary`, which the workbench asks about), unless every other byte is NUL (UTF-16 without a
+  BOM). Valid UTF-8 comes next, then the legacy encoding `chardetng` guesses, if the file decodes
+  in it without errors and encodes back to the same bytes, and otherwise Windows-1252, which gives
+  every byte a character of its own. **Open Anyway** reads a binary file as UTF-8 if it's valid,
+  and byte for byte otherwise. Nothing is ever decoded lossily: a file read in an encoding the user
+  chose must be valid in it (`InvalidText`) and round-trip (`LossyEncoding`).
+- **Encodings** are a `TextEncoding` (an `encoding_rs` encoding and whether there's a BOM) that the
+  document keeps. **Reopen with Encoding** reloads a clean document in another one (undoably, like
+  a reload), and **Save with Encoding** writes it in another one, which the document takes once
+  the file is written. A reload after an external change reads the file in the document's
+  encoding, falling back to detecting one. Crash recovery backups record it too.
 - **Saving** takes a `SavePoint` (an O(1) rope snapshot plus the history state) under the editor
   lock, then writes it without the lock, so editing can continue. The file is written to a
   temporary file in the same directory, flushed with `fsync`, then renamed over the target. A
-  crash therefore leaves either the old or the new file, never a partial one. Symlinks are
+  crash therefore leaves either the old or the new file, never a partial one. The text is encoded
+  as it's written; a character the encoding lacks fails the save (`Unencodable`) and leaves the
+  file as it was. Symlinks are
   followed. Read-only files are refused. Unix permission bits are copied to the new file. On
   Windows, the rename is retried for up to about 600 ms while another program (a virus scanner,
   an indexer, a sync client) briefly has the file open. The app's own files (settings edits,
@@ -370,8 +384,9 @@ its id and keys.
 - **Inputs are validated and bounded in Rust.** Positions are clamped and snapped to grapheme
   boundaries, batches are limited to 1,000 operations, and views to 1,000 lines and 10,000
   selections.
-- **Errors** reach the frontend as `{ code, message }`, with stable codes such as `notUtf8`,
-  `modifiedOnDisk`, and `unknownDocument`. The frontend shows them as notifications.
+- **Errors** reach the frontend as `{ code, message }`, with stable codes such as `binary`,
+  `modifiedOnDisk`, and `unknownDocument`. The frontend shows them as notifications, except
+  `binary` when opening a file, which opens the tab that asks about it.
 - **Browser fallback.** Outside the desktop shell (`pnpm dev`, tests) commands fail with code
   `unavailable` and the workbench still renders.
 
@@ -685,18 +700,20 @@ connects it to the editor, settings, and frontend. The developer guide is
 
 Extensions customize the workbench declaratively ([ADR 0007](adr/0007-workbench-contributions.md)).
 The manifest declares contributions (validated in `contributions.rs`), and the workbench renders
-them. Extensions fill in content through the `workbench` interface (API 1.1; previews in 1.2).
+them. Extensions fill in content through the `workbench` interface (API 1.1; previews in 1.2), and
+viewers through the `viewers` interface (API 1.4).
 
-| Contribution     | Declared                               | Filled in by the extension                        | Rendered by                        |
-| ---------------- | -------------------------------------- | ------------------------------------------------- | ---------------------------------- |
-| Themes           | base kind + theme file of token colors | (nothing: no code needed)                         | `themes/theme.ts`, `appearance.ts` |
-| File icon themes | theme file of icons and associations   | (nothing: no code needed)                         | `components/fileIcons.ts`          |
-| Keybindings      | key, macOS key, `editorFocus`          | —                                                 | the command registry               |
-| Menu items       | location, command, group, targets      | — (explorer items get the path as argument)       | `components/ContextMenu`           |
-| Status bar items | alignment, priority, initial text      | `set-status-item`                                 | `StatusBar`                        |
-| Side bar views   | title, icon                            | `set-view-items`, `set-view-message`, `show-view` | `panels/ExtensionViewPanel`        |
-| Decorations      | colors (dark/light), underline, weight | `set-decorations` (ranges per document)           | `EditorView` overlay and line runs |
-| Previews         | icon                                   | `show-preview`, `set-preview-content` (nodes)     | `panels/PreviewPane` in a dock tab |
+| Contribution     | Declared                               | Filled in by the extension                          | Rendered by                        |
+| ---------------- | -------------------------------------- | --------------------------------------------------- | ---------------------------------- |
+| Themes           | base kind + theme file of token colors | (nothing: no code needed)                           | `themes/theme.ts`, `appearance.ts` |
+| File icon themes | theme file of icons and associations   | (nothing: no code needed)                           | `components/fileIcons.ts`          |
+| Keybindings      | key, macOS key, `editorFocus`          | —                                                   | the command registry               |
+| Menu items       | location, command, group, targets      | — (explorer items get the path as argument)         | `components/ContextMenu`           |
+| Status bar items | alignment, priority, initial text      | `set-status-item`                                   | `StatusBar`                        |
+| Side bar views   | title, icon                            | `set-view-items`, `set-view-message`, `show-view`   | `panels/ExtensionViewPanel`        |
+| Decorations      | colors (dark/light), underline, weight | `set-decorations` (ranges per document)             | `EditorView` overlay and line runs |
+| Previews         | icon                                   | `show-preview`, `set-preview-content` (nodes)       | `panels/PreviewPane` in a dock tab |
+| Viewers          | title, file patterns, command, default | `set-viewer-content` (nodes), when the command runs | `panels/ViewerPane` in a dock tab  |
 
 - **Host state.** Status and view content live in the host's state, keyed by extension. They are
   compared on update (unchanged content sends no event) and removed when the extension stops.
@@ -721,6 +738,19 @@ them. Extensions fill in content through the `workbench` interface (API 1.1; pre
   code blocks with the editor's grammars, and pictures load through `extension_preview_image`,
   only for files the content names. Links to web addresses open through `open_external`, which
   accepts only `http:`, `https:`, and `mailto:`.
+- **Viewers** ([ADR 0023](adr/0023-encodings-and-viewers.md)) show files that aren't opened as
+  text, such as images. `openPath` (`state/documents.ts`) shows a file already open as text there,
+  else in the tab it already has, else in the viewer that's the default for its name
+  (`state/viewers.ts`), else as text. A file that's binary gets the same kind of tab, asking
+  first. These are dock items, `viewer:<viewer id>:<path>` (no viewer id for a binary file), saved
+  with the layout. When one shows, `extension_viewer_open` creates a preview record for the file
+  in the host (`<viewer id>/<path>`, left out of the preview list) and runs the viewer's command
+  with the path as its argument. The extension reads the file (`read-viewed-file`, only files open
+  in its viewers) and sets the content (`set-viewer-content`), which the tab fetches and draws like
+  a preview's, pictures resolved from the file's folder. The tab asks again when the file changes
+  on disk (`filesChanged`) or the extension becomes usable again, and the host does when a
+  stopped extension starts: its viewers' content went when it stopped, but their records stay
+  until their tabs close. **Reopen Editor With** swaps a tab between text and viewers in place.
 - **`reveal`** asks the frontend to activate a document and select a range; **`show-view`** opens
   a view.
 
@@ -799,6 +829,8 @@ them. Extensions fill in content through the `workbench` interface (API 1.1; pre
   lists everything in the side bar (the groups along the dock's left edge: views, terminals,
   documents), then the views not docked anywhere except panel views (`activityBarItems`). Its buttons show an item, hide the group of an item already showing,
   and can be dragged into the dock; a tab dropped on it joins the side bar.
+- **Quick picks** (`openQuickPick` in `components/paletteState.ts`) show a list of choices in
+  the palette, filtered by typing: encodings, and the ways to reopen a file.
 - **Context menus** (`components/ContextMenu`) are a generic keyboard-navigable menu, opened by
   the editor (clipboard, Go to Definition, extension items, Command Palette) and by explorer
   file rows (Open, extension items).
@@ -923,7 +955,13 @@ These are tracked for later milestones:
 - Lines longer than 16 KiB are shown only up to that point (with a badge). The cursor can't be
   seen beyond it, though editing there works. Visual columns past 4 KiB count characters, not
   tab stops or grapheme clusters.
-- Files load completely into memory (up to 256 MiB); there's no lazy or partial loading.
+- Files load completely into memory, whatever their size, taking about twice their size while
+  they load; there's no lazy or partial loading. The editor scrolls through one element sized
+  to all its lines, and browsers limit an element's height (to about 33 million pixels in
+  WebView2), so lines past roughly 1.6 million (at the default line height) can't be scrolled
+  into view, though the cursor, editing, search, and saving reach them.
+- Encodings are detected from the whole file's bytes (the guess from its first MiB); there's no
+  setting for a default encoding, and UTF-32 isn't supported.
 - Replace across files, include/exclude globs in the search panel, and search-result context
   lines aren't implemented.
 - The explorer can't rename, move, or delete files yet. Large directories aren't
@@ -943,8 +981,8 @@ These are tracked for later milestones:
   WebAssembly grammar's external scanner can't be interrupted mid-call.
 - Extensions have no storage API and can't depend on other extensions. Components that import
   WASI are rejected. There's no installer; extensions are installed by copying their folder.
-- Contributed views are trees of text items, and previews are formatted text from a fixed set of
-  elements; there are no custom interactive views, inline text (inlays), gutter icons, or
+- Contributed views are trees of text items, and previews and viewers are formatted text from a
+  fixed set of elements; viewers can't edit their files, and there are no custom interactive views, inline text (inlays), gutter icons, or
   decoration hover text. Menus exist only in the editor and the
   explorer (files), and keybindings support only the `editorFocus` condition.
 - There's no keybindings UI; keybindings are edited as TOML. The settings editor doesn't edit

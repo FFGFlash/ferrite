@@ -8,7 +8,7 @@ use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
 use ferrite_benches::code_text;
 use ferrite_core::Editor;
 use ferrite_text::TextBuffer;
-use ferrite_workspace::{load_text_file, save_text_file};
+use ferrite_workspace::{TextEncoding, load_text_file, save_text_file};
 
 const MB: usize = 1024 * 1024;
 
@@ -48,7 +48,11 @@ fn save(c: &mut Criterion) {
     let snapshot = TextBuffer::from_text(&code_text(size)).snapshot();
     group.bench_function(
       BenchmarkId::from_parameter(format!("{}MB", size / MB)),
-      |b| b.iter(|| save_text_file(black_box(&path), &snapshot, false, None).expect("saves")),
+      |b| {
+        b.iter(|| {
+          save_text_file(black_box(&path), &snapshot, TextEncoding::UTF8, None).expect("saves")
+        })
+      },
     );
   }
   group.finish();

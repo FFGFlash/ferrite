@@ -7,6 +7,8 @@ license.workspace = true
 publish = false
 
 [dependencies]
+chardetng = { workspace = true }
+encoding_rs = { workspace = true }
 ferrite-text = { workspace = true }
 globset = { workspace = true }
 ignore = { workspace = true }

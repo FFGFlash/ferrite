@@ -20,6 +20,7 @@ const document = (path: string | null, title = 'Palette.tsx'): DocumentSummary =
   dirty: false,
   lineEnding: 'LF',
   encoding: 'UTF-8',
+  encodingId: 'utf-8',
 })
 
 describe('crumbsFor', () => {

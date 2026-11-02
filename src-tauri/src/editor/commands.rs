@@ -10,8 +10,10 @@ use std::path::Path;
 
 use ferrite_core::{CoreError, Document, DocumentId, EditorOp};
 use ferrite_text::SearchQuery;
-use ferrite_workspace::{FileError, load_text_file, save_text_file};
-use serde::Deserialize;
+use ferrite_workspace::{
+  DecodeOptions, ENCODING_CHOICES, FileError, TextEncoding, load_text_file_with, save_text_file,
+};
+use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Manager, State, WebviewWindow};
 use tauri_plugin_clipboard_manager::ClipboardExt;
 
@@ -63,21 +65,109 @@ pub fn document_new(
   Ok(DocumentSummary::of(document))
 }
 
+/// Opens a file as a text document. A file that looks binary fails with
+/// `binary`, unless `binary` is set (the user chose to open it anyway).
 #[tauri::command]
-pub async fn document_open(app: AppHandle, path: String) -> Result<DocumentSummary, CommandError> {
-  open_path(&app, Path::new(&path)).await
+pub async fn document_open(
+  app: AppHandle,
+  path: String,
+  binary: Option<bool>,
+) -> Result<DocumentSummary, CommandError> {
+  let options = DecodeOptions {
+    encoding: None,
+    binary: binary.unwrap_or(false),
+  };
+  open_path(&app, Path::new(&path), options).await
 }
 
-/// Shows an open dialog and opens the chosen file. `None` if cancelled.
+/// Shows an open dialog and returns the chosen file, which the workbench
+/// then opens (as text, or in an extension's viewer). `None` if cancelled.
 #[tauri::command]
-pub async fn document_open_dialog(
+pub async fn document_pick_file(window: WebviewWindow) -> Option<String> {
+  dialogs::pick_file_to_open(&window)
+    .await
+    .map(|path| paths::normalize(&path).display().to_string())
+}
+
+/// The encodings a document can be reopened or saved with.
+#[tauri::command]
+pub fn document_encodings() -> Vec<EncodingChoice> {
+  ENCODING_CHOICES
+    .iter()
+    .map(|(id, label)| EncodingChoice { id, label })
+    .collect()
+}
+
+#[derive(Serialize)]
+pub struct EncodingChoice {
+  id: &'static str,
+  label: &'static str,
+}
+
+fn encoding_named(id: &str) -> Result<TextEncoding, CommandError> {
+  TextEncoding::from_id(id)
+    .ok_or_else(|| CommandError::new("unknownEncoding", format!("There's no encoding {id:?}.")))
+}
+
+/// Reads a document's file again in another encoding. Refused while it has
+/// unsaved changes, which reading it again would replace. The reload can be
+/// undone, like a reload after the file changed on disk.
+#[tauri::command]
+pub async fn document_reopen_with_encoding(
   app: AppHandle,
-  window: WebviewWindow,
-) -> Result<Option<DocumentSummary>, CommandError> {
-  match dialogs::pick_file_to_open(&window).await {
-    Some(path) => open_path(&app, &path).await.map(Some),
-    None => Ok(None),
+  id: u64,
+  encoding: String,
+) -> Result<DocumentSummary, CommandError> {
+  let id = DocumentId::from_raw(id);
+  let encoding = encoding_named(&encoding)?;
+  let state = app.state::<EditorState>();
+  let path = {
+    let editor = state.lock();
+    let document = editor.document(id)?;
+    if document.is_dirty() {
+      return Err(CommandError::new(
+        "unsaved",
+        format!(
+          "{} has unsaved changes. Save or undo them before reopening it with another encoding.",
+          document.title()
+        ),
+      ));
+    }
+    document
+      .path()
+      .ok_or_else(|| CommandError::new("untitled", "An untitled file has no encoding yet."))?
+      .to_path_buf()
+  };
+  let options = DecodeOptions {
+    encoding: Some(encoding),
+    binary: true,
+  };
+  let to_load = path.clone();
+  let loaded = blocking(move || load_text_file_with(&to_load, options)).await??;
+  let mut editor = state.lock();
+  let document = editor.document_mut(id)?;
+  if document.is_dirty() {
+    return Err(CommandError::new(
+      "unsaved",
+      format!("{} was edited while it was being read.", document.title()),
+    ));
   }
+  document.reload(&loaded.text, loaded.encoding, loaded.stamp)?;
+  tracing::info!(document = %id, encoding = %loaded.encoding.id(), "reopened with an encoding");
+  app.state::<ExtensionsState>().sync(document);
+  Ok(DocumentSummary::of(document))
+}
+
+/// Saves a document in another encoding, which it keeps from then on.
+/// `None` if the user cancelled.
+#[tauri::command]
+pub async fn document_save_with_encoding(
+  window: WebviewWindow,
+  id: u64,
+  encoding: String,
+) -> Result<Option<DocumentSummary>, CommandError> {
+  let encoding = encoding_named(&encoding)?;
+  save_in(&window, DocumentId::from_raw(id), false, Some(encoding)).await
 }
 
 /// Saves a document, asking for a path if it has none. `None` if the user
@@ -398,7 +488,11 @@ pub async fn confirm_close_with_unsaved(window: &WebviewWindow) -> bool {
   }
 }
 
-async fn open_path(app: &AppHandle, path: &Path) -> Result<DocumentSummary, CommandError> {
+async fn open_path(
+  app: &AppHandle,
+  path: &Path,
+  options: DecodeOptions,
+) -> Result<DocumentSummary, CommandError> {
   let path = paths::normalize(path);
   let state = app.state::<EditorState>();
   if let Some(summary) = find_open(&state, &path) {
@@ -407,7 +501,7 @@ async fn open_path(app: &AppHandle, path: &Path) -> Result<DocumentSummary, Comm
 
   let to_load = path.clone();
   let started = std::time::Instant::now();
-  let loaded = blocking(move || load_text_file(&to_load)).await??;
+  let loaded = blocking(move || load_text_file_with(&to_load, options)).await??;
   app
     .state::<Perf>()
     .record("document.load", started.elapsed());
@@ -418,8 +512,9 @@ async fn open_path(app: &AppHandle, path: &Path) -> Result<DocumentSummary, Comm
     return Ok(DocumentSummary::of(editor.document(id)?));
   }
   let bytes = loaded.text.len();
+  let encoding = loaded.encoding;
   let id = editor.open(path.clone(), loaded);
-  tracing::info!(document = %id, path = %path.display(), bytes, "opened file");
+  tracing::info!(document = %id, path = %path.display(), bytes, ?encoding, "opened file");
   let document = editor.document(id)?;
   fold_memory::recall(app, document);
   app.state::<ExtensionsState>().sync(document);
@@ -442,8 +537,19 @@ async fn save(
   id: DocumentId,
   choose_path: bool,
 ) -> Result<Option<DocumentSummary>, CommandError> {
+  save_in(window, id, choose_path, None).await
+}
+
+/// Saves `id` as [`save`] does, in `encoding` rather than its own if given.
+/// The document takes the encoding only once the file is written.
+async fn save_in(
+  window: &WebviewWindow,
+  id: DocumentId,
+  choose_path: bool,
+  encoding: Option<TextEncoding>,
+) -> Result<Option<DocumentSummary>, CommandError> {
   let state = window.state::<EditorState>();
-  let (point, current_path, title) = {
+  let (mut point, current_path, title) = {
     let editor = state.lock();
     let document = editor.document(id)?;
     (
@@ -452,6 +558,9 @@ async fn save(
       document.title(),
     )
   };
+  if let Some(encoding) = encoding {
+    point.encoding = encoding;
+  }
 
   let path = match (&current_path, choose_path) {
     (Some(path), false) => path.clone(),
@@ -478,15 +587,15 @@ async fn save(
   };
 
   let stamp = loop {
-    let (target, snapshot, has_bom, check) = (
+    let (target, snapshot, encoding, check) = (
       path.clone(),
       point.snapshot.clone(),
-      point.has_bom,
+      point.encoding,
       expected.clone(),
     );
     let started = std::time::Instant::now();
     let result =
-      blocking(move || save_text_file(&target, &snapshot, has_bom, check.as_ref())).await?;
+      blocking(move || save_text_file(&target, &snapshot, encoding, check.as_ref())).await?;
     window
       .state::<Perf>()
       .record("document.save", started.elapsed());
@@ -539,7 +648,7 @@ pub fn save_quietly(app: &AppHandle, id: DocumentId) -> Result<(), String> {
   let stamp = save_text_file(
     &path,
     &point.snapshot,
-    point.has_bom,
+    point.encoding,
     point.expected_stamp.as_ref(),
   )
   .map_err(|error| error.to_string())?;

@@ -62,6 +62,13 @@ pub enum AppEvent {
     /// Whether it should become the active tab.
     active: bool,
   },
+  /// A file named at startup that isn't a text document (it looks binary),
+  /// for the workbench to open in an extension's viewer, or to ask about.
+  OpenFile {
+    path: String,
+    /// Whether it should become the active tab.
+    active: bool,
+  },
   /// Progress of the Go to File index.
   IndexStatus {
     indexing: bool,
