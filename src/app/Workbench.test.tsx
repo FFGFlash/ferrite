@@ -1,6 +1,8 @@
 import { act, fireEvent, render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { builtinCommands } from '../commands/builtin'
+import { registerCommands } from '../commands/registry'
 import { contextMenuStore } from '../components/contextMenuState'
 import { dockStore, moveItem, restoreDock } from '../dock/dock'
 import { findGroup, groupOf } from '../dock/model'
@@ -247,6 +249,25 @@ describe('Workbench', () => {
     await user.keyboard('{Delete}')
     expect(screen.queryByRole('tab', { name: 'Search' })).not.toBeInTheDocument()
     expect(findGroup(dockStore.get(), 'g1')!.items).toEqual(['view:explorer', 'view:extensions'])
+  })
+
+  it('closes the focused tab with Ctrl+W and reopens it with Ctrl+Shift+T', async () => {
+    const user = userEvent.setup()
+    const unregister = registerCommands(builtinCommands)
+    render(<Workbench appInfo={null} />)
+
+    await user.click(screen.getByRole('tab', { name: 'Search' }))
+    await user.keyboard('{Control>}w{/Control}')
+    expect(findGroup(dockStore.get(), 'g1')!.items).toEqual(['view:explorer', 'view:extensions'])
+
+    await user.keyboard('{Control>}{Shift>}T{/Shift}{/Control}')
+    expect(findGroup(dockStore.get(), 'g1')!.items).toEqual([
+      'view:explorer',
+      'view:search',
+      'view:extensions',
+    ])
+    expect(screen.getByRole('tab', { name: 'Search' })).toHaveAttribute('aria-selected', 'true')
+    unregister()
   })
 
   it('offers splitting and moving in a tab menu, from the keyboard too', async () => {

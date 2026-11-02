@@ -10,11 +10,15 @@ import { createStore } from './store'
 
 const SAVE_DELAY_MS = 500
 const MAX_EXPANDED = 200
+export const MIN_ZOOM = 0.5
+export const MAX_ZOOM = 3
 
 export interface Layout {
   /** Expanded explorer folders (absolute paths). */
   expanded: string[]
   minimapVisible: boolean
+  /** The window's zoom factor (1 is 100%). */
+  zoom: number
   /**
    * Where everything is docked, as saved (see `dock/dock.ts`). Layouts from
    * before the dock hold `{ sidebarVisible, activeView }` here instead.
@@ -25,6 +29,7 @@ export interface Layout {
 export const DEFAULT_LAYOUT: Layout = {
   expanded: [],
   minimapVisible: true,
+  zoom: 1,
   dock: null,
 }
 
@@ -50,6 +55,10 @@ export function parseLayout(input: unknown): Layout {
       typeof saved.minimapVisible === 'boolean'
         ? saved.minimapVisible
         : DEFAULT_LAYOUT.minimapVisible,
+    zoom:
+      typeof saved.zoom === 'number' && saved.zoom >= MIN_ZOOM && saved.zoom <= MAX_ZOOM
+        ? saved.zoom
+        : DEFAULT_LAYOUT.zoom,
     dock:
       saved.dock ??
       // Before the dock: the side bar's state seeds the default layout.

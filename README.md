@@ -47,8 +47,11 @@ preserved exactly, and new lines use the file's existing line ending.
 | ----------------------------------- | -------------------------------- | ------------------------ |
 | Command palette                     | Ctrl+Shift+P, F1                 | ⇧⌘P, F1                  |
 | Go to file / Go to line             | Ctrl+P / Ctrl+G                  | ⌘P / ⌃G                  |
-| New file / Open / Close tab         | Ctrl+N / Ctrl+O / Ctrl+W         | ⌘N / ⌘O / ⌘W             |
-| Save / Save As                      | Ctrl+S / Ctrl+Shift+S            | ⌘S / ⇧⌘S                 |
+| New file / Open / Open folder       | Ctrl+N / Ctrl+O / Ctrl+K Ctrl+O  | ⌘N / ⌘O / ⌘K ⌘O          |
+| Close tab / Reopen closed tab       | Ctrl+W / Ctrl+Shift+T            | ⌘W / ⇧⌘T                 |
+| Close saved / all tabs in group     | Ctrl+K U / Ctrl+K W              | ⌘K U / ⌘K W              |
+| Close all editors / Close folder    | Ctrl+K Ctrl+W / Ctrl+K F         | ⌘K ⌘W / ⌘K F             |
+| Save / Save As / Save all           | Ctrl+S / Ctrl+Shift+S / Ctrl+K S | ⌘S / ⇧⌘S / ⌘K S          |
 | Find / Replace                      | Ctrl+F / Ctrl+H                  | ⌘F / ⌥⌘F                 |
 | Next / previous match               | F3 / Shift+F3 (Enter in find)    | F3 / ⇧F3                 |
 | Add next occurrence                 | Ctrl+D                           | ⌘D                       |
@@ -58,8 +61,13 @@ preserved exactly, and new lines use the file's existing line ending.
 | Explorer / Toggle side bar          | Ctrl+Shift+E / Ctrl+B            | ⇧⌘E / ⌘B                 |
 | Terminal / New / Toggle panel       | Ctrl+\` / Ctrl+Shift+\` / Ctrl+J | ⌃\` / ⌃⇧\` / ⌘J          |
 | Next / previous tab (in its group)  | Ctrl+Tab, Ctrl+PageDown / PageUp | ⌃Tab, ⌃PageDown / PageUp |
+| Tab 1 to 9 / last tab (in group)    | Alt+1 … Alt+9 / Alt+0            | ⌃1 … ⌃9 / ⌃0             |
 | Next / previous group               | F6 / Shift+F6                    | F6 / ⇧F6                 |
-| Settings                            | Ctrl+,                           | ⌘,                       |
+| Group 1 to 9 (outside the side bar) | Ctrl+1 … Ctrl+9                  | ⌘1 … ⌘9                  |
+| Split tab right                     | Ctrl+\                           | ⌘\                       |
+| Move tab to the left / right group  | Ctrl+Alt+← / →                   | ⌃⌘← / →                  |
+| Zoom in / out / reset               | Ctrl+= / Ctrl+- / Ctrl+0         | ⌘= / ⌘- / ⌘0             |
+| Settings / Keyboard shortcuts       | Ctrl+, / Ctrl+K Ctrl+S           | ⌘, / ⌘K ⌘S               |
 | Undo / Redo                         | Ctrl+Z / Ctrl+Y, Ctrl+Shift+Z    | ⌘Z / ⇧⌘Z                 |
 | Cut / Copy / Paste / Select all     | Ctrl+X / C / V / A               | ⌘X / C / V / A           |
 | Move by word                        | Ctrl+←/→                         | ⌥←/→                     |
@@ -301,6 +309,13 @@ Tabs sit in groups, and any tab can go in any group, beside any other.
   a tab. The same actions are commands: **View: Split Tab Right/Down**, **View: Move Tab
   Left/Right/Up/Down** (into the neighbouring group, or a new one), **View: Close Tab**, and
   **View: Reset Layout**. In a tab strip, the arrow keys move between tabs and `Delete` closes one.
+- **Closing and reopening.** `Ctrl+W` closes the tab you're working in, whatever it is: a
+  document, a view, Settings. In a terminal, `Ctrl+W` goes to the shell; close a terminal from its
+  tab. **View: Reopen Closed Tab** (`Ctrl+Shift+T`) brings back the last closed file, view, or
+  page where it was. Terminals (their shell has ended), previews, and untitled files don't come
+  back. **Close Other Tabs**, **Close Saved Tabs in Group**, and **Close All Tabs in Group** act on
+  the current group; **Close All Editors** closes every document, preview, and page, leaving views
+  and terminals.
 - **The side bar** is whatever is docked along the left edge, beside the activity bar. The
   activity bar has a button for each tab there (views, terminals, documents), and for views that
   aren't open; something docked elsewhere has no button. Drop a tab on the activity bar to move

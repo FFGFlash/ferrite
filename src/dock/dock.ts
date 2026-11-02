@@ -17,6 +17,7 @@ import {
   activate as activateDocument,
   close as closeDocument,
   documentsStore,
+  openPath,
 } from '../state/documents'
 import { layoutStore, updateLayout } from '../state/layout'
 import { reportError } from '../state/notifications'
@@ -113,6 +114,35 @@ export const currentGroup = createStore<string>(MAIN_GROUP)
 let documentGroup = MAIN_GROUP
 /** Where closed views were, to reopen them there. */
 const closedViews = new Map<ItemId, { group: string; index: number }>()
+
+/**
+ * A closed tab Reopen Closed Tab can bring back: a view, a page, or a
+ * document by path (`file:<path>`), and where it was.
+ */
+interface ClosedTab {
+  item: ItemId
+  group: string
+  index: number
+}
+
+const MAX_CLOSED_TABS = 20
+/** Closed tabs, most recent last. Terminals, previews, and untitled documents aren't kept. */
+const closedTabs: ClosedTab[] = []
+
+function rememberClosed(entry: ClosedTab): void {
+  const existing = closedTabs.findIndex(other => other.item === entry.item)
+  if (existing >= 0) {
+    closedTabs.splice(existing, 1)
+  }
+  closedTabs.push(entry)
+  if (closedTabs.length > MAX_CLOSED_TABS) {
+    closedTabs.shift()
+  }
+}
+
+export function hasClosedTab(): boolean {
+  return closedTabs.length > 0
+}
 
 function setLayout(layout: DockLayout): void {
   dockStore.set(layout)
@@ -404,6 +434,7 @@ export function restoreDock(): void {
   knownDocuments = new Set()
   knownTerminals = new Set()
   knownPreviews = new Set()
+  closedTabs.length = 0
   setLayout(layout)
   currentGroup.set(layout.main)
   documentGroup = layout.main
@@ -693,13 +724,30 @@ export async function toggleTerminals(): Promise<void> {
 
 /** Closes a tab: closes the document, ends the terminal, or closes the view, preview, or page. */
 export function closeItem(item: ItemId): void {
+  void closeTab(item)
+}
+
+const isOpen = (id: number) => documentsStore.get().documents.some(document => document.id === id)
+
+/**
+ * Closes a tab, remembering it for Reopen Closed Tab. Resolves to whether
+ * it closed: closing a document with unsaved changes can be cancelled.
+ */
+async function closeTab(item: ItemId): Promise<boolean> {
   const group = groupOf(dockStore.get(), item)
   const hadFocus = group ? hasFocus(group.id) : false
+  const place = group && { group: group.id, index: group.items.indexOf(item) }
   const id = itemId(item)
   switch (itemKind(item)) {
-    case 'document':
-      void closeDocument(Number(id))
-      return
+    case 'document': {
+      const path = documentsStore.get().documents.find(d => d.id === Number(id))?.path
+      await closeDocument(Number(id))
+      const closed = !isOpen(Number(id))
+      if (closed && path && place) {
+        rememberClosed({ item: fileItem(path), ...place })
+      }
+      return closed
+    }
     case 'terminal':
       closeTerminal(Number(id))
       break
@@ -708,11 +756,15 @@ export function closeItem(item: ItemId): void {
       setLayout(removeItem(dockStore.get(), item))
       break
     case 'page':
+      if (place) {
+        rememberClosed({ item, ...place })
+      }
       setLayout(removeItem(dockStore.get(), item))
       break
     default:
-      if (group) {
-        closedViews.set(item, { group: group.id, index: group.items.indexOf(item) })
+      if (place) {
+        closedViews.set(item, place)
+        rememberClosed({ item, ...place })
       }
       setLayout(removeItem(dockStore.get(), item))
   }
@@ -725,6 +777,7 @@ export function closeItem(item: ItemId): void {
       activeEditor.get()?.focus()
     }
   }
+  return true
 }
 
 /** The current group, if it still exists. */
@@ -740,6 +793,91 @@ export function closeCurrentTab(): void {
   const active = current()?.active
   if (active) {
     closeItem(active)
+  }
+}
+
+/**
+ * Closes tabs one at a time, the last first, so Reopen Closed Tab puts them
+ * back in order. Stops if closing one is cancelled.
+ */
+async function closeTabs(items: readonly ItemId[]): Promise<void> {
+  for (const item of [...items].reverse()) {
+    if (!(await closeTab(item))) {
+      return
+    }
+  }
+}
+
+/** Tabs that are editors: documents, previews, and pages, rather than views and terminals. */
+const isEditorTab = (item: ItemId) => {
+  const kind = itemKind(item)
+  return kind === 'document' || kind === 'preview' || kind === 'page'
+}
+
+const isDirty = (item: ItemId) =>
+  itemKind(item) === 'document' &&
+  documentsStore.get().documents.some(d => documentItem(d.id) === item && d.dirty)
+
+/** Closes the current group's tabs, or those `keep` doesn't keep. */
+export function closeGroupTabs(keep: (item: ItemId) => boolean = () => false): Promise<void> {
+  const items = current()?.items ?? []
+  return closeTabs(items.filter(item => itemKind(item) !== null && !keep(item)))
+}
+
+export const closeOtherTabs = () => closeGroupTabs(item => item === current()?.active)
+
+/** Closes the current group's documents without unsaved changes, previews, and pages. */
+export const closeSavedTabs = () => closeGroupTabs(item => !isEditorTab(item) || isDirty(item))
+
+/** Closes every document, preview, and page, leaving views and terminals. */
+export function closeAllEditors(): Promise<void> {
+  return closeTabs(allItems(dockStore.get()).filter(isEditorTab))
+}
+
+/**
+ * Reopens the most recently closed tab that's still closed: where it was,
+ * if its group remains, else where it would open.
+ */
+export async function reopenClosedTab(): Promise<void> {
+  for (let entry = closedTabs.pop(); entry; entry = closedTabs.pop()) {
+    const { item, group, index } = entry
+    const path = item.startsWith('file:') ? itemId(item) : null
+    const open =
+      path === null
+        ? groupOf(dockStore.get(), item) !== undefined
+        : documentsStore.get().documents.some(document => document.path === path)
+    if (open) {
+      continue
+    }
+    const layout = dockStore.get()
+    if (findGroup(layout, group)) {
+      setLayout(placeItem(layout, item, { kind: 'tabs', group, index }, 0.2))
+    }
+    if (path === null) {
+      showItem(item)
+      return
+    }
+    // The document takes its saved item's place when it opens (`syncDocuments`).
+    await openPath(path)
+    if (groupOf(dockStore.get(), item)) {
+      // It didn't open; `openPath` reported why.
+      setLayout(removeItem(dockStore.get(), item))
+    } else {
+      const { activeId } = documentsStore.get()
+      if (activeId !== null) {
+        showItem(documentItem(activeId))
+      }
+    }
+    return
+  }
+}
+
+/** Activates the current group's `n`th tab (from 1), or its last for 0. */
+export function activateTabNumber(n: number): void {
+  const items = current()?.items ?? []
+  const item = n === 0 ? items.at(-1) : items[n - 1]
+  if (item) {
+    showItem(item)
   }
 }
 
@@ -822,13 +960,28 @@ export function focusGroupRelative(step: number): void {
     return
   }
   const index = rects.findIndex(entry => entry.id === currentGroup.get())
-  const next = rects[(index + step + rects.length) % rects.length]!
-  const group = findGroup(dockStore.get(), next.id)
-  setCurrent(next.id)
+  focusGroup(rects[(index + step + rects.length) % rects.length]!.id)
+}
+
+/**
+ * Focuses the `n`th visible group (from 1) outside the side bar, in reading
+ * order: with the default layout, 1 is the main group.
+ */
+export function focusGroupNumber(n: number): void {
+  const sidebar = new Set(sidebarGroups(dockStore.get()).map(group => group.id))
+  const target = visibleGroupRects().filter(entry => !sidebar.has(entry.id))[n - 1]
+  if (target) {
+    focusGroup(target.id)
+  }
+}
+
+function focusGroup(id: string): void {
+  const group = findGroup(dockStore.get(), id)
+  setCurrent(id)
   if (group?.active) {
     showItem(group.active)
   } else {
-    contentElement(next.id)?.focus()
+    contentElement(id)?.focus()
   }
 }
 

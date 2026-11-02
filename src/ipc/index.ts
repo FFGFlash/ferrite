@@ -6,6 +6,7 @@
  * (e.g. `pnpm dev` in a browser, or tests) the wrappers degrade gracefully.
  */
 import { invoke, isTauri, type InvokeArgs } from '@tauri-apps/api/core'
+import { getCurrentWebview } from '@tauri-apps/api/webview'
 
 /** Mirrors `commands::AppInfo`. */
 export interface AppInfo {
@@ -109,4 +110,11 @@ function describe(reason: unknown): string {
     return reason.stack ?? `${reason.name}: ${reason.message}`
   }
   return String(reason)
+}
+
+/** Sets the window's zoom factor (1 is 100%). Does nothing outside the desktop shell. */
+export async function setWindowZoom(factor: number): Promise<void> {
+  if (desktop) {
+    await getCurrentWebview().setZoom(factor)
+  }
 }

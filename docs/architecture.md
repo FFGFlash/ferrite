@@ -798,7 +798,9 @@ them. Extensions fill in content through the `workbench` interface (API 1.1; pre
   the editor (clipboard, Go to Definition, extension items, Command Palette) and by explorer
   file rows (Open, extension items).
 - **Tabs** can be dragged within and between groups, cycled with Ctrl+Tab and
-  Ctrl+PageUp/PageDown within their group, and closed with Delete. Editor tabs remember their
+  Ctrl+PageUp/PageDown within their group, and closed with Delete or Ctrl+W (the current group's
+  tab). The dock keeps recently closed files, views, and pages with their places, for Reopen
+  Closed Tab (`closedTabs`, [ADR 0021](adr/0021-tab-keybindings.md)). Editor tabs remember their
   scroll position while the app runs. Clicking a tab focuses its content.
 - **Theming**: `styles/tokens.css` defines semantic tokens for dark and light themes (including
   find matches, widgets, inputs, lists, and buttons), selected by `data-theme` on `<html>`.

@@ -3,7 +3,7 @@ import { openPalette } from '../components/paletteState'
 import { togglePerfOverlay } from '../components/PerfOverlay'
 import { resetPerf } from '../state/perf'
 import { activeEditor } from '../editor/activeEditor'
-import { close, documentsStore, newFile, openFile, openPath, save } from '../state/documents'
+import { documentsStore, newFile, openFile, openPath, save, saveAll } from '../state/documents'
 import { addDevelopmentExtension, reloadExtensions } from '../ipc/extensions'
 import { setIconTheme, setTheme, settingsFilePath } from '../ipc/workspace'
 import { showOutput, showProblems } from '../state/output'
@@ -12,6 +12,7 @@ import { openSettings } from '../state/settings'
 import { DEFAULT_ICON_THEME } from '../state/iconTheme'
 import { layoutStore, updateLayout } from '../state/layout'
 import { notify } from '../state/notifications'
+import { resetZoom, zoomIn, zoomOut } from '../state/zoom'
 import { closeFolder, collapseAll, openFolder, workspaceStore } from '../state/workspace'
 import { isMac } from '../editor/keymap'
 import {
@@ -26,13 +27,23 @@ import {
 import { clearTerminal, closeTerminal, terminalsStore } from '../terminal/terminals'
 import { menuOrigin, openDefaultProfileMenu, openNewTerminalMenu } from '../terminal/profileMenu'
 import {
+  activateTabNumber,
+  closeAllEditors,
   closeCurrentTab,
+  closeGroupTabs,
+  closeItem,
+  closeOtherTabs,
+  closeSavedTabs,
   cycleTab,
+  documentItem,
   focusActiveTerminal,
+  focusGroupNumber,
   focusGroupRelative,
+  hasClosedTab,
   hasCurrentTab,
   moveCurrentTab,
   openTerminal,
+  reopenClosedTab,
   resetLayout,
   showView,
   splitCurrentTab,
@@ -88,11 +99,18 @@ export const builtinCommands: Command[] = [
     keybinding: 'mod+o',
     run: openFile,
   },
-  { id: 'file.openFolder', category: 'File', title: 'Open Folder…', run: openFolder },
+  {
+    id: 'file.openFolder',
+    category: 'File',
+    title: 'Open Folder…',
+    keybinding: 'mod+k mod+o',
+    run: openFolder,
+  },
   {
     id: 'file.closeFolder',
     category: 'File',
     title: 'Close Folder',
+    keybinding: 'mod+k f',
     enabled: hasWorkspace,
     run: closeFolder,
   },
@@ -113,12 +131,20 @@ export const builtinCommands: Command[] = [
     run: () => save(undefined, true),
   },
   {
+    id: 'file.saveAll',
+    category: 'File',
+    title: 'Save All',
+    keybinding: 'mod+k s',
+    enabled: () => documentsStore.get().documents.some(document => document.dirty),
+    run: saveAll,
+  },
+  {
+    // The active document, wherever focus is; Close Tab (Ctrl+W) closes the focused tab.
     id: 'file.close',
     category: 'View',
     title: 'Close Editor',
-    keybinding: 'mod+w',
     enabled: hasDocument,
-    run: () => close(),
+    run: () => closeItem(documentItem(documentsStore.get().activeId!)),
   },
   {
     id: 'workbench.commandPalette',
@@ -158,6 +184,30 @@ export const builtinCommands: Command[] = [
     category: 'View',
     title: 'Toggle Minimap',
     run: () => updateLayout({ minimapVisible: !layoutStore.get().minimapVisible }),
+  },
+  {
+    id: 'view.zoomIn',
+    category: 'View',
+    title: 'Zoom In',
+    keybinding: ['mod+=', 'mod+shift+=', 'mod++'],
+    terminal: true,
+    run: zoomIn,
+  },
+  {
+    id: 'view.zoomOut',
+    category: 'View',
+    title: 'Zoom Out',
+    keybinding: ['mod+-', 'mod+shift+-'],
+    terminal: true,
+    run: zoomOut,
+  },
+  {
+    id: 'view.resetZoom',
+    category: 'View',
+    title: 'Reset Zoom',
+    keybinding: 'mod+0',
+    terminal: true,
+    run: resetZoom,
   },
   {
     id: 'workbench.togglePanel',
@@ -226,13 +276,63 @@ export const builtinCommands: Command[] = [
     id: 'view.closeTab',
     category: 'View',
     title: 'Close Tab',
+    keybinding: 'mod+w',
     enabled: hasCurrentTab,
     run: closeCurrentTab,
+  },
+  {
+    id: 'view.closeOtherTabs',
+    category: 'View',
+    title: 'Close Other Tabs',
+    enabled: hasCurrentTab,
+    run: closeOtherTabs,
+  },
+  {
+    id: 'view.closeSavedTabs',
+    category: 'View',
+    title: 'Close Saved Tabs in Group',
+    keybinding: 'mod+k u',
+    enabled: hasCurrentTab,
+    run: closeSavedTabs,
+  },
+  {
+    id: 'view.closeGroupTabs',
+    category: 'View',
+    title: 'Close All Tabs in Group',
+    keybinding: 'mod+k w',
+    enabled: hasCurrentTab,
+    run: () => closeGroupTabs(),
+  },
+  {
+    id: 'view.closeAllEditors',
+    category: 'View',
+    title: 'Close All Editors',
+    keybinding: 'mod+k mod+w',
+    run: closeAllEditors,
+  },
+  {
+    id: 'view.reopenClosedTab',
+    category: 'View',
+    title: 'Reopen Closed Tab',
+    keybinding: 'mod+shift+t',
+    terminal: true,
+    enabled: hasClosedTab,
+    run: reopenClosedTab,
   },
   ...(['left', 'right', 'up', 'down'] as const).map((direction): Command => ({
     id: `view.moveTab${direction[0]!.toUpperCase()}${direction.slice(1)}`,
     category: 'View',
     title: `Move Tab ${direction[0]!.toUpperCase()}${direction.slice(1)}`,
+    // Up and down would take the editor's Add Cursor Above/Below.
+    ...(direction === 'left' || direction === 'right'
+      ? {
+          keybinding: {
+            default: `ctrl+alt+arrow${direction}`,
+            mac: `ctrl+meta+arrow${direction}`,
+          },
+        }
+      : {}),
+    terminal: true,
     enabled: hasCurrentTab,
     run: () =>
       moveCurrentTab(direction === 'up' ? 'top' : direction === 'down' ? 'bottom' : direction),
@@ -241,6 +341,7 @@ export const builtinCommands: Command[] = [
     id: 'view.splitRight',
     category: 'View',
     title: 'Split Tab Right',
+    keybinding: 'mod+\\',
     enabled: hasCurrentTab,
     run: () => splitCurrentTab('right'),
   },
@@ -267,6 +368,22 @@ export const builtinCommands: Command[] = [
     terminal: true,
     run: () => focusGroupRelative(-1),
   },
+  ...[1, 2, 3, 4, 5, 6, 7, 8, 9].map((n): Command => ({
+    id: `view.focusGroup${n}`,
+    category: 'View',
+    title: `Focus Group ${n}`,
+    keybinding: `mod+${n}`,
+    terminal: true,
+    run: () => focusGroupNumber(n),
+  })),
+  ...[1, 2, 3, 4, 5, 6, 7, 8, 9, 0].map((n): Command => ({
+    id: n === 0 ? 'view.lastTab' : `view.tab${n}`,
+    category: 'View',
+    title: n === 0 ? 'Last Tab in Group' : `Tab ${n} in Group`,
+    keybinding: { default: `alt+${n}`, mac: `ctrl+${n}` },
+    enabled: hasCurrentTab,
+    run: () => activateTabNumber(n),
+  })),
   {
     id: 'view.resetLayout',
     category: 'View',
@@ -672,6 +789,7 @@ export const builtinCommands: Command[] = [
     id: 'preferences.keyboardShortcuts',
     category: 'Preferences',
     title: 'Keyboard Shortcuts',
+    keybinding: 'mod+k mod+s',
     run: () => newFile(keyboardShortcutsText()),
   },
 ]

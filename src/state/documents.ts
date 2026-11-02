@@ -171,6 +171,13 @@ export async function save(id = activeId(), as = false): Promise<void> {
   }
 }
 
+/** Saves every document with unsaved changes, one at a time (untitled ones ask for a path). */
+export async function saveAll(): Promise<void> {
+  for (const document of documentsStore.get().documents.filter(d => d.dirty)) {
+    await save(document.id)
+  }
+}
+
 export async function close(id = activeId()): Promise<void> {
   if (id === null) {
     return

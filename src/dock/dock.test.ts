@@ -11,13 +11,17 @@ vi.mock('../ipc/terminal', () => ({
   killTerminal: vi.fn(),
   terminalPlatform: vi.fn(async () => ({ windowsBuild: null })),
 }))
-vi.mock('../ipc/editor', () => ({ closeDocument: vi.fn(async () => true) }))
+vi.mock('../ipc/editor', () => ({
+  closeDocument: vi.fn(async () => true),
+  openDocument: vi.fn(),
+}))
 vi.mock('../ipc/extensions', () => ({
   listPreviews: vi.fn(async () => []),
   previewClosed: vi.fn(async () => {}),
 }))
 
 const terminalIpc = await import('../ipc/terminal')
+const editorIpc = await import('../ipc/editor')
 const extensionIpc = await import('../ipc/extensions')
 const previews = await import('../state/previews')
 const dock = await import('./dock')
@@ -62,6 +66,9 @@ describe('dock', () => {
       title: 'pwsh',
     }))
     vi.mocked(terminalIpc.killTerminal).mockResolvedValue(undefined)
+    // Reopening a file gives it a new id, as the backend does.
+    let nextDocument = 100
+    vi.mocked(editorIpc.openDocument).mockImplementation(async path => doc(nextDocument++, path))
     vi.mocked(terminalIpc.listTerminals).mockResolvedValue([])
     layoutStore.set(DEFAULT_LAYOUT)
     dock.restoreDock()
@@ -403,5 +410,101 @@ describe('dock', () => {
     expect(findGroup(layout(), bottom)!.hidden).toBe(true)
     await dock.toggleTerminals()
     expect(findGroup(layout(), bottom)!.hidden).toBeFalsy()
+  })
+
+  it('reopens closed tabs, the latest first, where they were', async () => {
+    documentsStore.set({ documents: [doc(1), doc(2)], activeId: 1 })
+    showPage('settings')
+    expect(groupItems('main')).toEqual(['document:1', 'page:settings', 'document:2'])
+    dock.closeItem('view:search')
+    dock.closeItem('page:settings')
+    dock.closeItem('document:1')
+    await vi.waitFor(() => expect(groupItems('main')).toEqual(['document:2']))
+
+    await dock.reopenClosedTab()
+    expect(editorIpc.openDocument).toHaveBeenCalledWith('/w/file1.rs')
+    expect(groupItems('main')).toEqual(['document:100', 'document:2'])
+    expect(findGroup(layout(), 'main')!.active).toBe('document:100')
+    await dock.reopenClosedTab()
+    expect(groupItems('main')).toEqual(['document:100', 'page:settings', 'document:2'])
+    await dock.reopenClosedTab()
+    expect(groupItems('g1')).toEqual(['view:explorer', 'view:search', 'view:extensions'])
+    expect(dock.hasClosedTab()).toBe(false)
+  })
+
+  it('skips tabs open again, and keeps no untitled documents or terminals', async () => {
+    documentsStore.set({ documents: [doc(1, null)], activeId: 1 })
+    await dock.openTerminal()
+    const terminal = groupHolding('terminal:' + terminals.terminalsStore.get().activeId)!
+    dock.closeItem('view:search')
+    dock.groupFocused(terminal.id)
+    await dock.closeGroupTabs()
+    dock.groupFocused('main')
+    await dock.closeGroupTabs()
+    expect(dock.hasClosedTab()).toBe(true)
+
+    dock.showView('search', false)
+    await dock.reopenClosedTab()
+    expect(dock.hasClosedTab()).toBe(false)
+    expect(editorIpc.openDocument).not.toHaveBeenCalled()
+    expect(terminals.terminalsStore.get().tabs).toEqual([])
+  })
+
+  it('removes the place kept for a file that fails to reopen', async () => {
+    documentsStore.set({ documents: [doc(1), doc(2)], activeId: 1 })
+    dock.closeItem('document:1')
+    await vi.waitFor(() => expect(groupItems('main')).toEqual(['document:2']))
+    vi.mocked(editorIpc.openDocument).mockRejectedValueOnce(new Error('gone'))
+    await dock.reopenClosedTab()
+    expect(groupItems('main')).toEqual(['document:2'])
+  })
+
+  it('closes the saved, other, or all tabs of the group, and every editor', async () => {
+    documentsStore.set({ documents: [doc(1), { ...doc(2), dirty: true }, doc(3)], activeId: 3 })
+    showPage('settings')
+    dock.groupFocused('main')
+    await dock.closeSavedTabs()
+    expect(groupItems('main')).toEqual(['document:2'])
+
+    dock.groupFocused('g1')
+    dock.activateTabNumber(3)
+    await dock.closeOtherTabs()
+    expect(groupItems('g1')).toEqual(['view:extensions'])
+
+    await dock.closeAllEditors()
+    expect(groupItems('main')).toEqual([])
+    expect(groupItems('g1')).toEqual(['view:extensions'])
+
+    // Closed from the last, so they reopen in order.
+    documentsStore.set({ documents: [doc(4), doc(5), doc(6)], activeId: 6 })
+    dock.groupFocused('main')
+    await dock.closeGroupTabs()
+    for (let i = 0; i < 3; i++) {
+      await dock.reopenClosedTab()
+    }
+    expect(
+      groupItems('main')!.map(
+        item => documentsStore.get().documents.find(d => `document:${d.id}` === item)?.path,
+      ),
+    ).toEqual(['/w/file4.rs', '/w/file5.rs', '/w/file6.rs'])
+  })
+
+  it('stops closing tabs when closing one is cancelled', async () => {
+    documentsStore.set({ documents: [doc(1), doc(2), doc(3)], activeId: 1 })
+    vi.mocked(editorIpc.closeDocument).mockImplementation(async id => id !== 2)
+    dock.groupFocused('main')
+    await dock.closeGroupTabs()
+    expect(groupItems('main')).toEqual(['document:1', 'document:2'])
+    vi.mocked(editorIpc.closeDocument).mockImplementation(async () => true)
+  })
+
+  it('activates a tab of the current group by number, 0 for the last', () => {
+    dock.groupFocused('g1')
+    dock.activateTabNumber(2)
+    expect(findGroup(layout(), 'g1')!.active).toBe('view:search')
+    dock.activateTabNumber(0)
+    expect(findGroup(layout(), 'g1')!.active).toBe('view:extensions')
+    dock.activateTabNumber(9)
+    expect(findGroup(layout(), 'g1')!.active).toBe('view:extensions')
   })
 })

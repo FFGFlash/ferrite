@@ -3,5 +3,5 @@
   "identifier": "default",
   "description": "Permissions for the main workbench window. Ferrite's own commands are always callable; Tauri core and plugin permissions are granted here only when the frontend needs them.",
   "windows": ["main"],
-  "permissions": []
+  "permissions": ["core:webview:allow-set-webview-zoom"]
 }

@@ -135,6 +135,7 @@ item kinds. A malformed tree gives the default layout.
   (right-click, `Shift+F10`, or the menu key) splits or moves the tab. F6 and Shift+F6 move
   between groups. There are commands for all of it: Move Tab Left/Right/Up/Down (into the
   neighbouring group on screen, or a new one), Split Tab Right/Down, Close Tab, and Reset Layout.
+  Close Tab took `Ctrl+W` and Reopen Closed Tab was added later ([ADR 0021](0021-tab-keybindings.md)).
 - **Close buttons.** The × on a tab is for the pointer only (`aria-hidden`). A control inside a
   `tab` can't be reached by screen readers, and axe reports it.
 

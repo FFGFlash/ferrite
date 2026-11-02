@@ -4,16 +4,17 @@ import { DEFAULT_LAYOUT, parseLayout } from './layout'
 describe('parseLayout', () => {
   it('restores valid saved values', () => {
     const dock = { main: 'main', root: { kind: 'group', id: 'main', items: [], active: null } }
-    expect(parseLayout({ expanded: ['/a'], minimapVisible: false, dock })).toEqual({
+    expect(parseLayout({ expanded: ['/a'], minimapVisible: false, zoom: 1.25, dock })).toEqual({
       expanded: ['/a'],
       minimapVisible: false,
+      zoom: 1.25,
       dock,
     })
   })
 
   it('falls back to defaults for missing or invalid fields', () => {
     expect(parseLayout({})).toEqual(DEFAULT_LAYOUT)
-    expect(parseLayout({ expanded: [1, '/b'], minimapVisible: 'no' })).toEqual({
+    expect(parseLayout({ expanded: [1, '/b'], minimapVisible: 'no', zoom: 40 })).toEqual({
       ...DEFAULT_LAYOUT,
       expanded: ['/b'],
     })
