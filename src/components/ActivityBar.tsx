@@ -1,13 +1,19 @@
-import { useState, type DragEvent } from 'react'
+import { useState } from 'react'
 import { useViews } from '../app/views'
 import { activityBarItems, dockInSidebar, dockStore, toggleItem } from '../dock/dock'
-import { DOCK_ITEM_TYPE, draggedItem, endDrag, startDrag } from '../dock/DockArea'
-import { ItemIcon, itemLabel, itemTooltip, useResolver, type ResolvedItem } from '../dock/items'
+import { startItemDrag } from '../dock/DockArea'
+import {
+  ItemIcon,
+  itemLabel,
+  itemTitle,
+  itemTooltip,
+  useResolver,
+  type ResolvedItem,
+} from '../dock/items'
 import { groups } from '../dock/model'
 import { useStore } from '../state/store'
+import { useDropTarget } from './drag'
 import './ActivityBar.css'
-
-const isDockDrag = (event: DragEvent) => event.dataTransfer.types.includes(DOCK_ITEM_TYPE)
 
 /**
  * A button per item in the side bar (views, terminals, documents), then per
@@ -21,6 +27,19 @@ export function ActivityBar() {
   const views = useViews()
   const resolve = useResolver()
   const [dropping, setDropping] = useState(false)
+  const dropRef = useDropTarget<HTMLElement>({
+    over: drag => {
+      const takes = drag.payload.kind === 'dock'
+      setDropping(takes)
+      return takes
+    },
+    drop: drag => {
+      if (drag.payload.kind === 'dock') {
+        dockInSidebar(drag.payload.item)
+      }
+    },
+    leave: () => setDropping(false),
+  })
 
   const items = activityBarItems(
     layout,
@@ -32,35 +51,7 @@ export function ActivityBar() {
   const shown = new Set(groups(layout).flatMap(group => (group.hidden ? [] : [group.active])))
 
   return (
-    <nav
-      className="activitybar"
-      aria-label="Views"
-      data-drop={dropping || undefined}
-      onDragOver={event => {
-        if (isDockDrag(event)) {
-          event.preventDefault()
-          event.dataTransfer.dropEffect = 'move'
-          setDropping(true)
-        }
-      }}
-      onDragLeave={event => {
-        if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
-          setDropping(false)
-        }
-      }}
-      onDrop={event => {
-        setDropping(false)
-        if (!isDockDrag(event)) {
-          return
-        }
-        event.preventDefault()
-        const item = event.dataTransfer.getData(DOCK_ITEM_TYPE) || draggedItem()
-        endDrag()
-        if (item) {
-          dockInSidebar(item)
-        }
-      }}
-    >
+    <nav ref={dropRef} className="activitybar" aria-label="Views" data-drop={dropping || undefined}>
       {items.map(resolved => (
         <button
           key={resolved.item}
@@ -70,12 +61,7 @@ export function ActivityBar() {
           aria-pressed={shown.has(resolved.item)}
           title={itemTooltip(resolved)}
           data-kind={resolved.kind}
-          draggable
-          onDragStart={event => startDrag(event, resolved.item)}
-          onDragEnd={() => {
-            setDropping(false)
-            endDrag()
-          }}
+          onPointerDown={event => startItemDrag(event, resolved.item, itemTitle(resolved))}
           onClick={() => toggleItem(resolved.item)}
         >
           <ItemIcon resolved={resolved} className="activitybar__icon" size={24} />

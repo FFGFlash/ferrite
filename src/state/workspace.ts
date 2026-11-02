@@ -49,9 +49,10 @@ export async function loadWorkspace(): Promise<void> {
   }
 }
 
-export async function openFolder(): Promise<void> {
+/** Opens a folder the user picks, or `path` (a folder dropped on the window). */
+export async function openFolder(path?: string): Promise<void> {
   try {
-    const info = await ipc.openWorkspaceDialog()
+    const info = await (path === undefined ? ipc.openWorkspaceDialog() : ipc.openWorkspace(path))
     if (info) {
       updateLayout({ expanded: [] })
       showView('explorer')
@@ -205,6 +206,17 @@ export async function moveEntries(paths: readonly string[], folder: string): Pro
 /** Copies files and folders into `folder`, returning the copies' paths. */
 export async function copyEntries(paths: readonly string[], folder: string): Promise<string[]> {
   const copies = await ipc.copyEntries([...paths], folder)
+  await reload(folder)
+  return copies
+}
+
+/**
+ * Copies the files and folders of a drop from another program into
+ * `folder`, returning the copies' paths. The backend copies what was dropped
+ * (`dropId` names the drop), so nothing outside the open folder can be named.
+ */
+export async function copyDropped(dropId: number, folder: string): Promise<string[]> {
+  const copies = await ipc.copyDropped(dropId, folder)
   await reload(folder)
   return copies
 }

@@ -14,6 +14,7 @@ use tauri::ipc::Channel;
 use tauri::{AppHandle, Manager, State};
 
 use crate::editor::protocol::{DocumentSummary, Position};
+use crate::file_drop::FileDragPhase;
 use crate::settings::FrontendSettings;
 
 #[derive(Debug, Clone, Serialize)]
@@ -116,6 +117,17 @@ pub enum AppEvent {
   /// Something the user should know about, such as files that could not be
   /// reopened or restored unsaved changes.
   Notice { level: NoticeLevel, message: String },
+  /// Files and folders dragged in from another program. The position is in
+  /// physical pixels from the webview's top left (zero for `Leave`). Paths
+  /// come with `Enter` and `Drop`; `drop_id` names a drop, for copying it.
+  FileDrag {
+    phase: FileDragPhase,
+    x: f64,
+    y: f64,
+    files: Vec<String>,
+    folders: Vec<String>,
+    drop_id: Option<u64>,
+  },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]

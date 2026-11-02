@@ -31,7 +31,8 @@ the focused row).
 - **Inside the open folder.** The backend refuses paths outside it, the folder itself (except
   as a destination or to reveal), and paths with `..`.
 - **Drag and drop** stays inside the explorer. Dragging files in from the system isn't handled
-  yet.
+  yet. (It is now: they're copied into the folder they're dropped on, [ADR
+  0022](0022-file-drops-and-pointer-drags.md).)
 
 ### Open documents follow their files
 

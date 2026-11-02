@@ -6,6 +6,7 @@ import { Channel } from '@tauri-apps/api/core'
 import type { DocumentSummary, Position, SearchQuery } from './editor'
 import { call, isDesktop } from './index'
 import type { MessageLevel } from './extensions'
+import type { FileDragEvent } from '../components/drag'
 
 export interface WorkspaceInfo {
   root: string
@@ -172,8 +173,11 @@ export type AppEvent =
   | { type: 'extensionPreviewChanged'; preview: string }
   | { type: 'extensionShowPreview'; preview: string; beside: boolean }
   | { type: 'notice'; level: 'warning'; message: string }
+  /** Files dragged in from another program; positions in physical pixels. */
+  | ({ type: 'fileDrag' } & FileDragEvent)
 
 export const getWorkspace = () => call<WorkspaceInfo | null>('workspace_get')
+export const openWorkspace = (path: string) => call<WorkspaceInfo>('workspace_open', { path })
 export const openWorkspaceDialog = () => call<WorkspaceInfo | null>('workspace_open_dialog')
 export const closeWorkspace = () => call<void>('workspace_close')
 export const listDirectory = (path: string) =>
@@ -184,6 +188,9 @@ export const createEntry = (parent: string, name: string, directory: boolean) =>
 /** Renames a file or folder; `name` may name new subfolders to move it into. */
 export const renameEntry = (path: string, name: string) =>
   call<CreatedEntry>('workspace_rename', { path, name })
+/** Copies what was dropped from another program (drop `dropId`) into `target`. */
+export const copyDropped = (dropId: number, target: string) =>
+  call<string[]>('workspace_copy_dropped', { dropId, target })
 /** Moves files and folders into `target`, returning their new paths. */
 export const moveEntries = (paths: string[], target: string) =>
   call<string[]>('workspace_move', { paths, target })

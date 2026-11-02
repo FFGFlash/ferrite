@@ -2,6 +2,7 @@ import { act, fireEvent, render, screen, waitFor, within } from '@testing-librar
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { DirectoryEntry } from '../ipc/workspace'
+import { dragFilesTo, pressToDrag } from '../test/drag'
 
 vi.mock('../ipc/workspace', () => ({
   listDirectory: vi.fn(),
@@ -9,6 +10,7 @@ vi.mock('../ipc/workspace', () => ({
   renameEntry: vi.fn(),
   moveEntries: vi.fn(),
   copyEntries: vi.fn(),
+  copyDropped: vi.fn(),
   deleteEntries: vi.fn(),
   revealEntry: vi.fn(),
   writeClipboardText: vi.fn(),
@@ -539,44 +541,43 @@ describe('ExplorerPanel', () => {
 
   it('moves by dragging onto a folder, and copies with Ctrl held', async () => {
     const tree = await renderTree()
-    const transfer = () => ({ setData: vi.fn(), effectAllowed: '', dropEffect: '' })
-    // jsdom's drag events carry no modifier keys; a mouse event does.
-    const withCtrl = (type: string) => {
-      const event = new MouseEvent(type, { bubbles: true, cancelable: true, ctrlKey: true })
-      Object.defineProperty(event, 'dataTransfer', { value: transfer() })
-      return event
-    }
     let readme = within(tree).getByText('README.md').closest('li') as HTMLElement
     const src = within(tree).getByText('src').closest('li') as HTMLElement
 
-    fireEvent.dragStart(readme, { dataTransfer: transfer() })
-    fireEvent.dragOver(src, { dataTransfer: transfer() })
+    const drag = pressToDrag(readme)
+    drag.moveTo({ element: src, x: 10, y: 40 })
     expect(src).toHaveAttribute('data-drop-target')
     // Dropping where it already is does nothing: no target there.
-    fireEvent.dragOver(readme, { dataTransfer: transfer() })
+    drag.moveTo({ element: readme, x: 10, y: 80 })
     expect(readme).not.toHaveAttribute('data-drop-target')
-    fireEvent.dragOver(src, { dataTransfer: transfer() })
-    await act(async () => {
-      fireEvent.drop(src, { dataTransfer: transfer() })
-    })
+    drag.moveTo({ element: src, x: 10, y: 40 })
+    await act(async () => drag.drop())
     expect(ipc.moveEntries).toHaveBeenCalledWith(['/w/README.md'], '/w/src')
     expect(src).not.toHaveAttribute('data-drop-target')
 
     // Without Ctrl, dropping where it is does nothing. (Moving it expanded
     // src, so its row is a new element.)
     readme = within(tree).getAllByText('README.md')[0]!.closest('li') as HTMLElement
-    fireEvent.dragStart(readme, { dataTransfer: transfer() })
-    await act(async () => {
-      fireEvent.drop(readme, { dataTransfer: transfer() })
-    })
+    const again = pressToDrag(readme)
+    again.moveTo({ element: readme, x: 10, y: 80 })
+    await act(async () => again.drop())
     expect(ipc.moveEntries).toHaveBeenCalledTimes(1)
-    fireEvent.dragStart(readme, { dataTransfer: transfer() })
-    fireEvent(readme, withCtrl('dragover'))
+    const copy = pressToDrag(readme)
+    copy.moveTo({ element: readme, x: 10, y: 80, ctrlKey: true })
     expect(tree).toHaveAttribute('data-drop-target')
-    await act(async () => {
-      fireEvent(readme, withCtrl('drop'))
-    })
+    await act(async () => copy.drop())
     expect(ipc.copyEntries).toHaveBeenCalledWith(['/w/README.md'], '/w')
+  })
+
+  it('copies files dropped from another program into the folder under them', async () => {
+    vi.mocked(ipc.copyDropped).mockResolvedValue(['/w/src/notes.txt'])
+    const tree = await renderTree()
+    const src = within(tree).getByText('src').closest('li') as HTMLElement
+
+    dragFilesTo({ element: src, x: 10, y: 40 }, { files: ['C:\elsewhere\notes.txt'], dropId: 4 })
+    await act(async () => {})
+    expect(ipc.copyDropped).toHaveBeenCalledWith(4, '/w/src')
+    expect(src).not.toHaveAttribute('data-drop-target')
   })
 
   it("offers extensions' items for the files and folders they're for", async () => {

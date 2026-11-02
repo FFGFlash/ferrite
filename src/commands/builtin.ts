@@ -739,7 +739,9 @@ export const builtinCommands: Command[] = [
     category: 'Preferences',
     title: 'Open Settings (TOML)',
     terminal: true,
-    run: async () => openPath(await settingsFilePath()),
+    run: async () => {
+      await openPath(await settingsFilePath())
+    },
   },
   {
     id: 'developer.togglePerformance',

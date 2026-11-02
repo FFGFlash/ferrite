@@ -738,8 +738,13 @@ them. Extensions fill in content through the `workbench` interface (API 1.1; pre
   - `model.ts`: the tree of splits and tab groups, as pure functions.
   - `dock.ts`: the store. It follows the documents and terminals stores, places new items, tracks
     the current group, hides and shows groups, and saves the tree (documents by path).
-  - `DockArea.tsx` and `items.tsx`: rendering, with splitters (`Sash`), tab strips, drag and drop
+  - `DockArea.tsx` and `items.tsx`: rendering, with splitters (`Sash`), tab strips, drop targets
     with a drop preview, the tab menu, and each item kind's tab, content, and buttons.
+
+  Dragging (`components/drag.ts`, [ADR 0022](adr/0022-file-drops-and-pointer-drags.md)) is on
+  pointer events, not HTML5 drag and drop: tabs, activity bar buttons, and explorer rows, and
+  files dragged in from other programs, which the backend reports (`file_drop.rs`). Elements
+  register as drop targets (`useDropTarget`), and the one under the pointer takes the drag.
 
   Views and pages (`app/pages.ts`, such as the settings editor) are shown through
   `state/viewRequests.ts`, so state modules needn't import the dock.

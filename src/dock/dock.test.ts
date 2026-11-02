@@ -15,6 +15,10 @@ vi.mock('../ipc/editor', () => ({
   closeDocument: vi.fn(async () => true),
   openDocument: vi.fn(),
 }))
+vi.mock('../ipc/workspace', async importOriginal => ({
+  ...(await importOriginal<typeof import('../ipc/workspace')>()),
+  openWorkspace: vi.fn(async (path: string) => ({ root: path, name: path.split('/').pop() })),
+}))
 vi.mock('../ipc/extensions', () => ({
   listPreviews: vi.fn(async () => []),
   previewClosed: vi.fn(async () => {}),
@@ -22,6 +26,9 @@ vi.mock('../ipc/extensions', () => ({
 
 const terminalIpc = await import('../ipc/terminal')
 const editorIpc = await import('../ipc/editor')
+const workspaceIpc = await import('../ipc/workspace')
+const { workspaceStore } = await import('../state/workspace')
+const { notifications } = await import('../state/notifications')
 const extensionIpc = await import('../ipc/extensions')
 const previews = await import('../state/previews')
 const dock = await import('./dock')
@@ -506,5 +513,29 @@ describe('dock', () => {
     expect(findGroup(layout(), 'g1')!.active).toBe('view:extensions')
     dock.activateTabNumber(9)
     expect(findGroup(layout(), 'g1')!.active).toBe('view:extensions')
+  })
+
+  it('opens dropped files in order where they were dropped, moving open ones there', async () => {
+    documentsStore.set({ documents: [doc(1), doc(2)], activeId: 1 })
+    await dock.openDroppedFiles(['/elsewhere/a.txt', '/w/file2.rs', '/elsewhere/b.txt'], [], {
+      kind: 'split',
+      group: 'main',
+      edge: 'right',
+    })
+    const group = groupHolding('document:100')!
+    expect(group.id).not.toBe('main')
+    expect(group.items).toEqual(['document:100', 'document:2', 'document:101'])
+    expect(group.active).toBe('document:101')
+    expect(groupItems('main')).toEqual(['document:1'])
+  })
+
+  it('opens dropped files where documents open, and the first dropped folder', async () => {
+    documentsStore.set({ documents: [doc(1)], activeId: 1 })
+    await dock.openDroppedFiles(['/elsewhere/a.txt'], ['/p/one', '/p/two'], null)
+    expect(groupItems('main')).toEqual(['document:1', 'document:100'])
+    expect(workspaceIpc.openWorkspace).toHaveBeenCalledWith('/p/one')
+    expect(workspaceIpc.openWorkspace).toHaveBeenCalledTimes(1)
+    expect(workspaceStore.get().info?.root).toBe('/p/one')
+    expect(notifications.get().at(-1)?.message).toContain('one folder at a time')
   })
 })

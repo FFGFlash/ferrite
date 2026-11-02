@@ -1,5 +1,6 @@
 /** Applies backend notifications to frontend state. */
 import { editorFor, mountedEditors } from '../editor/activeEditor'
+import { fileDrag } from '../components/drag'
 import { subscribeToEvents, type AppEvent } from '../ipc/workspace'
 import { applySettings } from './appearance'
 import { documentsStore, revealInDocument, setDirty, updateSummary } from './documents'
@@ -108,6 +109,9 @@ export function handleEvent(event: AppEvent): void {
       break
     case 'notice':
       notify(event.level, event.message)
+      break
+    case 'fileDrag':
+      fileDrag(event)
       break
     case 'documentEdited':
       setDirty(event.documentId, true)

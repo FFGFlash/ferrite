@@ -94,12 +94,13 @@ export function activate(id: number): void {
 
 /**
  * Opens (or switches to) the file at `path`, optionally selecting a range
- * once its editor is showing.
+ * once its editor is showing. Resolves to the document, or `null` if it
+ * couldn't be opened (the error is reported).
  */
 export async function openPath(
   path: string,
   selection?: { start: Position; end?: Position },
-): Promise<void> {
+): Promise<DocumentSummary | null> {
   try {
     const summary = await ipc.openDocument(path)
     const editor = editorFor(summary.id)
@@ -112,8 +113,10 @@ export async function openPath(
       }
     }
     upsert(summary, true)
+    return summary
   } catch (error) {
     reportError('Opening the file', error)
+    return null
   }
 }
 

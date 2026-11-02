@@ -1,7 +1,9 @@
 //! Renaming, moving, copying, and deleting files and folders from the
 //! explorer, and showing them in the system's file manager.
 //!
-//! Every path must be inside the open folder. Open documents follow their
+//! Every path must be inside the open folder, except what's copied in from a
+//! drop from another program, which the backend itself names (see
+//! `file_drop`). Open documents follow their
 //! files when they're renamed or moved (their language servers and
 //! extensions see the new path); documents of deleted files stay open, as
 //! when another program deletes a file.
@@ -18,6 +20,7 @@ use crate::editor::protocol::DocumentSummary;
 use crate::error::CommandError;
 use crate::events::{self, AppEvent};
 use crate::extensions::ExtensionsState;
+use crate::file_drop::DropState;
 use crate::lsp::LspState;
 use crate::ui_state;
 use crate::workspace::WorkspaceState;
@@ -166,6 +169,31 @@ pub async fn workspace_copy(
     let (source, folder) = (inside(&root, &path, false)?, into.clone());
     let copy = blocking(move || copy_entry(&source, &folder)).await?;
     tracing::info!(copy = %copy.display(), "copied from the explorer");
+    copies.push(copy.display().to_string());
+  }
+  Ok(copies)
+}
+
+/// Copies the files and folders dropped from another program (the last
+/// drop, `drop_id`) into `target`, a folder, returning the copies' paths.
+/// They can come from anywhere, but only the backend knows what they are.
+#[tauri::command]
+pub async fn workspace_copy_dropped(
+  app: AppHandle,
+  drop_id: u64,
+  target: String,
+) -> Result<Vec<String>, CommandError> {
+  let root = root(&app)?;
+  let into = inside(&root, &target, true)?;
+  let sources = app
+    .state::<DropState>()
+    .dropped(drop_id)
+    .ok_or_else(|| CommandError::new("staleDrop", "Those files are no longer being dropped."))?;
+  let mut copies = Vec::new();
+  for source in sources {
+    let folder = into.clone();
+    let copy = blocking(move || copy_entry(&source, &folder)).await?;
+    tracing::info!(copy = %copy.display(), "copied a file dropped from another program");
     copies.push(copy.display().to_string());
   }
   Ok(copies)

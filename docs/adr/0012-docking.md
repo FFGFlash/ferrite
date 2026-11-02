@@ -121,11 +121,10 @@ item kinds. A malformed tree gives the default layout.
 
 ### Drag and drop, and the keyboard
 
-- **Dragging.** Tabs, and activity bar buttons, drag with the HTML5 drag events. A tab dropped
-  on the activity bar joins the side bar. On Windows that needs Tauri's own drop handler off (`dragDropEnabled: false`), which replaces WebView2's;
-  Ferrite didn't use it. With it off, the frontend refuses drops of anything but dock items, so a
-  file dropped from another program can't replace the page. A preview shows where the item will
-  land:
+- **Dragging.** Tabs, and activity bar buttons, can be dragged. A tab dropped on the activity bar
+  joins the side bar. (They first used HTML5 drag events, with Tauri's own drop handler off;
+  they're now pointer drags, so files from other programs can be dropped too: [ADR
+  0022](0022-file-drops-and-pointer-drags.md).) A preview shows where the item will land:
   - over a tab strip: among those tabs;
   - over the middle of a group: into it;
   - over a quarter of a group near an edge: beside it, on that side;

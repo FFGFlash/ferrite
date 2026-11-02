@@ -9,7 +9,14 @@ import { findGroup, groupOf } from '../dock/model'
 import type { AppInfo } from '../ipc'
 import { documentsStore } from '../state/documents'
 import { DEFAULT_LAYOUT, layoutStore } from '../state/layout'
+import { dragFilesTo, dragTo, pressToDrag } from '../test/drag'
 import { Workbench } from './Workbench'
+
+vi.mock('../ipc/editor', async importOriginal => ({
+  ...(await importOriginal<typeof import('../ipc/editor')>()),
+  openDocument: vi.fn(),
+}))
+const editorIpc = await import('../ipc/editor')
 
 const appInfo: AppInfo = {
   name: 'Ferrite',
@@ -28,42 +35,16 @@ function stubLayout() {
   vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockReturnValue(1000)
 }
 
-/** A `dataTransfer` that carries data from dragstart to drop, as browsers do. */
-function dataTransfer() {
-  const data = new Map<string, string>()
-  return {
-    get types() {
-      return [...data.keys()]
-    },
-    setData: (type: string, value: string) => data.set(type, value),
-    getData: (type: string) => data.get(type) ?? '',
-    effectAllowed: 'all',
-    dropEffect: 'none',
-  }
-}
-
 const groupHolding = (item: string) => groupOf(dockStore.get(), item)
 
-/**
- * Fires a drag event at a point. jsdom has no `DragEvent`, so a mouse event
- * carries the coordinates and the `dataTransfer`.
- */
-function drag(
-  type: 'dragOver' | 'drop',
-  element: Element,
-  transfer: ReturnType<typeof dataTransfer>,
-  x: number,
-  y: number,
-) {
-  const event = new MouseEvent(type.toLowerCase(), {
-    bubbles: true,
-    cancelable: true,
-    clientX: x,
-    clientY: y,
-  })
-  Object.defineProperty(event, 'dataTransfer', { value: transfer })
-  fireEvent(element, event)
-}
+const doc = (id: number, path: string) => ({
+  id,
+  title: path.split('/').pop()!,
+  path,
+  dirty: false,
+  lineEnding: 'LF' as const,
+  encoding: 'UTF-8',
+})
 
 describe('Workbench', () => {
   beforeEach(() => {
@@ -129,35 +110,20 @@ describe('Workbench', () => {
     expect(buttons()).toEqual(['Search', 'Extensions'])
 
     // Its tab dropped on the activity bar brings it back into the side bar.
-    const transfer = dataTransfer()
-    fireEvent.dragStart(screen.getByRole('tab', { name: 'Explorer' }), { dataTransfer: transfer })
-    drag('dragOver', activityBar, transfer, 10, 500)
+    const drag = pressToDrag(screen.getByRole('tab', { name: 'Explorer' }))
+    drag.moveTo({ element: activityBar, x: 10, y: 500 })
     expect(activityBar).toHaveAttribute('data-drop', 'true')
-    drag('drop', activityBar, transfer, 10, 500)
+    expect(document.querySelector('.drag-ghost')).toHaveTextContent('Explorer')
+    drag.drop()
     expect(activityBar).not.toHaveAttribute('data-drop')
+    expect(document.querySelector('.drag-ghost')).not.toBeInTheDocument()
     expect(groupHolding('view:explorer')!.id).toBe('g1')
     expect(buttons()).toEqual(['Search', 'Extensions', 'Explorer'])
 
     // Anything docked there gets a button, such as a document.
-    act(() =>
-      documentsStore.set({
-        documents: [
-          {
-            id: 1,
-            title: 'main.rs',
-            path: '/w/main.rs',
-            dirty: false,
-            lineEnding: 'LF',
-            encoding: 'UTF-8',
-          },
-        ],
-        activeId: 1,
-      }),
-    )
+    act(() => documentsStore.set({ documents: [doc(1, '/w/main.rs')], activeId: 1 }))
     expect(buttons()).toEqual(['Search', 'Extensions', 'Explorer'])
-    fireEvent.dragStart(screen.getByRole('tab', { name: 'main.rs' }), { dataTransfer: transfer })
-    drag('dragOver', activityBar, transfer, 10, 500)
-    drag('drop', activityBar, transfer, 10, 500)
+    dragTo(screen.getByRole('tab', { name: 'main.rs' }), { element: activityBar, x: 10, y: 500 })
     expect(buttons()).toEqual(['Search', 'Extensions', 'Explorer', 'main.rs'])
     expect(within(activityBar).getByRole('button', { name: 'main.rs' })).toHaveAttribute(
       'aria-pressed',
@@ -184,55 +150,152 @@ describe('Workbench', () => {
     expect(sizes()[0]).toBeCloseTo(0.1)
   })
 
+  it('can still resize groups after the splits holding them were hidden and shown', async () => {
+    stubLayout()
+    // As in browsers: elements out of the page measure 0, and observers report
+    // what they observe when it changes size, including on leaving the page.
+    const sized = function (this: HTMLElement) {
+      return this.isConnected ? 1000 : 0
+    }
+    vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockImplementation(sized)
+    vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockImplementation(sized)
+    const observers = new Set<{ callback: () => void; targets: Set<Element> }>()
+    vi.stubGlobal(
+      'ResizeObserver',
+      class {
+        entry: { callback: () => void; targets: Set<Element> }
+        constructor(callback: () => void) {
+          this.entry = { callback, targets: new Set() }
+          observers.add(this.entry)
+        }
+        observe(target: Element) {
+          this.entry.targets.add(target)
+        }
+        unobserve(target: Element) {
+          this.entry.targets.delete(target)
+        }
+        disconnect() {
+          observers.delete(this.entry)
+        }
+      },
+    )
+    const layoutChanged = () =>
+      act(() => observers.forEach(entry => entry.targets.size > 0 && entry.callback()))
+    const user = userEvent.setup()
+    render(<Workbench appInfo={null} />)
+    const activityBar = screen.getByRole('navigation', { name: 'Views' })
+    const button = (name: string) => within(activityBar).getByRole('button', { name })
+
+    // Search docked below the explorer: the left side split in two.
+    act(() => moveItem('view:search', { kind: 'split', group: 'g1', edge: 'bottom' }))
+    layoutChanged()
+    expect(screen.getAllByRole('separator', { name: 'Resize group' })).toHaveLength(2)
+
+    // Both hidden from the activity bar, then shown again.
+    await user.click(button('Explorer'))
+    await user.click(button('Search'))
+    layoutChanged()
+    expect(screen.queryAllByRole('separator', { name: 'Resize group' })).toHaveLength(0)
+    await user.click(button('Explorer'))
+    await user.click(button('Search'))
+    layoutChanged()
+
+    // Both splitters are back and work: the side bar's width, and the
+    // explorer's height above Search.
+    const sashes = screen.getAllByRole('separator', { name: 'Resize group' })
+    expect(sashes).toHaveLength(2)
+    const root = () => dockStore.get().root
+    const column = () => {
+      const node = root()
+      return node.kind === 'split' ? node.children[0]! : node
+    }
+    const sizes = (node: ReturnType<typeof root>) => (node.kind === 'split' ? node.sizes : [])
+    // Showing a view focuses it on the next frame; let that happen first.
+    await act(() => new Promise(resolve => requestAnimationFrame(resolve)))
+    sashes.find(sash => sash.getAttribute('aria-orientation') === 'vertical')!.focus()
+    await user.keyboard('{End}')
+    expect(sizes(root())[0]).toBeCloseTo(0.9)
+    sashes.find(sash => sash.getAttribute('aria-orientation') === 'horizontal')!.focus()
+    // Its value is the lower group's height: Home shrinks Search.
+    await user.keyboard('{Home}')
+    expect(sizes(column())[0]).toBeCloseTo(0.9)
+    vi.unstubAllGlobals()
+  })
+
   it('docks a dragged tab into another group, or beside it', () => {
     stubLayout()
-    act(() =>
-      documentsStore.set({
-        documents: [
-          {
-            id: 1,
-            title: 'main.rs',
-            path: '/w/main.rs',
-            dirty: false,
-            lineEnding: 'LF',
-            encoding: 'UTF-8',
-          },
-        ],
-        activeId: 1,
-      }),
-    )
+    act(() => documentsStore.set({ documents: [doc(1, '/w/main.rs')], activeId: 1 }))
     render(<Workbench appInfo={null} />)
-    const transfer = dataTransfer()
     const editor = screen.getByRole('region', { name: 'main.rs' })
 
     // Onto the editor's tabs: a tab of that group, even at the top edge of the window.
-    fireEvent.dragStart(screen.getByRole('tab', { name: 'Search' }), { dataTransfer: transfer })
     const bar = within(editor).getByRole('tablist').parentElement!
-    drag('dragOver', bar, transfer, 500, 5)
-    drag('drop', bar, transfer, 500, 5)
+    dragTo(screen.getByRole('tab', { name: 'Search' }), { element: bar, x: 500, y: 5 })
     expect(groupHolding('view:search')!.id).toBe('main')
 
     // Onto the right side of the content: a new group there.
-    fireEvent.dragStart(screen.getByRole('tab', { name: 'Explorer' }), { dataTransfer: transfer })
     const content = within(screen.getByRole('region', { name: 'Search' })).getByRole('tabpanel')
-    drag('dragOver', content, transfer, 900, 500)
+    const drag = pressToDrag(screen.getByRole('tab', { name: 'Explorer' }))
+    drag.moveTo({ element: content, x: 900, y: 500 })
     expect(content.querySelector('.dock-drop')).toHaveAttribute('data-zone', 'right')
-    drag('drop', content, transfer, 900, 500)
+    drag.drop()
     const group = groupHolding('view:explorer')!
     expect(group.items).toEqual(['view:explorer'])
     expect(group.id).not.toBe('g1')
 
     // Near the edge of the whole dock, over a group along it: a group along that edge.
-    fireEvent.dragStart(screen.getByRole('tab', { name: 'Extensions' }), {
-      dataTransfer: transfer,
-    })
     const outer = within(screen.getByRole('region', { name: 'Search' })).getByRole('tabpanel')
-    drag('dragOver', outer, transfer, 500, 990)
+    const edgeDrag = pressToDrag(screen.getByRole('tab', { name: 'Extensions' }))
+    edgeDrag.moveTo({ element: outer, x: 500, y: 990 })
     expect(document.querySelector('.dock-drop--root')).toHaveAttribute('data-zone', 'bottom')
-    drag('drop', outer, transfer, 500, 990)
+    edgeDrag.drop()
     const root = dockStore.get().root
     expect(root.kind === 'split' && root.direction).toBe('column')
     expect(root.kind === 'split' && root.children.at(-1)).toBe(groupHolding('view:extensions'))
+  })
+
+  it('cancels a drag with Escape, and keeps the click that ends a drag from the tab', () => {
+    stubLayout()
+    render(<Workbench appInfo={null} />)
+    const search = screen.getByRole('tab', { name: 'Search' })
+    const content = within(screen.getByRole('region', { name: 'Explorer' })).getByRole('tabpanel')
+
+    // Pressing moves focus; the blur of what had it doesn't end the drag.
+    act(() => screen.getByRole('tab', { name: 'Explorer' }).focus())
+    const drag = pressToDrag(search)
+    act(() => search.focus())
+    drag.moveTo({ element: content, x: 900, y: 500 })
+    expect(content.querySelector('.dock-drop')).toBeInTheDocument()
+    drag.cancel()
+    expect(content.querySelector('.dock-drop')).not.toBeInTheDocument()
+    expect(findGroup(dockStore.get(), 'g1')!.items).toContain('view:search')
+
+    // The click that ends a drag (here, dropped where nothing takes it) is swallowed.
+    const extensions = screen.getByRole('tab', { name: 'Extensions' })
+    dragTo(extensions, { element: document.body, x: 900, y: 500 })
+    fireEvent.click(extensions)
+    expect(extensions).toHaveAttribute('aria-selected', 'false')
+
+    // A press without moving is a click: it selects the tab.
+    pressToDrag(search).drop()
+    fireEvent.click(search)
+    expect(search).toHaveAttribute('aria-selected', 'true')
+  })
+
+  it('opens files dropped from other programs where they are dropped', async () => {
+    stubLayout()
+    vi.mocked(editorIpc.openDocument).mockImplementation(async path => doc(7, path))
+    act(() => documentsStore.set({ documents: [doc(1, '/w/main.rs')], activeId: 1 }))
+    render(<Workbench appInfo={null} />)
+
+    // Beside the editor: a new group on its right.
+    const content = within(screen.getByRole('region', { name: 'main.rs' })).getByRole('tabpanel')
+    dragFilesTo({ element: content, x: 900, y: 500 }, { files: ['C:\\elsewhere\\notes.txt'] })
+    await act(async () => {})
+    expect(editorIpc.openDocument).toHaveBeenCalledWith('C:\\elsewhere\\notes.txt')
+    const group = groupHolding('document:7')!
+    expect(group.items).toEqual(['document:7'])
+    expect(group.id).not.toBe('main')
   })
 
   it('moves between tabs with the arrow keys and closes them with Delete', async () => {

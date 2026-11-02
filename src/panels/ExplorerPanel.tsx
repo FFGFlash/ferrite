@@ -1,16 +1,9 @@
-import {
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-  type DragEvent,
-  type KeyboardEvent,
-  type RefObject,
-} from 'react'
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type RefObject } from 'react'
 import { CopyMinus, FilePlus, FolderOpen, FolderPlus } from 'lucide-react'
 import { executeCommand, primaryKeybinding, getCommand } from '../commands/registry'
 import type { DirectoryEntry } from '../ipc/workspace'
 import { openContextMenu, type MenuEntry } from '../components/contextMenuState'
+import { startDrag, useDropTarget, type Drag } from '../components/drag'
 import { isMac } from '../editor/keymap'
 import { documentsStore, openPath } from '../state/documents'
 import { iconThemeStore, type LoadedIconTheme } from '../state/iconTheme'
@@ -37,6 +30,7 @@ import {
   canPaste,
   cancelCreate,
   cancelRename,
+  copyDroppedInto,
   copyEntry,
   copyPath,
   cutEntry,
@@ -88,7 +82,7 @@ function openRowMenu(
   const keys = keyHints()
   const target = { path: entry.path, directory: entry.directory }
   openContextMenu(x, y, [
-    ...(entry.directory ? [] : [{ label: 'Open', run: () => openPath(entry.path) }, null]),
+    ...(entry.directory ? [] : [{ label: 'Open', run: () => void openPath(entry.path) }, null]),
     ...createEntries(entry.path),
     { label: revealLabel(), hint: keys.reveal, run: () => revealInSystem(entry.path) },
     null,
@@ -133,10 +127,18 @@ function openFolderMenu(x: number, y: number, root: string): void {
   ])
 }
 
-/** The files and folders being dragged in the explorer. */
-let dragged: string[] = []
-/** Dragging with this key held copies instead of moving, as in the system's file manager. */
-const copyKeyHeld = (event: DragEvent) => (isMac() ? event.altKey : event.ctrlKey)
+/**
+ * The folder a drag over the tree is over: a folder's row, the folder holding
+ * a file's row, or `root` between rows. `closed` is a closed folder's row,
+ * which opens after a moment.
+ */
+function folderAt(drag: Drag, root: string): { folder: string; closed: string | null } {
+  const row = document.elementFromPoint(drag.x, drag.y)?.closest<HTMLElement>('[data-drop-folder]')
+  return row
+    ? { folder: row.dataset.dropFolder!, closed: row.dataset.closedFolder ?? null }
+    : { folder: root, closed: null }
+}
+
 /** How long a dragged item hovers over a closed folder before it opens. */
 const OPEN_ON_HOVER_MS = 600
 
@@ -168,6 +170,65 @@ export function ExplorerPanel() {
   const [dropTarget, setDropTarget] = useState<string | null>(null)
   const hoverTimer = useRef<{ path: string; timer: ReturnType<typeof setTimeout> } | null>(null)
   useEffect(() => () => clearTimeout(hoverTimer.current?.timer), [])
+
+  const endDrag = () => {
+    setDropTarget(null)
+    clearTimeout(hoverTimer.current?.timer)
+    hoverTimer.current = null
+  }
+  /**
+   * Takes a drag over a folder: files and folders from the tree (moving
+   * needs a new place; copying can go anywhere but into itself), and files
+   * from other programs, which are copied. A closed folder's row opens after
+   * a moment.
+   */
+  const dropHandlers = (fromTree: boolean) => ({
+    over: (drag: Drag) => {
+      const root = info?.root
+      if (!root) {
+        return false
+      }
+      const { folder, closed } = fromTree ? folderAt(drag, root) : { folder: root, closed: null }
+      const { payload } = drag
+      const takes =
+        payload.kind === 'files' ||
+        (payload.kind === 'entries' &&
+          (drag.copy
+            ? !payload.paths.some(path => isWithin(folder, path) && path !== folder)
+            : canMoveInto(payload.paths, folder)))
+      if (!takes) {
+        endDrag()
+        return false
+      }
+      setDropTarget(folder)
+      if (hoverTimer.current?.path !== closed) {
+        clearTimeout(hoverTimer.current?.timer)
+        hoverTimer.current = closed
+          ? { path: closed, timer: setTimeout(() => toggleFolder(closed), OPEN_ON_HOVER_MS) }
+          : null
+      }
+      return true
+    },
+    drop: (drag: Drag) => {
+      const root = info?.root
+      endDrag()
+      if (!root) {
+        return
+      }
+      const { folder } = fromTree ? folderAt(drag, root) : { folder: root }
+      const { payload } = drag
+      if (payload.kind === 'entries') {
+        if (drag.copy || canMoveInto(payload.paths, folder)) {
+          void moveOrCopy(payload.paths, folder, drag.copy)
+        }
+      } else if (payload.kind === 'files' && payload.dropId !== null) {
+        void copyDroppedInto(payload.dropId, folder)
+      }
+    },
+    leave: endDrag,
+  })
+  const treeDropRef = useDropTarget<HTMLUListElement>(dropHandlers(true))
+  const blankDropRef = useDropTarget<HTMLDivElement>(dropHandlers(false))
 
   const rows = useMemo(
     () => (info ? flatten(info.root, listings, new Set(expanded), 0, false) : []),
@@ -304,59 +365,16 @@ export function ExplorerPanel() {
     event.preventDefault()
   }
 
-  const endDrag = () => {
-    dragged = []
-    setDropTarget(null)
-    clearTimeout(hoverTimer.current?.timer)
-    hoverTimer.current = null
-  }
-  /**
-   * Accepts a drag over `folder` (or, for a closed folder's row, opens it
-   * after a moment). Moving needs a new place; copying can go anywhere.
-   */
-  const dragOver = (event: DragEvent, folder: string, closedFolder: string | null) => {
-    const copy = copyKeyHeld(event)
-    if (dragged.length === 0 || (!copy && !canMoveInto(dragged, folder))) {
-      setDropTarget(null)
-      return
-    }
-    if (copy && dragged.some(path => isWithin(folder, path) && path !== folder)) {
-      return
-    }
-    event.preventDefault()
-    event.stopPropagation()
-    event.dataTransfer.dropEffect = copy ? 'copy' : 'move'
-    setDropTarget(folder)
-    if (hoverTimer.current?.path !== closedFolder) {
-      clearTimeout(hoverTimer.current?.timer)
-      hoverTimer.current = closedFolder
-        ? {
-            path: closedFolder,
-            timer: setTimeout(() => toggleFolder(closedFolder), OPEN_ON_HOVER_MS),
-          }
-        : null
-    }
-  }
-  const drop = (event: DragEvent, folder: string) => {
-    event.preventDefault()
-    event.stopPropagation()
-    const paths = dragged
-    const copy = copyKeyHeld(event)
-    endDrag()
-    if (copy || canMoveInto(paths, folder)) {
-      void moveOrCopy(paths, folder, copy)
-    }
-  }
-
   return (
     <div className="explorer">
       <ul
-        ref={treeRef}
+        ref={element => {
+          treeRef.current = element
+          treeDropRef(element)
+        }}
         id={EXPLORER_TREE_ID}
         className="explorer-tree"
         data-drop-target={dropTarget === info.root || undefined}
-        onDragOver={event => dragOver(event, info.root, null)}
-        onDrop={event => drop(event, info.root)}
         role="tree"
         aria-label={info.name}
         tabIndex={0}
@@ -390,7 +408,6 @@ export function ExplorerPanel() {
               id={rowId(row.entry.path)}
               className={`explorer-tree__row${isRenaming ? ' explorer-tree__row--input' : ''}`}
               role="treeitem"
-              draggable={!isRenaming}
               data-cut={(clipboard?.cut && clipboard.paths.includes(row.entry.path)) || undefined}
               data-drop-target={
                 (dropTarget !== null &&
@@ -398,20 +415,17 @@ export function ExplorerPanel() {
                   isWithin(row.entry.path, dropTarget)) ||
                 undefined
               }
-              onDragStart={event => {
-                dragged = [row.entry.path]
-                event.dataTransfer.effectAllowed = 'copyMove'
-                event.dataTransfer.setData('application/x-ferrite-explorer', row.entry.path)
+              data-drop-folder={folderPath}
+              data-closed-folder={row.entry.directory && !row.expanded ? row.entry.path : undefined}
+              onPointerDown={event => {
+                if (!isRenaming) {
+                  startDrag(event, () => ({
+                    kind: 'entries',
+                    paths: [row.entry.path],
+                    label: row.entry.name,
+                  }))
+                }
               }}
-              onDragEnd={endDrag}
-              onDragOver={event =>
-                dragOver(
-                  event,
-                  folderPath,
-                  row.entry.directory && !row.expanded ? row.entry.path : null,
-                )
-              }
-              onDrop={event => drop(event, folderPath)}
               aria-level={row.depth + 1}
               aria-expanded={row.entry.directory ? row.expanded : undefined}
               aria-selected={row.entry.path === activePath}
@@ -465,10 +479,9 @@ export function ExplorerPanel() {
       {/* The space below the rows: its menu creates at the top level. The
           header actions and commands do the same from the keyboard. */}
       <div
+        ref={blankDropRef}
         className="explorer__blank"
         aria-hidden="true"
-        onDragOver={event => dragOver(event, info.root, null)}
-        onDrop={event => drop(event, info.root)}
         onContextMenu={event => {
           event.preventDefault()
           openFolderMenu(event.clientX, event.clientY, info.root)

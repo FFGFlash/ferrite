@@ -292,7 +292,8 @@ Right-click a file or folder for the rest, or use these keys while the explorer 
 
 Deleting asks first. Pasting where the name is taken adds ` copy` (`notes copy.md`). Drag a file or
 folder onto a folder to move it, or hold `Ctrl` (`Alt` on macOS) to copy it; hovering over a
-closed folder opens it. Open files follow when they're renamed or moved, and their language
+closed folder opens it. Files and folders dragged in from another program (File Explorer,
+Finder) are copied into the folder they're dropped on. Open files follow when they're renamed or moved, and their language
 servers and extensions see the new name. Files of a deleted folder stay open, as when another
 program deletes them. Extensions can add their own items, for files, folders, or files with
 certain names, such as Tidy's **Trim Trailing Whitespace in Files**.
@@ -304,7 +305,12 @@ Tabs sit in groups, and any tab can go in any group, beside any other.
 
 - **Docking.** Drag a tab (or an activity bar button) onto another group's tabs to join it, onto
   a side of a group to split it, or near an edge of the window to dock along that edge. A
-  highlight shows where it will land.
+  highlight shows where it will land. `Escape` cancels a drag.
+- **Opening files by dropping them.** Files dragged in from another program open where they're
+  dropped, the same way: among a group's tabs, beside a group, or along an edge. They don't need to
+  be in the open folder. Dropped in the middle of a group that isn't for documents (the side bar's
+  views, say), they open where documents open; dropped on the explorer, they're copied into it
+  instead. A dropped folder becomes the open folder.
 - **From the keyboard.** The tab menu (right-click, `Shift+F10`, or the menu key) splits or moves
   a tab. The same actions are commands: **View: Split Tab Right/Down**, **View: Move Tab
   Left/Right/Up/Down** (into the neighbouring group, or a new one), **View: Close Tab**, and

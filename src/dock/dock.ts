@@ -12,6 +12,7 @@
  * runs; they hold their place until the documents load. Previews aren't
  * saved: their extensions open them again.
  */
+import { setDropFallback } from '../components/drag'
 import { activeEditor, editorFor } from '../editor/activeEditor'
 import {
   activate as activateDocument,
@@ -20,7 +21,8 @@ import {
   openPath,
 } from '../state/documents'
 import { layoutStore, updateLayout } from '../state/layout'
-import { reportError } from '../state/notifications'
+import { notify, reportError } from '../state/notifications'
+import { openFolder } from '../state/workspace'
 import {
   closePreview,
   previewsStore,
@@ -563,6 +565,13 @@ function showPreview(id: string, beside: boolean): void {
 
 setPreviewHandler(showPreview)
 
+// Files from other programs dropped where nothing takes them open where documents do.
+setDropFallback(drag => {
+  if (drag.payload.kind === 'files') {
+    void openDroppedFiles(drag.payload.files, drag.payload.folders, null)
+  }
+})
+
 /** Records the item as the one in use, for the stores that care. */
 function noteActive(item: ItemId): void {
   const id = itemId(item)
@@ -849,28 +858,87 @@ export async function reopenClosedTab(): Promise<void> {
     if (open) {
       continue
     }
-    const layout = dockStore.get()
-    if (findGroup(layout, group)) {
-      setLayout(placeItem(layout, item, { kind: 'tabs', group, index }, 0.2))
-    }
+    const target = findGroup(dockStore.get(), group)
+      ? ({ kind: 'tabs', group, index } as const)
+      : null
     if (path === null) {
+      if (target) {
+        setLayout(placeItem(dockStore.get(), item, target, 0.2))
+      }
       showItem(item)
       return
     }
-    // The document takes its saved item's place when it opens (`syncDocuments`).
-    await openPath(path)
-    if (groupOf(dockStore.get(), item)) {
-      // It didn't open; `openPath` reported why.
-      setLayout(removeItem(dockStore.get(), item))
-    } else {
-      const { activeId } = documentsStore.get()
-      if (activeId !== null) {
-        showItem(documentItem(activeId))
-      }
+    const opened = await openPathAt(path, target)
+    if (opened) {
+      showItem(opened)
     }
     return
   }
 }
+
+/**
+ * Opens the file at `path` at `target`, or where documents open for `null`,
+ * and resolves to its tab (`null` if it didn't open). An open document moves
+ * there. A new one's saved item (`file:<path>`) holds the place until it
+ * opens and takes it (`syncDocuments`).
+ */
+async function openPathAt(path: string, target: DropTarget | null): Promise<ItemId | null> {
+  const open = documentsStore.get().documents.find(document => document.path === path)
+  if (open) {
+    if (target) {
+      moveItem(documentItem(open.id), target)
+    }
+    return documentItem(open.id)
+  }
+  const saved = fileItem(path)
+  if (target) {
+    setLayout(placeItem(dockStore.get(), saved, target, 0.5))
+  }
+  const summary = await openPath(path)
+  if (groupOf(dockStore.get(), saved)) {
+    // It didn't open (`openPath` reported why), or opened under another
+    // spelling of its path; then it moves to the place.
+    setLayout(removeItem(dockStore.get(), saved))
+    if (summary && target) {
+      moveItem(documentItem(summary.id), target)
+    }
+  }
+  return summary ? documentItem(summary.id) : null
+}
+
+/**
+ * Opens files and folders dropped from another program: the files at
+ * `target` (the first there, the rest after it), or where documents open for
+ * `null`, then the first folder as the open folder.
+ */
+export async function openDroppedFiles(
+  files: readonly string[],
+  folders: readonly string[],
+  target: DropTarget | null,
+): Promise<void> {
+  let next = target
+  let last: ItemId | null = null
+  for (const path of files) {
+    const item = await openPathAt(path, next)
+    const group = item && groupOf(dockStore.get(), item)
+    if (item && group) {
+      last = item
+      next = next && { kind: 'tabs', group: group.id, index: group.items.indexOf(item) + 1 }
+    }
+  }
+  if (last) {
+    showItem(last)
+  }
+  const [folder, ...others] = folders
+  if (folder) {
+    if (others.length > 0) {
+      notify('info', `Ferrite opens one folder at a time, so it opened ${baseName(folder)}.`)
+    }
+    await openFolder(folder)
+  }
+}
+
+const baseName = (path: string) => path.split(/[\\/]/).filter(Boolean).at(-1) ?? path
 
 /** Activates the current group's `n`th tab (from 1), or its last for 0. */
 export function activateTabNumber(n: number): void {

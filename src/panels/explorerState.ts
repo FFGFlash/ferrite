@@ -16,6 +16,7 @@ import { layoutStore } from '../state/layout'
 import { reportError } from '../state/notifications'
 import { createStore } from '../state/store'
 import {
+  copyDropped,
   copyEntries,
   deleteEntries,
   isWithin,
@@ -197,15 +198,27 @@ export async function moveOrCopy(
   copy: boolean,
 ): Promise<boolean> {
   try {
-    const placed = copy ? await copyEntries(paths, folder) : await moveEntries(paths, folder)
-    if (placed[0]) {
-      setFocused(placed[0])
-      await revealInExplorer(placed[0])
-    }
+    await focusPlaced(copy ? await copyEntries(paths, folder) : await moveEntries(paths, folder))
     return true
   } catch (error) {
     reportError(copy ? 'Copying' : 'Moving', error)
     return false
+  }
+}
+
+/** Copies files and folders dropped from another program (drop `dropId`) into `folder`. */
+export async function copyDroppedInto(dropId: number, folder: string): Promise<void> {
+  try {
+    await focusPlaced(await copyDropped(dropId, folder))
+  } catch (error) {
+    reportError('Copying', error)
+  }
+}
+
+async function focusPlaced(placed: readonly string[]): Promise<void> {
+  if (placed[0]) {
+    setFocused(placed[0])
+    await revealInExplorer(placed[0])
   }
 }
 

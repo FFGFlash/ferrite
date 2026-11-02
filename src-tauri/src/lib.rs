@@ -14,6 +14,7 @@ mod entries;
 mod error;
 mod events;
 mod extensions;
+mod file_drop;
 mod languages;
 mod logging;
 mod lsp;
@@ -45,6 +46,7 @@ pub fn run() {
     .manage(extensions::ExtensionsState::default())
     .manage(languages::LanguagesState::default())
     .manage(terminal::TerminalState::default())
+    .manage(file_drop::DropState::default())
     .setup(move |app| {
       let log_dir = match app.path().app_log_dir() {
         Ok(dir) => Some(dir),
@@ -123,12 +125,14 @@ pub fn run() {
       );
       Ok(())
     })
-    .on_window_event(|window, event| {
-      if let WindowEvent::CloseRequested { api, .. } = event
-        && let Some(window) = window.app_handle().get_webview_window(window.label())
-      {
-        editor::on_close_requested(&window, api);
+    .on_window_event(|window, event| match event {
+      WindowEvent::CloseRequested { api, .. } => {
+        if let Some(window) = window.app_handle().get_webview_window(window.label()) {
+          editor::on_close_requested(&window, api);
+        }
       }
+      WindowEvent::DragDrop(event) => file_drop::on_drag_drop(window.app_handle(), event),
+      _ => {}
     })
     .invoke_handler(tauri::generate_handler![
       commands::app_info,
@@ -170,6 +174,7 @@ pub fn run() {
       entries::workspace_rename,
       entries::workspace_move,
       entries::workspace_copy,
+      entries::workspace_copy_dropped,
       entries::workspace_delete,
       entries::workspace_reveal,
       workspace::workspace_find_files,

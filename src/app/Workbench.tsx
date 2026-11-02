@@ -1,6 +1,7 @@
 import { useKeybindings } from '../commands/registry'
 import { ActivityBar } from '../components/ActivityBar'
 import { ContextMenu } from '../components/ContextMenu'
+import { DragGhost } from '../components/DragGhost'
 import { ErrorBoundary } from '../components/ErrorBoundary'
 import { Notifications } from '../components/Notifications'
 import { Palette } from '../components/Palette'
@@ -31,6 +32,7 @@ export function Workbench({ appInfo }: WorkbenchProps) {
       <Notifications />
       <Palette />
       <ContextMenu />
+      <DragGhost />
       <PerfOverlay />
     </div>
   )

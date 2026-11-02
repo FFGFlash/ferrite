@@ -1,7 +1,6 @@
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import { App } from './app/App'
-import { installDropGuard } from './dock/DockArea'
 import { installGlobalErrorLogging } from './ipc'
 import { followSystemTheme } from './themes/theme'
 import './styles/tokens.css'
@@ -10,7 +9,6 @@ import './styles/accessibility.css'
 
 followSystemTheme()
 installGlobalErrorLogging()
-installDropGuard()
 
 const root = document.getElementById('root')
 if (!root) {

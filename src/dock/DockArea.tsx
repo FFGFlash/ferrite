@@ -3,13 +3,14 @@ import {
   useLayoutEffect,
   useRef,
   useState,
-  type DragEvent,
   type KeyboardEvent,
   type MouseEvent,
+  type PointerEvent,
   type ReactNode,
 } from 'react'
 import { executeCommand } from '../commands/registry'
 import { openContextMenu, type MenuEntry } from '../components/contextMenuState'
+import { startDrag, useDropTarget, type Drag } from '../components/drag'
 import { Sash } from '../components/Sash'
 import { WelcomePage } from '../editor/WelcomePage'
 import type { AppInfo } from '../ipc'
@@ -22,6 +23,7 @@ import {
   focusItem,
   groupFocused,
   moveItem,
+  openDroppedFiles,
   resize,
 } from './dock'
 import {
@@ -34,11 +36,16 @@ import {
   useResolver,
   type ResolvedItem,
 } from './items'
-import type { DockGroup, DockNode, DockSplit, DropTarget, Edge, ItemId } from './model'
+import {
+  itemKind,
+  type DockGroup,
+  type DockNode,
+  type DockSplit,
+  type DropTarget,
+  type Edge,
+  type ItemId,
+} from './model'
 import './Dock.css'
-
-/** The data type of a dragged tab (or activity bar button). */
-export const DOCK_ITEM_TYPE = 'application/x-ferrite-dock-item'
 
 /** Groups are never squeezed smaller than this, in pixels. */
 const MIN_GROUP_SIZE = 100
@@ -54,46 +61,14 @@ type DropHint =
   | { kind: 'tabs'; group: string; index: number }
 
 const dropHint = createStore<DropHint | null>(null)
-/** The item being dragged, which `dataTransfer` doesn't reveal until the drop. */
-const dragging = createStore<ItemId | null>(null)
 
-/** Starts dragging an item: a tab, or a view from the activity bar. */
-export function startDrag(event: DragEvent, item: ItemId): void {
-  event.dataTransfer.setData(DOCK_ITEM_TYPE, item)
-  event.dataTransfer.effectAllowed = 'move'
-  dragging.set(item)
+/** Starts dragging a tab or activity bar button (from `onPointerDown`). */
+export function startItemDrag(event: PointerEvent<HTMLElement>, item: ItemId, label: string): void {
+  startDrag(event, () => ({ kind: 'dock', item, label }))
 }
 
-/**
- * Refuses drops of anything but dock items, such as files from another
- * program. HTML5 drag and drop needs Tauri's own drop handling turned off
- * (`dragDropEnabled`), and without it the webview would open a dropped file
- * in place of the workbench.
- */
-export function installDropGuard(): void {
-  for (const type of ['dragover', 'drop'] as const) {
-    window.addEventListener(type, event => {
-      if (!event.dataTransfer?.types.includes(DOCK_ITEM_TYPE)) {
-        event.preventDefault()
-        if (event.dataTransfer) {
-          event.dataTransfer.dropEffect = 'none'
-        }
-      }
-    })
-  }
-}
-
-/** The item being dragged, if any. */
-export function draggedItem(): ItemId | null {
-  return dragging.get()
-}
-
-export function endDrag(): void {
-  dragging.set(null)
-  dropHint.set(null)
-}
-
-const isDockDrag = (event: DragEvent) => event.dataTransfer.types.includes(DOCK_ITEM_TYPE)
+/** What the dock takes: its own items, and files from other programs. */
+const isDockDrag = (drag: Drag) => drag.payload.kind === 'dock' || drag.payload.kind === 'files'
 
 function sameHint(a: DropHint | null, b: DropHint | null): boolean {
   return JSON.stringify(a) === JSON.stringify(b)
@@ -105,13 +80,14 @@ function hint(next: DropHint | null): void {
   }
 }
 
+const clearHint = () => hint(null)
+
 /**
  * The edge of the whole dock the pointer is near, over a group's content: the
  * outer strip of a group that lies along that edge. Tab strips are always for
  * joining tabs, so the top edge is reached below them.
  */
-function outerEdgeAt(event: DragEvent<HTMLElement>): Edge | null {
-  const content = event.currentTarget
+function outerEdgeAt(drag: Drag, content: HTMLElement): Edge | null {
   const dock = content.closest('[data-dock]')?.getBoundingClientRect()
   const group = content.closest('[data-group]')?.getBoundingClientRect()
   if (!dock || !group) {
@@ -119,10 +95,10 @@ function outerEdgeAt(event: DragEvent<HTMLElement>): Edge | null {
   }
   const r = content.getBoundingClientRect()
   const candidates: [Edge, boolean, number][] = [
-    ['left', Math.abs(group.left - dock.left) < 2, event.clientX - r.left],
-    ['right', Math.abs(dock.right - group.right) < 2, r.right - event.clientX],
-    ['top', Math.abs(group.top - dock.top) < 2, event.clientY - r.top],
-    ['bottom', Math.abs(dock.bottom - group.bottom) < 2, r.bottom - event.clientY],
+    ['left', Math.abs(group.left - dock.left) < 2, drag.x - r.left],
+    ['right', Math.abs(dock.right - group.right) < 2, r.right - drag.x],
+    ['top', Math.abs(group.top - dock.top) < 2, drag.y - r.top],
+    ['bottom', Math.abs(dock.bottom - group.bottom) < 2, r.bottom - drag.y],
   ]
   let best: Edge | null = null
   let bestDistance = ROOT_EDGE_DISTANCE
@@ -136,29 +112,30 @@ function outerEdgeAt(event: DragEvent<HTMLElement>): Edge | null {
 }
 
 /** The edge of the whole dock the pointer is near, for drags over its gaps (splitters). */
-function rootEdgeAt(event: DragEvent): Edge | null {
-  const dock = (event.currentTarget as HTMLElement).closest('[data-dock]')
-  if (!dock) {
-    return null
-  }
+function rootEdgeAt(drag: Drag, dock: HTMLElement): Edge | null {
   const r = dock.getBoundingClientRect()
   const distances: [Edge, number][] = [
-    ['left', event.clientX - r.left],
-    ['right', r.right - event.clientX],
-    ['top', event.clientY - r.top],
-    ['bottom', r.bottom - event.clientY],
+    ['left', drag.x - r.left],
+    ['right', r.right - drag.x],
+    ['top', drag.y - r.top],
+    ['bottom', r.bottom - drag.y],
   ]
   const [edge, distance] = distances.reduce((a, b) => (b[1] < a[1] ? b : a))
   return distance <= ROOT_EDGE_DISTANCE ? edge : null
 }
 
-function drop(event: DragEvent, target: DropTarget): void {
-  event.preventDefault()
-  const item = event.dataTransfer.getData(DOCK_ITEM_TYPE) || dragging.get()
-  endDrag()
-  if (item) {
-    moveItem(item, target)
-    focusItem(item)
+/**
+ * Drops on the dock: moves an item there, or opens files from another
+ * program there (`null`: where documents open).
+ */
+function drop(drag: Drag, target: DropTarget | null): void {
+  clearHint()
+  const { payload } = drag
+  if (payload.kind === 'dock' && target) {
+    moveItem(payload.item, target)
+    focusItem(payload.item)
+  } else if (payload.kind === 'files') {
+    void openDroppedFiles(payload.files, payload.folders, target)
   }
 }
 
@@ -191,33 +168,26 @@ export function DockArea({ appInfo }: DockAreaProps) {
       <SplitView key={node.id} split={node} shown={shown} render={render} />
     )
 
-  const onDragOver = (event: DragEvent<HTMLElement>) => {
-    const edge = isDockDrag(event) ? rootEdgeAt(event) : null
-    if (edge) {
-      event.preventDefault()
-      event.dataTransfer.dropEffect = 'move'
-      hint({ kind: 'root', edge })
-    }
-  }
+  // Over the gaps between groups (splitters) near the dock's edge: along that edge.
+  const dropRef = useDropTarget<HTMLElement>({
+    over: (drag, element) => {
+      const edge = isDockDrag(drag) ? rootEdgeAt(drag, element) : null
+      if (edge) {
+        hint({ kind: 'root', edge })
+      }
+      return edge !== null
+    },
+    drop: (drag, element) => {
+      const edge = rootEdgeAt(drag, element)
+      if (edge) {
+        drop(drag, { kind: 'root', edge })
+      }
+    },
+    leave: clearHint,
+  })
 
   return (
-    <main
-      className="dock"
-      aria-label="Workbench"
-      data-dock
-      onDragOver={onDragOver}
-      onDrop={event => {
-        const edge = rootEdgeAt(event)
-        if (edge && isDockDrag(event)) {
-          drop(event, { kind: 'root', edge })
-        }
-      }}
-      onDragLeave={event => {
-        if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
-          hint(null)
-        }
-      }}
-    >
+    <main ref={dropRef} className="dock" aria-label="Workbench" data-dock>
       {shown(layout.root) ? render(layout.root) : render(groupNode(layout.main))}
       <RootDropPreview />
     </main>
@@ -241,12 +211,14 @@ interface SplitViewProps {
 
 /** Children side by side (a row) or stacked (a column), with splitters between them. */
 function SplitView({ split, shown, render }: SplitViewProps) {
-  const ref = useRef<HTMLDivElement>(null)
+  // The element, not a ref: with one child or none showing, the split renders
+  // no element of its own, and a new one when its children show again. Each
+  // is measured; one that left the page would measure 0, leaving no splitters.
+  const [element, setElement] = useState<HTMLDivElement | null>(null)
   const [extent, setExtent] = useState(0)
   const row = split.direction === 'row'
 
   useLayoutEffect(() => {
-    const element = ref.current
     if (!element) {
       return
     }
@@ -255,7 +227,7 @@ function SplitView({ split, shown, render }: SplitViewProps) {
     const observer = new ResizeObserver(measure)
     observer.observe(element)
     return () => observer.disconnect()
-  }, [row])
+  }, [element, row])
 
   const visible = split.children
     .map((node, index) => ({ node, index, size: split.sizes[index] ?? 0 }))
@@ -283,7 +255,7 @@ function SplitView({ split, shown, render }: SplitViewProps) {
   }
 
   return (
-    <div ref={ref} className={`dock-split dock-split--${split.direction}`}>
+    <div ref={setElement} className={`dock-split dock-split--${split.direction}`}>
       {visible.map((entry, k) => {
         const next = visible[k + 1]
         const previous = visible[k - 1]
@@ -340,45 +312,71 @@ function GroupView({ group, main, current, resolve, appInfo }: GroupViewProps) {
   const label = active ? itemTitle(active) : main ? 'Welcome' : 'Empty group'
   const panelId = `dock-panel-${group.id}`
 
-  const onContentDragOver = (event: DragEvent<HTMLDivElement>) => {
-    if (!isDockDrag(event)) {
-      return
-    }
-    event.preventDefault()
-    event.stopPropagation()
-    event.dataTransfer.dropEffect = 'move'
-    const outer = outerEdgeAt(event)
-    if (outer) {
-      hint({ kind: 'root', edge: outer })
-      return
-    }
-    const r = event.currentTarget.getBoundingClientRect()
-    const x = (event.clientX - r.left) / r.width
-    const y = (event.clientY - r.top) / r.height
-    const edges: [Edge, number][] = [
-      ['left', x],
-      ['right', 1 - x],
-      ['top', y],
-      ['bottom', 1 - y],
-    ]
-    const [edge, distance] = edges.reduce((a, b) => (b[1] < a[1] ? b : a))
-    hint({ kind: 'split', group: group.id, zone: distance < SPLIT_ZONE ? edge : 'center' })
-  }
+  /**
+   * Whether files from other programs dropped in the middle join this group:
+   * when documents go here (it holds editors, or it's the main group).
+   * Dropped on the explorer's group, they open where documents open.
+   */
+  const takesFiles =
+    main ||
+    group.items.some(item => {
+      const kind = itemKind(item)
+      return kind === 'document' || kind === 'page' || kind === 'preview'
+    })
 
-  const onContentDrop = (event: DragEvent<HTMLDivElement>) => {
-    if (!isDockDrag(event)) {
-      return
-    }
-    event.stopPropagation()
-    const outer = outerEdgeAt(event)
-    const current = dropHint.get()
-    const target: DropTarget = outer
-      ? { kind: 'root', edge: outer }
-      : current?.kind === 'split' && current.group === group.id && current.zone !== 'center'
-        ? { kind: 'split', group: group.id, edge: current.zone }
-        : { kind: 'tabs', group: group.id, index: group.items.length }
-    drop(event, target)
-  }
+  const contentRef = useDropTarget<HTMLDivElement>({
+    over: (drag, element) => {
+      if (!isDockDrag(drag)) {
+        return false
+      }
+      const outer = outerEdgeAt(drag, element)
+      if (outer) {
+        hint({ kind: 'root', edge: outer })
+        return true
+      }
+      const r = element.getBoundingClientRect()
+      const x = (drag.x - r.left) / r.width
+      const y = (drag.y - r.top) / r.height
+      const edges: [Edge, number][] = [
+        ['left', x],
+        ['right', 1 - x],
+        ['top', y],
+        ['bottom', 1 - y],
+      ]
+      const [edge, distance] = edges.reduce((a, b) => (b[1] < a[1] ? b : a))
+      hint({ kind: 'split', group: group.id, zone: distance < SPLIT_ZONE ? edge : 'center' })
+      return true
+    },
+    drop: (drag, element) => {
+      const outer = outerEdgeAt(drag, element)
+      const current = dropHint.get()
+      const target: DropTarget | null = outer
+        ? { kind: 'root', edge: outer }
+        : current?.kind === 'split' && current.group === group.id && current.zone !== 'center'
+          ? { kind: 'split', group: group.id, edge: current.zone }
+          : drag.payload.kind === 'files' && !takesFiles
+            ? null
+            : { kind: 'tabs', group: group.id, index: group.items.length }
+      drop(drag, target)
+    },
+    leave: clearHint,
+  })
+
+  const barRef = useDropTarget<HTMLDivElement>({
+    over: drag => {
+      if (isDockDrag(drag)) {
+        hint({ kind: 'tabs', group: group.id, index: group.items.length })
+      }
+      return isDockDrag(drag)
+    },
+    drop: drag => {
+      const current = dropHint.get()
+      const index =
+        current?.kind === 'tabs' && current.group === group.id ? current.index : group.items.length
+      drop(drag, { kind: 'tabs', group: group.id, index })
+    },
+    leave: clearHint,
+  })
 
   return (
     <section
@@ -390,27 +388,7 @@ function GroupView({ group, main, current, resolve, appInfo }: GroupViewProps) {
       onFocus={() => groupFocused(group.id)}
     >
       {items.length > 0 && (
-        <div
-          className="dock-group__bar"
-          onDragOver={event => {
-            if (isDockDrag(event)) {
-              event.preventDefault()
-              event.stopPropagation()
-              hint({ kind: 'tabs', group: group.id, index: group.items.length })
-            }
-          }}
-          onDrop={event => {
-            if (isDockDrag(event)) {
-              event.stopPropagation()
-              const current = dropHint.get()
-              const index =
-                current?.kind === 'tabs' && current.group === group.id
-                  ? current.index
-                  : group.items.length
-              drop(event, { kind: 'tabs', group: group.id, index })
-            }
-          }}
-        >
+        <div ref={barRef} className="dock-group__bar">
           <div className="dock-tabs" role="tablist" aria-label={`${label} tabs`}>
             {items.map(resolved => (
               <Tab
@@ -435,9 +413,8 @@ function GroupView({ group, main, current, resolve, appInfo }: GroupViewProps) {
         id={active ? panelId : undefined}
         role={active ? 'tabpanel' : undefined}
         aria-labelledby={active ? tabId(group.id, active.item) : undefined}
+        ref={contentRef}
         tabIndex={-1}
-        onDragOver={onContentDragOver}
-        onDrop={onContentDrop}
       >
         {active ? (
           <ItemContent key={active.item} resolved={active} />
@@ -509,9 +486,33 @@ function Tab({ resolved, group, active, panelId }: TabProps) {
     }
   }
 
+  const dropRef = useDropTarget<HTMLDivElement>({
+    over: (drag, element) => {
+      if (!isDockDrag(drag)) {
+        return false
+      }
+      const r = element.getBoundingClientRect()
+      const before = drag.x < r.left + r.width / 2
+      hint({ kind: 'tabs', group: group.id, index: before ? index : index + 1 })
+      return true
+    },
+    drop: drag => {
+      const current = dropHint.get()
+      drop(drag, {
+        kind: 'tabs',
+        group: group.id,
+        index: current?.kind === 'tabs' && current.group === group.id ? current.index : index,
+      })
+    },
+    leave: clearHint,
+  })
+
   return (
     <div
-      ref={ref}
+      ref={element => {
+        ref.current = element
+        dropRef(element)
+      }}
       className="dock-tab"
       role="tab"
       id={tabId(group.id, item)}
@@ -525,19 +526,7 @@ function Tab({ resolved, group, active, panelId }: TabProps) {
       data-dirty={(resolved.kind === 'document' && resolved.document.dirty) || undefined}
       data-exited={(resolved.kind === 'terminal' && resolved.terminal.exited) || undefined}
       data-drop={dropSide ?? undefined}
-      draggable
-      onDragStart={event => startDrag(event, item)}
-      onDragEnd={endDrag}
-      onDragOver={event => {
-        if (!isDockDrag(event)) {
-          return
-        }
-        event.preventDefault()
-        event.stopPropagation()
-        const r = event.currentTarget.getBoundingClientRect()
-        const before = event.clientX < r.left + r.width / 2
-        hint({ kind: 'tabs', group: group.id, index: before ? index : index + 1 })
-      }}
+      onPointerDown={event => startItemDrag(event, item, title)}
       onClick={() => activateTab(item)}
       onAuxClick={event => {
         if (event.button === 1) {
@@ -558,6 +547,7 @@ function Tab({ resolved, group, active, panelId }: TabProps) {
         className="dock-tab__close"
         aria-hidden="true"
         title={`Close ${title}`}
+        onPointerDown={event => event.stopPropagation()}
         onMouseDown={event => event.stopPropagation()}
         onClick={event => {
           event.stopPropagation()
