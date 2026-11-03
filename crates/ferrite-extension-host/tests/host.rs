@@ -11,7 +11,7 @@ use std::process::Command;
 use std::sync::{Arc, Condvar, Mutex, MutexGuard, OnceLock, PoisonError};
 use std::time::{Duration, Instant};
 
-use ferrite_core::{DocumentId, Editor, EditorOp};
+use ferrite_core::{DocumentId, Editor, EditorOp, LanguageChoice};
 use ferrite_extension_host::preview::{ImageSource, LinkTarget, PreviewElement};
 use ferrite_extension_host::{
   ConfigValue, Embedder, ExtensionHost, ExtensionState, HostOptions, Limits, Notification,
@@ -1022,6 +1022,30 @@ fn a_moved_document_is_reopened_for_extensions() {
 }
 
 #[test]
+fn choosing_a_documents_language_starts_extensions_for_it() {
+  let s = setup("todos", "todos", Some(ALL), "", |m| {
+    m.replace(
+      "activation = [\"on-startup\"]",
+      "activation = [\"on-language:rust\"]",
+    )
+  });
+  let id = s.fake.open(&s.host, "// TODO: x\n");
+  s.host.load();
+  assert_ne!(state_of(&s.host).0, ExtensionState::Active, "plain text");
+
+  {
+    let mut editor = s.fake.editor();
+    let document = editor.document_mut(id).expect("open");
+    document.set_language_choice(Some(LanguageChoice::Language("rust".into())));
+    s.host.sync(document);
+  }
+  s.fake.wait_for("decorations", |n| {
+    *n == Notification::DecorationsChanged(id)
+  });
+  assert_eq!(state_of(&s.host).0, ExtensionState::Active);
+}
+
+#[test]
 fn extensions_built_against_api_1_1_still_run() {
   let s = setup("todos", "todos", Some(ALL), "", |m| m);
   let dir = PathBuf::from(&s.host.statuses()[0].path);
@@ -1227,12 +1251,14 @@ fn the_html_css_example_contributes_languages_and_servers_once_allowed() {
   // Languages don't wait for the permission; servers do.
   let languages = host.languages();
   let ids: Vec<&str> = languages.iter().map(|l| l.id.as_str()).collect();
-  assert_eq!(ids, ["html", "css"]);
+  assert_eq!(ids, ["html", "css", "svg"]);
   assert_eq!(
     languages[0].grammar,
     example.join("grammars/tree-sitter-html.wasm")
   );
   assert!(languages[0].grammar.is_file());
+  assert_eq!(languages[2].grammar_name, "xml");
+  assert!(languages[2].grammar.is_file());
   assert!(host.language_servers().is_empty());
 
   host.set_permissions("example.html-css", &[Permission::LanguageServers]);

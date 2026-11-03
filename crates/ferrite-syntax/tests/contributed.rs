@@ -1,6 +1,6 @@
-//! Languages from WebAssembly grammars, using the HTML and CSS grammars of
-//! the example extension in `extensions/html-css`, and the JavaScript one in
-//! `extensions/javascript` for scripts in HTML.
+//! Languages from WebAssembly grammars, using the HTML, CSS and SVG grammars
+//! of the example extension in `extensions/html-css`, and the JavaScript one
+//! in `extensions/javascript` for scripts in HTML and SVG.
 
 use std::path::{Path, PathBuf};
 
@@ -44,11 +44,28 @@ fn javascript() -> LanguageDefinition {
   }
 }
 
+/// SVG, with the XML grammar.
+fn svg() -> LanguageDefinition {
+  let dir = extension();
+  LanguageDefinition {
+    id: "svg".into(),
+    name: "SVG".into(),
+    file_extensions: vec!["svg".into()],
+    file_names: Vec::new(),
+    grammar: dir.join("grammars/tree-sitter-xml.wasm"),
+    grammar_name: "xml".into(),
+    highlights: dir.join("queries/svg/highlights.scm"),
+    injections: Some(dir.join("queries/svg/injections.scm")),
+    folds: None,
+  }
+}
+
 fn registry() -> Registry {
   let (registry, problems) = Registry::new([
     definition("html", "HTML", true),
     definition("css", "CSS", false),
     javascript(),
+    svg(),
   ]);
   assert!(problems.is_empty(), "{problems:?}");
   registry
@@ -198,6 +215,65 @@ fn css_files_parse_on_their_own() {
   let lines = spans(&tree, &buffer);
   assert!(has(&lines[0], "/* x */", "comment"));
   assert!(has(&lines[2], "@media", "keyword"));
+}
+
+const ICON: &str = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>
+<!-- an icon -->
+<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 24 24\">
+  <style>
+    circle { fill: #333; }
+  </style>
+  <circle cx=\"12\" cy=\"12\" r=\"4\"/>
+  <text>A &amp; B</text>
+  <script><![CDATA[
+    const size = 24;
+  ]]></script>
+</svg>
+";
+
+#[test]
+fn svg_files_highlight_like_inline_svg_with_css_and_javascript_inside() {
+  let registry = registry();
+  let svg = registry.for_path(Path::new("icon.SVG")).expect("svg");
+  let buffer = TextBuffer::from_text(ICON);
+  let tree = parse(svg, &registry, &buffer, None, || false)
+    .expect("grammar loads")
+    .expect("parses");
+  assert!(!tree.tree().root_node().has_error());
+  let injected: Vec<&str> = tree
+    .injections()
+    .map(|(language, _)| language.id())
+    .collect();
+  assert_eq!(injected, ["css", "javascript"]);
+
+  let lines = spans(&tree, &buffer);
+  assert!(has(&lines[0], "xml", "keyword"), "{:?}", lines[0]);
+  assert!(has(&lines[0], "version", "attribute"));
+  assert!(has(&lines[1], "<!-- an icon -->", "comment"));
+  assert!(has(&lines[2], "svg", "tag"), "{:?}", lines[2]);
+  assert!(has(&lines[2], "viewBox", "attribute"));
+  assert!(has(&lines[2], "\"0 0 24 24\"", "string"));
+  assert!(has(&lines[2], "=", "operator"));
+  assert!(has(&lines[2], "<", "punctuation"));
+  // CSS in <style>.
+  assert!(has(&lines[4], "circle", "tag"), "{:?}", lines[4]);
+  assert!(has(&lines[4], "fill", "property"));
+  assert!(has(&lines[6], "/>", "punctuation"), "{:?}", lines[6]);
+  assert!(has(&lines[7], "&amp;", "escape"), "{:?}", lines[7]);
+  // JavaScript in a CDATA section.
+  assert!(has(&lines[9], "const", "keyword"), "{:?}", lines[9]);
+}
+
+#[test]
+fn inline_svg_in_html_is_highlighted_as_html() {
+  let registry = registry();
+  let buffer = TextBuffer::from_text("<p><svg viewBox=\"0 0 8 8\"><circle r=\"4\"/></svg></p>\n");
+  let tree = parse_all(&registry, &buffer, None);
+  assert!(!tree.tree().root_node().has_error());
+  let lines = spans(&tree, &buffer);
+  assert!(has(&lines[0], "svg", "tag"), "{:?}", lines[0]);
+  assert!(has(&lines[0], "circle", "tag"));
+  assert!(has(&lines[0], "viewBox", "attribute"));
 }
 
 #[test]

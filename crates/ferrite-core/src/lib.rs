@@ -23,7 +23,9 @@ mod selection;
 mod testing;
 mod view;
 
-pub use document::{Document, DocumentId, EXACT_COLUMN_BYTES, EditorConfig, SavePoint};
+pub use document::{
+  Document, DocumentId, EXACT_COLUMN_BYTES, EditorConfig, LanguageChoice, SavePoint,
+};
 pub use editor::Editor;
 pub use error::CoreError;
 pub use find::{MAX_MATCHES, MatchSummary};

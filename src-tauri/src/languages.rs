@@ -13,12 +13,13 @@ use std::path::Path;
 use std::sync::{Arc, Mutex, PoisonError, RwLock};
 use std::time::SystemTime;
 
-use ferrite_core::CommentTokens;
+use ferrite_core::{CommentTokens, Document, LanguageChoice};
 use ferrite_extension_host::contributions::{LanguageContribution, LanguageServerContribution};
 use ferrite_lsp::{ServerCommand, ServerConfig};
 use ferrite_syntax::{Language, LanguageDefinition, Registry};
 use ferrite_tasks::Priority;
-use tauri::{AppHandle, Manager};
+use serde::Serialize;
+use tauri::{AppHandle, Manager, State};
 
 use crate::editor::EditorState;
 use crate::events::{self, AppEvent};
@@ -53,12 +54,15 @@ impl LanguagesState {
     self.read(|current| current.registry.for_path(path).cloned())
   }
 
-  /// The comment syntax of a file's language; none for plain text.
-  pub fn comments_for(&self, path: &Path) -> CommentTokens {
+  /// The language of a document (see [`language_of`]).
+  pub fn for_document(&self, document: &Document) -> Option<Language> {
+    self.read(|current| language_of(&current.registry, document).cloned())
+  }
+
+  /// The comment syntax of a document's language; none for plain text.
+  pub fn comments_for(&self, document: &Document) -> CommentTokens {
     self.read(|current| {
-      current
-        .registry
-        .for_path(path)
+      language_of(&current.registry, document)
         .and_then(|language| current.comments.get(language.id()))
         .cloned()
         .unwrap_or_default()
@@ -73,6 +77,48 @@ impl LanguagesState {
   fn read<T>(&self, f: impl FnOnce(&Current) -> T) -> T {
     f(&self.current.read().unwrap_or_else(PoisonError::into_inner))
   }
+}
+
+/// A document's language in `registry`: the one chosen for it, else the one
+/// its file name suggests. `None` for plain text, including when the chosen
+/// language is no longer registered.
+pub fn language_of<'r>(registry: &'r Registry, document: &Document) -> Option<&'r Language> {
+  match document.language_choice() {
+    Some(LanguageChoice::PlainText) => None,
+    Some(LanguageChoice::Language(id)) => registry.get(id),
+    None => document.path().and_then(|path| registry.for_path(path)),
+  }
+}
+
+/// A language a document can be set to.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LanguageDto {
+  pub id: String,
+  pub name: String,
+  /// The file extensions it's for, without the dot.
+  pub file_extensions: Vec<String>,
+}
+
+/// The languages a document can be set to, by name: those that files can
+/// have, leaving out ones only embedded in others (Markdown's inline text).
+#[tauri::command]
+pub fn languages_list(state: State<'_, LanguagesState>) -> Vec<LanguageDto> {
+  choices(&state.registry())
+}
+
+fn choices(registry: &Registry) -> Vec<LanguageDto> {
+  let mut languages: Vec<LanguageDto> = registry
+    .languages()
+    .filter(|language| !language.file_extensions().is_empty() || !language.file_names().is_empty())
+    .map(|language| LanguageDto {
+      id: language.id().to_owned(),
+      name: language.name().to_owned(),
+      file_extensions: language.file_extensions().to_vec(),
+    })
+    .collect();
+  languages.sort_by_cached_key(|language| language.name.to_lowercase());
+  languages
 }
 
 /// Rebuilds the languages from the extensions in the background.
@@ -229,4 +275,48 @@ pub fn examples(folders: &[&str]) -> Registry {
   let (registry, problems) = Registry::new(definitions);
   assert!(problems.is_empty(), "{problems:?}");
   registry
+}
+
+#[cfg(test)]
+mod tests {
+  use ferrite_core::{Editor, EditorConfig};
+
+  use super::*;
+
+  #[test]
+  fn documents_have_the_language_chosen_for_them_else_their_files() {
+    let registry = examples(&["html-css"]);
+    let dir = tempfile::tempdir().expect("temp dir");
+    let path = dir.path().join("icon.svg");
+    std::fs::write(&path, "<svg/>").expect("writes");
+    let mut editor = Editor::new(EditorConfig::default());
+    let loaded = ferrite_workspace::load_text_file(&path).expect("loads");
+    let file = editor.open(path, loaded);
+    let untitled = editor.create_untitled();
+    let mut language = |id, choice| {
+      let document = editor.document_mut(id).expect("open");
+      document.set_language_choice(choice);
+      language_of(&registry, document).map(|language| language.id().to_owned())
+    };
+    let chosen = |id: &str| Some(LanguageChoice::Language(id.to_owned()));
+
+    assert_eq!(language(file, None).as_deref(), Some("svg"));
+    assert_eq!(language(file, chosen("html")).as_deref(), Some("html"));
+    assert_eq!(language(file, Some(LanguageChoice::PlainText)), None);
+    assert_eq!(language(untitled, None), None);
+    assert_eq!(language(untitled, chosen("css")).as_deref(), Some("css"));
+    // A language that's gone (its extension was removed) leaves plain text.
+    assert_eq!(language(untitled, chosen("cobol")), None);
+  }
+
+  #[test]
+  fn languages_to_choose_from_are_those_files_can_have_by_name() {
+    let registry = examples(&["markdown", "html-css"]);
+    let names: Vec<String> = choices(&registry)
+      .into_iter()
+      .map(|language| language.name)
+      .collect();
+    // Not Markdown's inline text, which is only embedded in Markdown.
+    assert_eq!(names, ["CSS", "HTML", "Markdown", "SVG"]);
+  }
 }

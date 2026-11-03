@@ -16,7 +16,14 @@ import {
 } from '../state/documents'
 import { viewersFor } from '../state/viewers'
 import { addDevelopmentExtension, reloadExtensions } from '../ipc/extensions'
-import { listEncodings, type EncodingChoice } from '../ipc/editor'
+import {
+  listEncodings,
+  listLanguages,
+  setDocumentLanguage,
+  type EncodingChoice,
+  type LanguageChoice,
+} from '../ipc/editor'
+import { editorStatus } from '../state/editorStatus'
 import { setIconTheme, setTheme, settingsFilePath } from '../ipc/workspace'
 import { showOutput, showProblems } from '../state/output'
 import { forgetExtensionIcons } from '../state/extensions'
@@ -122,6 +129,47 @@ function changeEncoding(): void {
     items: [
       { label: 'Reopen with Encoding', run: () => void pickEncoding('reopen') },
       { label: 'Save with Encoding', run: () => void pickEncoding('save') },
+    ],
+  })
+}
+
+/** Asks for a language for the active editor's document, as the status bar's language offers. */
+async function pickLanguage(): Promise<void> {
+  const editor = activeEditor.get()
+  if (!editor) {
+    return
+  }
+  const id = editor.documentId
+  let languages: LanguageChoice[]
+  try {
+    languages = await listLanguages()
+  } catch (error) {
+    notify('error', `Listing the languages failed: ${String(error)}`)
+    return
+  }
+  const current = editorStatus.get()?.language?.id ?? 'plaintext'
+  // The backend's event refreshes the editor.
+  const set = (language: string | null) => () => {
+    setDocumentLanguage(id, language).catch((error: unknown) => {
+      notify('error', `Changing the language failed: ${String(error)}`)
+    })
+  }
+  const extensions = (language: LanguageChoice) =>
+    language.fileExtensions.map(extension => `.${extension}`).join(', ') || undefined
+  openQuickPick({
+    placeholder: 'Select a language',
+    items: [
+      { label: 'Auto Detect', detail: 'From the file name', run: set(null) },
+      {
+        label: 'Plain Text',
+        detail: current === 'plaintext' ? 'Current' : undefined,
+        run: set('plaintext'),
+      },
+      ...languages.map(language => ({
+        label: language.name,
+        detail: language.id === current ? 'Current' : extensions(language),
+        run: set(language.id),
+      })),
     ],
   })
 }
@@ -251,6 +299,14 @@ export const builtinCommands: Command[] = [
     title: 'Save with Encoding…',
     enabled: () => activeFileDocument() !== undefined,
     run: () => pickEncoding('save'),
+  },
+  {
+    id: 'editor.changeLanguage',
+    category: 'View',
+    title: 'Change Language Mode',
+    keybinding: 'mod+k m',
+    enabled: hasEditor,
+    run: pickLanguage,
   },
   {
     id: 'view.reopenWith',

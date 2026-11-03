@@ -207,6 +207,9 @@ export interface ServerStatus {
 
 /** The document's language and language server. */
 export interface LanguageStatus {
+  /** The language's id, e.g. `css`. */
+  id: string
+  /** Its name, e.g. `CSS`. */
   language: string
   server: ServerStatus | null
   /** Characters that open completion; `null` without completion support. */
@@ -330,6 +333,20 @@ export const closeDocument = (id: number) => call<boolean>('document_close', { i
  */
 export const openDocument = (path: string, binary = false) =>
   call<DocumentSummary>('document_open', { path, binary })
+/** A language a document can be set to. */
+export interface LanguageChoice {
+  id: string
+  name: string
+  /** The file extensions it's for, without the dot. */
+  fileExtensions: string[]
+}
+
+/** The languages a document can be set to, by name. */
+export const listLanguages = () => call<LanguageChoice[]>('languages_list')
+/** Sets a document's language: an id, `plaintext` for none, or `null` to go by its file name. */
+export const setDocumentLanguage = (id: number, language: string | null) =>
+  call<void>('document_set_language', { id, language })
+
 export const listEncodings = () => call<EncodingChoice[]>('document_encodings')
 export const reopenWithEncoding = (id: number, encoding: string) =>
   call<DocumentSummary>('document_reopen_with_encoding', { id, encoding })

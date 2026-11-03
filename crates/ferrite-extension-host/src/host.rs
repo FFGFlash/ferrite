@@ -16,7 +16,7 @@ use std::sync::mpsc::{self, Receiver};
 use std::sync::{Arc, Mutex, MutexGuard, OnceLock, PoisonError, RwLock, Weak};
 use std::time::{Duration, Instant};
 
-use ferrite_core::{Document, DocumentId};
+use ferrite_core::{Document, DocumentId, LanguageChoice};
 use ferrite_text::{TextBuffer, TextSnapshot, Version, map_offset_through};
 
 use crate::api::{self, document_info, to_position};
@@ -117,8 +117,9 @@ fn catch_up<'a>(
 /// What the host knows about an open document.
 struct DocumentRecord {
   info: DocumentInfo,
-  /// The path `info` was built for.
+  /// The path and chosen language `info` was built for.
   path: Option<PathBuf>,
+  choice: Option<LanguageChoice>,
   /// Recently synced texts, oldest first; the last is the current one.
   history: VecDeque<TextSnapshot>,
   /// Diagnostics by extension id.
@@ -587,14 +588,17 @@ impl Shared {
         && record.info.version == document.version().get()
         && record.info.dirty == document.is_dirty()
         && record.path.as_deref() == document.path()
+        && record.choice.as_ref() == document.language_choice()
       {
         return;
       }
-      // Renamed, moved, or saved under another name: to extensions, the
-      // document at the old path closed and one at the new path opened (its
-      // language may differ), so their diagnostics for it are dropped.
+      // Renamed, moved, saved under another name, or set to another
+      // language: to extensions, the document at the old path closed and one
+      // at the new path opened (its language may differ), so their
+      // diagnostics for it are dropped.
       if let Some(record) = state.documents.get(&id)
-        && record.path.as_deref() != document.path()
+        && (record.path.as_deref() != document.path()
+          || record.choice.as_ref() != document.language_choice())
       {
         state.documents.remove(&id);
         for entry in &state.extensions {
@@ -614,6 +618,7 @@ impl Shared {
             DocumentRecord {
               info: info.clone(),
               path: document.path().map(Path::to_path_buf),
+              choice: document.language_choice().cloned(),
               history: VecDeque::from([buffer.snapshot()]),
               diagnostics: BTreeMap::new(),
               decorations: BTreeMap::new(),
@@ -643,6 +648,7 @@ impl Shared {
           let synced_version = record.synced().map(TextSnapshot::version);
           record.info = info.clone();
           record.path = document.path().map(Path::to_path_buf);
+          record.choice = document.language_choice().cloned();
           if synced_version != Some(buffer.version()) {
             let readers: Vec<&Worker> = state
               .extensions
@@ -1226,10 +1232,11 @@ impl ExtensionHost {
         return;
       }
       for record in state.documents.values_mut() {
-        record.info.language = record
-          .path
-          .as_deref()
-          .and_then(|path| self.shared.embedder.language_of(path));
+        record.info.language = api::language_of(
+          self.shared.embedder.as_ref(),
+          record.path.as_deref(),
+          record.choice.as_ref(),
+        );
       }
       self.start_wanted(state, &mut outbox);
     }

@@ -47,7 +47,7 @@ export const StatusBar = memo(function StatusBar({ appInfo }: StatusBarProps) {
       </div>
       <div className="statusbar__group">
         {side('right')}
-        {status?.language && <LanguageItems status={status.language} />}
+        {status && <LanguageItems status={status.language} />}
         {active && (
           <>
             <span className="statusbar__item" title="Line ending">
@@ -134,14 +134,24 @@ function serverText(server: NonNullable<LanguageStatus['server']>): string {
   }
 }
 
-/** The active document's language and language server. (Problem counts cover every file.) */
-function LanguageItems({ status }: { status: LanguageStatus }) {
-  const { server } = status
+/**
+ * The active document's language, which changes it, and language server. (Problem counts
+ * cover every file.)
+ */
+function LanguageItems({ status }: { status: LanguageStatus | null }) {
+  const language = status?.language ?? 'Plain Text'
+  const server = status?.server
   return (
     <>
-      <span className="statusbar__item" title="Language">
-        {status.language}
-      </span>
+      <button
+        type="button"
+        className="statusbar__item statusbar__button"
+        title="Select Language Mode"
+        aria-label={`Language: ${language}. Select Language Mode`}
+        onClick={() => void executeCommand('editor.changeLanguage')}
+      >
+        {language}
+      </button>
       {server && (
         <span
           className="statusbar__item"

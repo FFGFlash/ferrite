@@ -38,11 +38,10 @@ impl RegionStates {
     document: &Document,
     f: impl FnOnce(&RegionMarkers) -> T,
   ) -> T {
-    let tokens = match document.path() {
-      Some(path) if document.buffer().len() <= MAX_SYNTAX_BYTES => {
-        app.state::<LanguagesState>().comments_for(path)
-      }
-      _ => CommentTokens::default(),
+    let tokens = if document.buffer().len() <= MAX_SYNTAX_BYTES {
+      app.state::<LanguagesState>().comments_for(document)
+    } else {
+      CommentTokens::default()
     };
     let mut documents = self.0.lock().unwrap_or_else(PoisonError::into_inner);
     let markers = documents.entry(document.id()).or_default();

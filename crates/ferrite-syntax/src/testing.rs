@@ -100,6 +100,15 @@ const EXAMPLES: &[Example] = &[
     None,
   ),
   (
+    "html-css",
+    "svg",
+    &["svg"],
+    "tree-sitter-xml",
+    "xml",
+    "svg/highlights.scm",
+    Some("svg/injections.scm"),
+  ),
+  (
     "markdown",
     "markdown",
     &["md"],

@@ -1,11 +1,11 @@
-# A language-only extension: HTML and CSS highlighting from Tree-sitter
+# A language-only extension: HTML, CSS and SVG highlighting from Tree-sitter
 # grammars compiled to WebAssembly, and the language servers from
 # vscode-langservers-extracted. No code, so no entrypoint. See
 # docs/extensions.md#languages.
 id = "example.html-css"
 name = "HTML & CSS"
 version = "0.1.0"
-description = "HTML and CSS: highlighting (with CSS and JavaScript inside HTML) and language servers."
+description = "HTML, CSS and SVG: highlighting (with CSS and JavaScript inside HTML and SVG) and language servers."
 author = "Ferrite"
 api_version = "1"
 
@@ -38,6 +38,20 @@ grammar = "grammars/tree-sitter-css.wasm"
 highlights = "queries/css/highlights.scm"
 folds = "queries/css/folds.scm"
 block_comment = ["/*", "*/"]
+
+[[languages]]
+id = "svg"
+name = "SVG"
+file_extensions = ["svg"]
+# SVG is XML: the prebuilt tree-sitter-xml grammar, which exports
+# `tree_sitter_xml`.
+grammar = "grammars/tree-sitter-xml.wasm"
+grammar_name = "xml"
+highlights = "queries/svg/highlights.scm"
+folds = "queries/svg/folds.scm"
+# Highlights <style> as CSS and <script> as JavaScript.
+injections = "queries/svg/injections.scm"
+block_comment = ["<!--", "-->"]
 
 # `npm install -g vscode-langservers-extracted` provides both servers. Ferrite
 # looks for them on the PATH and shows "not installed" in the status bar if

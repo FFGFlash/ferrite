@@ -32,8 +32,9 @@ This guide uses these examples:
   lists them in a side bar view, counts them in the status bar, and adds a keybinding and a
   context menu item.
 - [Example Themes](../extensions/themes/) contributes two color themes and no code at all.
-- [HTML & CSS](../extensions/html-css/) adds two languages, highlights CSS and JavaScript inside
-  HTML, and declares their language servers, also with no code. Ferrite has no languages of its
+- [HTML & CSS](../extensions/html-css/) adds three languages (HTML, CSS and SVG), highlights CSS
+  and JavaScript inside HTML and SVG, and declares language servers for HTML and CSS, also with no
+  code. Ferrite has no languages of its
   own: [Rust](../extensions/rust/), [TypeScript](../extensions/typescript/),
   [JavaScript](../extensions/javascript/), [JSON](../extensions/json/),
   [TOML](../extensions/toml/), and [Python](../extensions/python/) are extensions like it.
@@ -677,12 +678,16 @@ html-css/
   grammars/
     tree-sitter-html.wasm         Tree-sitter grammars, compiled to WebAssembly
     tree-sitter-css.wasm
+    tree-sitter-xml.wasm          SVG's: SVG is XML
   queries/
     html/highlights.scm           what to color
     html/injections.scm           where CSS and JavaScript are embedded
     html/folds.scm                what folds
     css/highlights.scm
     css/folds.scm
+    svg/highlights.scm
+    svg/injections.scm
+    svg/folds.scm
 ```
 
 ```toml
@@ -724,7 +729,10 @@ A grammar is a Tree-sitter parser compiled to WebAssembly with `tree-sitter buil
 exports `tree_sitter_<grammar_name>`. Ferrite uses Tree-sitter 0.27, which loads grammars of
 language ABI 13 to 15. Many grammars publish a prebuilt `.wasm`: all the examples' grammars are the
 files from their npm packages (`tree-sitter-html@0.23.2`, `tree-sitter-css@0.25.0`,
-`tree-sitter-rust@0.24.0`, and so on; each extension's `grammars` folder has the license). To build one yourself:
+`tree-sitter-rust@0.24.0`, and so on), except XML's, whose npm package has none: it's the
+`tree-sitter-xml.wasm` attached to the
+[v0.7.0 release](https://github.com/tree-sitter-grammars/tree-sitter-xml/releases/tag/v0.7.0).
+Each extension's `grammars` folder has the licenses. To build one yourself:
 
 ```sh
 npx tree-sitter-cli@0.27.1 build --wasm path/to/tree-sitter-html
@@ -847,7 +855,7 @@ root_markers = ["package.json"]          # optional: files marking a project roo
 2. Ferrite asks whether to allow the two language servers. Either answer is fine; to get them,
    run `npm install -g vscode-langservers-extracted`.
 3. Open an `.html` file: tags, attributes, and comments are colored, and so is the CSS in
-   `<style>` and the JavaScript in `<script>`.
+   `<style>` and the JavaScript in `<script>`. An `.svg` file is colored the same way.
 
 After editing a query, click **Restart** in the Extensions view: languages whose files changed
 are loaded again, and open documents are highlighted with them. An invalid query is logged

@@ -147,6 +147,8 @@ pub fn run() {
       editor::document_encodings,
       editor::document_reopen_with_encoding,
       editor::document_save_with_encoding,
+      editor::document_set_language,
+      languages::languages_list,
       editor::document_save,
       editor::document_save_as,
       editor::document_close,

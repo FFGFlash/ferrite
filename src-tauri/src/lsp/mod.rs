@@ -122,6 +122,8 @@ struct OpenDocument {
   server: Arc<LanguageServer>,
   uri: Uri,
   path: PathBuf,
+  /// The id of the language it was opened as.
+  language: String,
   lsp_version: i32,
   /// Texts recently sent, by LSP version, oldest first; the last is what
   /// the server has now.
@@ -229,8 +231,9 @@ struct Inner {
   servers: HashMap<ServerKey, ServerEntry>,
   documents: HashMap<DocumentId, OpenDocument>,
   /// Documents waiting for their server to start (or that cannot have one
-  /// because it failed), with the path they were checked for.
-  waiting: HashMap<DocumentId, (PathBuf, ServerKey)>,
+  /// because it failed), with the path and language id they were checked
+  /// for.
+  waiting: HashMap<DocumentId, (PathBuf, String, ServerKey)>,
   /// Diagnostics for files that aren't open, by server and path.
   unopened: HashMap<ServerKey, BTreeMap<PathBuf, Vec<FileDiagnostic>>>,
   shutting_down: bool,
@@ -262,6 +265,9 @@ pub struct ServerStatusDto {
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct LanguageStatusDto {
+  /// The language's id, e.g. `css`.
+  pub id: String,
+  /// Its name, e.g. `CSS`.
   pub language: String,
   pub server: Option<ServerStatusDto>,
   /// Characters that open completion; `None` without completion support.
@@ -283,9 +289,14 @@ impl LspState {
     self.0.lock().unwrap_or_else(PoisonError::into_inner)
   }
 
-  fn wanted(&self, app: &AppHandle, inner: &mut Inner, path: &Path) -> Option<Wanted> {
+  fn wanted(
+    &self,
+    app: &AppHandle,
+    inner: &mut Inner,
+    path: &Path,
+    language: &Language,
+  ) -> Option<Wanted> {
     let languages = app.state::<LanguagesState>();
-    let language = languages.for_path(path)?;
     let configs = inner.configs.get_or_insert_with(|| {
       app
         .state::<SettingsState>()
@@ -312,29 +323,39 @@ impl LspState {
   pub fn sync(&self, app: &AppHandle, document: &Document) {
     let id = document.id();
     let buffer = document.buffer();
+    let language = app.state::<LanguagesState>().for_document(document);
     let mut inner = self.lock();
     if inner.shutting_down {
       return;
     }
     let path = document.path();
     if let Some(open) = inner.documents.get_mut(&id) {
-      if Some(open.path.as_path()) == path && open.server.is_alive() {
+      if Some(open.path.as_path()) == path
+        && language.as_ref().map(Language::id) == Some(open.language.as_str())
+        && open.server.is_alive()
+      {
         open.send_changes(buffer);
         return;
       }
-      // Saved under another name, or its server exited.
+      // Saved under another name, set to another language, or its server
+      // exited.
       if let Some(open) = inner.documents.remove(&id) {
         open.close();
       }
     }
-    let Some(path) = path.filter(|_| buffer.len() <= MAX_LSP_BYTES) else {
+    let (Some(path), Some(language)) = (path.filter(|_| buffer.len() <= MAX_LSP_BYTES), language)
+    else {
       inner.waiting.remove(&id);
       return;
     };
     let key = match inner.waiting.get(&id) {
-      Some((waited, key)) if waited == path => key.clone(),
+      Some((waited, waited_language, key))
+        if waited == path && waited_language == language.id() =>
+      {
+        key.clone()
+      }
       _ => {
-        let Some(wanted) = self.wanted(app, &mut inner, path) else {
+        let Some(wanted) = self.wanted(app, &mut inner, path, &language) else {
           inner.waiting.remove(&id);
           return;
         };
@@ -352,7 +373,10 @@ impl LspState {
           start_server(app, wanted.key, wanted.config);
           events::emit(app, AppEvent::LanguageServerChanged);
         }
-        inner.waiting.insert(id, (path.to_path_buf(), key.clone()));
+        inner.waiting.insert(
+          id,
+          (path.to_path_buf(), language.id().to_owned(), key.clone()),
+        );
         key
       }
     };
@@ -367,10 +391,8 @@ impl LspState {
       return;
     };
     let server = server.clone();
-    let language = app.state::<LanguagesState>().for_path(path);
-    let language = language.as_ref().map_or("plaintext", Language::id);
     server.notify::<DidOpenTextDocument>(DidOpenTextDocumentParams {
-      text_document: TextDocumentItem::new(uri.clone(), language.into(), 1, buffer.contents()),
+      text_document: TextDocumentItem::new(uri.clone(), language.id().into(), 1, buffer.contents()),
     });
     inner.waiting.remove(&id);
     inner.documents.insert(
@@ -380,6 +402,7 @@ impl LspState {
         server,
         uri,
         path: path.to_path_buf(),
+        language: language.id().to_owned(),
         lsp_version: 1,
         history: VecDeque::from([(1, buffer.snapshot())]),
         diagnostics: Vec::new(),
@@ -459,13 +482,13 @@ impl LspState {
     document: &Document,
     lines: Range<usize>,
   ) -> (Vec<DiagnosticDto>, Option<LanguageStatusDto>) {
-    let languages = app.state::<LanguagesState>();
-    let Some(language) = document.path().and_then(|path| languages.for_path(path)) else {
+    let Some(language) = app.state::<LanguagesState>().for_document(document) else {
       return (Vec::new(), None);
     };
     let buffer = document.buffer();
     let mut inner = self.lock();
     let mut status = LanguageStatusDto {
+      id: language.id().to_owned(),
       language: language.name().to_owned(),
       server: None,
       completion_triggers: None,
@@ -473,7 +496,7 @@ impl LspState {
     let id = document.id();
     let key = match (inner.documents.get(&id), inner.waiting.get(&id)) {
       (Some(open), _) => open.key.clone(),
-      (None, Some((_, key))) => key.clone(),
+      (None, Some((_, _, key))) => key.clone(),
       (None, None) => return (Vec::new(), Some(status)),
     };
     if let Some(entry) = inner.servers.get(&key) {
@@ -663,7 +686,7 @@ impl LspState {
     for id in &affected {
       inner.documents.remove(id);
     }
-    inner.waiting.retain(|_, (_, waiting)| waiting != key);
+    inner.waiting.retain(|_, (_, _, waiting)| waiting != key);
     // Its replacement checks the files again.
     inner.unopened.remove(key);
     affected.into_iter().map(DocumentId::get).collect()

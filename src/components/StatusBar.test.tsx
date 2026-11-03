@@ -1,7 +1,8 @@
-import { render, screen } from '@testing-library/react'
+import { act, render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 import { registerCommands } from '../commands/registry'
+import { editorStatus } from '../state/editorStatus'
 import { statusItemsStore } from '../state/extensions'
 import { StatusBar } from './StatusBar'
 
@@ -47,5 +48,29 @@ describe('StatusBar', () => {
     expect(screen.getByText('low')).toHaveAttribute('title', 'A')
     unregister()
     statusItemsStore.set([])
+  })
+
+  it("shows the active editor's language, plain text without one, and changes it", async () => {
+    const user = userEvent.setup()
+    const run = vi.fn()
+    const unregister = registerCommands([{ id: 'editor.changeLanguage', title: 'Change', run }])
+    editorStatus.set({ line: 1, column: 1, selectionCount: 1, language: null })
+    render(<StatusBar appInfo={null} />)
+    await user.click(
+      screen.getByRole('button', { name: 'Language: Plain Text. Select Language Mode' }),
+    )
+    expect(run).toHaveBeenCalled()
+
+    act(() =>
+      editorStatus.set({
+        line: 1,
+        column: 1,
+        selectionCount: 1,
+        language: { id: 'svg', language: 'SVG', server: null, completionTriggers: null },
+      }),
+    )
+    expect(screen.getByRole('button', { name: /^Language: SVG\./ })).toHaveTextContent('SVG')
+    unregister()
+    editorStatus.set(null)
   })
 })

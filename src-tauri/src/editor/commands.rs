@@ -8,7 +8,7 @@
 
 use std::path::Path;
 
-use ferrite_core::{CoreError, Document, DocumentId, EditorOp};
+use ferrite_core::{CoreError, Document, DocumentId, EditorOp, LanguageChoice};
 use ferrite_text::SearchQuery;
 use ferrite_workspace::{
   DecodeOptions, ENCODING_CHOICES, FileError, TextEncoding, load_text_file_with, save_text_file,
@@ -102,6 +102,55 @@ pub fn document_encodings() -> Vec<EncodingChoice> {
 pub struct EncodingChoice {
   id: &'static str,
   label: &'static str,
+}
+
+/// Sets a document's language: a language's id, `plaintext` for none, or
+/// `None` to go by its file name again. Its language server and extensions
+/// see it close and open again as the new language; its view is refreshed
+/// by the event this sends.
+#[tauri::command]
+pub fn document_set_language(
+  app: AppHandle,
+  state: State<'_, EditorState>,
+  id: u64,
+  language: Option<String>,
+) -> Result<(), CommandError> {
+  let choice = match language {
+    None => None,
+    Some(language) if language == "plaintext" => Some(LanguageChoice::PlainText),
+    Some(language) => {
+      if app
+        .state::<LanguagesState>()
+        .registry()
+        .get(&language)
+        .is_none()
+      {
+        return Err(CommandError::new(
+          "unknownLanguage",
+          format!("There's no language {language:?}."),
+        ));
+      }
+      Some(LanguageChoice::Language(language))
+    }
+  };
+  let id = DocumentId::from_raw(id);
+  {
+    let mut editor = state.lock();
+    let document = editor.document_mut(id)?;
+    tracing::info!(document = %id, language = ?choice, "set document language");
+    document.set_language_choice(choice);
+    let document = &*document;
+    app.state::<LspState>().sync(&app, document);
+    app.state::<ExtensionsState>().sync(document);
+  }
+  // Its old server's diagnostics are gone.
+  events::emit(
+    &app,
+    AppEvent::DiagnosticsChanged {
+      document_id: id.get(),
+    },
+  );
+  Ok(())
 }
 
 fn encoding_named(id: &str) -> Result<TextEncoding, CommandError> {
@@ -382,10 +431,8 @@ fn op_context(
   ops: &[OpDto],
 ) -> OpContext {
   let mut context = OpContext::default();
-  if ops.iter().any(|op| matches!(op, OpDto::ToggleComment))
-    && let Some(path) = document.path()
-  {
-    context.comments = app.state::<LanguagesState>().comments_for(path);
+  if ops.iter().any(|op| matches!(op, OpDto::ToggleComment)) {
+    context.comments = app.state::<LanguagesState>().comments_for(document);
   }
   if ops.iter().any(|op| matches!(op, OpDto::Paste { .. })) {
     context.copied_lines = state.copied_lines();

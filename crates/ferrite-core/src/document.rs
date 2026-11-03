@@ -82,6 +82,16 @@ pub struct SavePoint {
   state: StateId,
 }
 
+/// A language chosen for a document, instead of the one its file name
+/// suggests.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum LanguageChoice {
+  /// No language.
+  PlainText,
+  /// The language with this id, e.g. `css`.
+  Language(String),
+}
+
 #[derive(Debug)]
 pub struct Document {
   id: DocumentId,
@@ -98,6 +108,8 @@ pub struct Document {
   cursor_history: VecDeque<(Version, Selections)>,
   /// Folded regions.
   pub(crate) folds: Folds,
+  /// The language chosen for the document, if any.
+  language: Option<LanguageChoice>,
 }
 
 impl Document {
@@ -132,6 +144,7 @@ impl Document {
       saved_state,
       cursor_history: VecDeque::new(),
       folds,
+      language: None,
     }
   }
 
@@ -166,6 +179,16 @@ impl Document {
       .file
       .as_ref()
       .map_or(TextEncoding::UTF8, |file| file.encoding)
+  }
+
+  /// The language chosen for the document; `None` to go by its file name.
+  /// It stays when the file is renamed or saved under another name.
+  pub fn language_choice(&self) -> Option<&LanguageChoice> {
+    self.language.as_ref()
+  }
+
+  pub fn set_language_choice(&mut self, choice: Option<LanguageChoice>) {
+    self.language = choice;
   }
 
   /// File name for file-backed documents, `Untitled-N` otherwise.

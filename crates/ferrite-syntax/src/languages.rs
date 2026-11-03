@@ -75,6 +75,16 @@ impl Language {
     &self.0.definition.name
   }
 
+  /// The file extensions it claims, lowercase and without the dot.
+  pub fn file_extensions(&self) -> &[String] {
+    &self.0.definition.file_extensions
+  }
+
+  /// The whole file names it claims, e.g. `Cargo.lock`.
+  pub fn file_names(&self) -> &[String] {
+    &self.0.definition.file_names
+  }
+
   /// Whether the language has a fold query: it declares one, and its
   /// grammar hasn't failed to load. Doesn't load the grammar (or wait for
   /// it to load), as compiling one can take a while.

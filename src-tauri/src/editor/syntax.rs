@@ -16,7 +16,7 @@
 //! The tree also gives the document's foldable regions, when its language
 //! has a fold query.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::hash::{DefaultHasher, Hash, Hasher};
 use std::ops::Range;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
@@ -33,7 +33,7 @@ use tauri::{AppHandle, Manager};
 
 use super::protocol::KnownDto;
 use crate::events::{self, AppEvent};
-use crate::languages::LanguagesState;
+use crate::languages::{LanguagesState, language_of};
 use crate::perf::Perf;
 
 /// Larger documents are not highlighted.
@@ -317,16 +317,19 @@ fn flatten_utf16(text: &str, spans: &[Span]) -> Vec<u32> {
 }
 
 #[derive(Default)]
-pub struct SyntaxStates {
-  documents: Mutex<HashMap<DocumentId, DocumentSyntax>>,
+pub struct SyntaxStates(Mutex<States>);
+
+#[derive(Default)]
+struct States {
+  documents: HashMap<DocumentId, DocumentSyntax>,
+  /// Documents that lost their language (set to plain text, say) since
+  /// their view was last sent colors, which it still shows.
+  uncolored: HashSet<DocumentId>,
 }
 
 impl SyntaxStates {
-  fn lock(&self) -> MutexGuard<'_, HashMap<DocumentId, DocumentSyntax>> {
-    self
-      .documents
-      .lock()
-      .unwrap_or_else(PoisonError::into_inner)
+  fn lock(&self) -> MutexGuard<'_, States> {
+    self.0.lock().unwrap_or_else(PoisonError::into_inner)
   }
 
   /// Highlights for a view of the lines in `ranges` (see
@@ -340,14 +343,25 @@ impl SyntaxStates {
     known: Option<&KnownDto>,
     chunks: &[Range<usize>],
   ) -> Vec<LineHighlightsDto> {
-    let mut documents = self.lock();
-    let Some(syntax) = Self::entry(app, &mut documents, document) else {
-      return Vec::new();
+    let mut states = self.lock();
+    let Some(syntax) = Self::entry(app, &mut states, document) else {
+      // Clears the colors of a document that lost its language.
+      if !states.uncolored.remove(&document.id()) {
+        return Vec::new();
+      }
+      return ranges
+        .iter()
+        .flat_map(Clone::clone)
+        .map(|line| LineHighlightsDto {
+          line,
+          spans: Vec::new(),
+        })
+        .collect();
     };
     let started = Instant::now();
     let job = syntax.update(document.buffer());
     let highlights = syntax.highlights(document.buffer(), ranges, known, chunks);
-    drop(documents);
+    drop(states);
     let perf = app.state::<Perf>();
     perf.record("syntax.highlight", started.elapsed());
     if let Some(job) = job {
@@ -361,11 +375,11 @@ impl SyntaxStates {
   /// [`Self::highlights`], this leaves alone what the editor's view has been
   /// sent. Called with the editor locked.
   pub fn tree(&self, app: &AppHandle, document: &Document) -> Option<SyntaxTree> {
-    let mut documents = self.lock();
-    let syntax = Self::entry(app, &mut documents, document)?;
+    let mut states = self.lock();
+    let syntax = Self::entry(app, &mut states, document)?;
     let job = syntax.update(document.buffer());
     let tree = syntax.tree.clone();
-    drop(documents);
+    drop(states);
     if let Some(job) = job {
       spawn_parse(app, document.id(), job);
     }
@@ -382,8 +396,8 @@ impl SyntaxStates {
     document: &Document,
     ranges: &[Range<usize>],
   ) -> Option<Vec<Range<usize>>> {
-    let mut documents = self.lock();
-    let syntax = Self::entry(app, &mut documents, document)?;
+    let mut states = self.lock();
+    let syntax = Self::entry(app, &mut states, document)?;
     if !syntax.language.has_folds() {
       return None;
     }
@@ -394,7 +408,7 @@ impl SyntaxStates {
         regions.extend(fold_ranges(tree, document.buffer(), lines.clone())?);
       }
     }
-    drop(documents);
+    drop(states);
     if let Some(job) = job {
       spawn_parse(app, document.id(), job);
     }
@@ -407,8 +421,8 @@ impl SyntaxStates {
   /// fold query (so they come from indentation), or its tree is parsed.
   /// Called with the editor locked.
   pub fn folds_ready(&self, app: &AppHandle, document: &Document) -> bool {
-    let mut documents = self.lock();
-    let Some(syntax) = Self::entry(app, &mut documents, document) else {
+    let mut states = self.lock();
+    let Some(syntax) = Self::entry(app, &mut states, document) else {
       return true;
     };
     if !syntax.language.has_folds() {
@@ -416,7 +430,7 @@ impl SyntaxStates {
     }
     let job = syntax.update(document.buffer());
     let ready = syntax.tree.is_some();
-    drop(documents);
+    drop(states);
     if let Some(job) = job {
       spawn_parse(app, document.id(), job);
     }
@@ -428,22 +442,29 @@ impl SyntaxStates {
   /// isn't highlighted.
   fn entry<'a>(
     app: &AppHandle,
-    documents: &'a mut HashMap<DocumentId, DocumentSyntax>,
+    states: &'a mut States,
     document: &Document,
   ) -> Option<&'a mut DocumentSyntax> {
     let id = document.id();
     let registry = app.state::<LanguagesState>().registry();
-    let language = document
-      .path()
-      .and_then(|path| registry.for_path(path))
+    let language = language_of(&registry, document)
       .filter(|_| document.buffer().len() <= MAX_SYNTAX_BYTES)
       .cloned();
     let Some(language) = language else {
-      documents.remove(&id);
+      if states
+        .documents
+        .remove(&id)
+        .is_some_and(|syntax| syntax.mirror.is_some())
+      {
+        states.uncolored.insert(id);
+      }
       return None;
     };
+    // A new state sends every line's colors again.
+    states.uncolored.remove(&id);
     Some(
-      documents
+      states
+        .documents
         .entry(id)
         .and_modify(|syntax| {
           if syntax.language != language || !Arc::ptr_eq(&syntax.registry, &registry) {
@@ -456,7 +477,9 @@ impl SyntaxStates {
 
   /// Drops the syntax state of a closed document.
   pub fn forget(&self, id: DocumentId) {
-    self.lock().remove(&id);
+    let mut states = self.lock();
+    states.documents.remove(&id);
+    states.uncolored.remove(&id);
   }
 }
 
@@ -490,8 +513,9 @@ fn spawn_parse(app: &AppHandle, id: DocumentId, job: ParseJob) {
         let Ok(document) = editor.document(id) else {
           return;
         };
-        let mut documents = state.syntax.lock();
-        documents
+        let mut states = state.syntax.lock();
+        states
+          .documents
           .get_mut(&id)
           .is_some_and(|syntax| syntax.finish(job.version, tree, document.buffer()))
       };

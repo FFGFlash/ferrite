@@ -11,7 +11,7 @@ use std::path::Path;
 use std::sync::{Arc, RwLock, Weak};
 use std::time::Instant;
 
-use ferrite_core::{Document, DocumentId, Editor};
+use ferrite_core::{Document, DocumentId, Editor, LanguageChoice};
 use ferrite_text::{Edit, TextBuffer};
 
 use crate::bindings::ferrite::extension::host::Host;
@@ -29,7 +29,7 @@ use crate::permissions::Permission;
 use crate::preview::{self, MAX_KEY_BYTES, MAX_TITLE_CHARS, PreviewInfo};
 use crate::runtime::StoreState;
 use crate::worker::Setup;
-use crate::{Notification, Severity, StatusContent, ViewEntry};
+use crate::{Embedder, Notification, Severity, StatusContent, ViewEntry};
 
 /// Most lines returned by one `read-lines` call.
 pub const MAX_READ_LINES: usize = 10_000;
@@ -182,12 +182,27 @@ pub fn document_info(shared: &Shared, document: &Document) -> DocumentInfo {
     path: document
       .path()
       .map(|path| path.to_string_lossy().into_owned()),
-    language: document
-      .path()
-      .and_then(|path| shared.embedder.language_of(path)),
+    language: language_of(
+      shared.embedder.as_ref(),
+      document.path(),
+      document.language_choice(),
+    ),
     line_count: to_u32(buffer.line_count()),
     length: to_u64(buffer.len()),
     dirty: document.is_dirty(),
+  }
+}
+
+/// A document's language id: the one chosen for it, else its file's.
+pub fn language_of(
+  embedder: &dyn Embedder,
+  path: Option<&Path>,
+  choice: Option<&LanguageChoice>,
+) -> Option<String> {
+  match choice {
+    Some(LanguageChoice::PlainText) => None,
+    Some(LanguageChoice::Language(id)) => Some(id.clone()),
+    None => path.and_then(|path| embedder.language_of(path)),
   }
 }
 

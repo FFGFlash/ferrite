@@ -147,20 +147,22 @@ overwriting when you save.
 ## Languages
 
 Ferrite has no languages built in: each comes from an extension, so you add exactly the ones you
-edit. Without any, files are plain text. A language extension brings a Tree-sitter grammar
-compiled to WebAssembly for highlighting, and usually declares a language server. These are
-included, with no code to build:
+edit. Without any, files are plain text. A file's language comes from its name and is shown in the
+status bar; click it (or run **View: Change Language Mode**, `Ctrl+K M`) to choose another one,
+plain text, or to go back to detecting it. The choice lasts while the file is open. A language
+extension brings a Tree-sitter grammar compiled to WebAssembly for highlighting, and usually
+declares a language server. These are included, with no code to build:
 
-| Extension                            | Languages                | Language server                   | Install the server with                                |
-| ------------------------------------ | ------------------------ | --------------------------------- | ------------------------------------------------------ |
-| [Rust](extensions/rust/)             | Rust                     | `rust-analyzer`                   | `rustup component add rust-analyzer`                   |
-| [TypeScript](extensions/typescript/) | TypeScript, TSX          | `typescript-language-server`      | `npm install -g typescript-language-server typescript` |
-| [JavaScript](extensions/javascript/) | JavaScript, JSX          | `typescript-language-server`      | as above                                               |
-| [JSON](extensions/json/)             | JSON                     | —                                 |                                                        |
-| [TOML](extensions/toml/)             | TOML, `Cargo.lock`       | —                                 |                                                        |
-| [Python](extensions/python/)         | Python                   | `pyright-langserver`              | `npm install -g pyright`                               |
-| [HTML & CSS](extensions/html-css/)   | HTML (with CSS, JS), CSS | `vscode-html/css-language-server` | `npm install -g vscode-langservers-extracted`          |
-| [Markdown](extensions/markdown/)     | Markdown                 | —                                 |                                                        |
+| Extension                            | Languages                     | Language server                   | Install the server with                                |
+| ------------------------------------ | ----------------------------- | --------------------------------- | ------------------------------------------------------ |
+| [Rust](extensions/rust/)             | Rust                          | `rust-analyzer`                   | `rustup component add rust-analyzer`                   |
+| [TypeScript](extensions/typescript/) | TypeScript, TSX               | `typescript-language-server`      | `npm install -g typescript-language-server typescript` |
+| [JavaScript](extensions/javascript/) | JavaScript, JSX               | `typescript-language-server`      | as above                                               |
+| [JSON](extensions/json/)             | JSON                          | —                                 |                                                        |
+| [TOML](extensions/toml/)             | TOML, `Cargo.lock`            | —                                 |                                                        |
+| [Python](extensions/python/)         | Python                        | `pyright-langserver`              | `npm install -g pyright`                               |
+| [HTML & CSS](extensions/html-css/)   | HTML (with CSS, JS), CSS, SVG | `vscode-html/css-language-server` | `npm install -g vscode-langservers-extracted`          |
+| [Markdown](extensions/markdown/)     | Markdown                      | —                                 |                                                        |
 
 Load one with **Extensions: Load Development Extension…** (choose its folder, such as
 `extensions/rust`), or install it by copying its folder into the `extensions` folder next to
