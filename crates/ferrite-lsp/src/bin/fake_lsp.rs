@@ -7,7 +7,10 @@
 //! (its symbols are the functions declared with `fn`). `fake/text` returns a
 //! document's text so tests can check synchronization; `fake/sleep` delays
 //! its answer. Flags: `--utf16` negotiates UTF-16 positions instead of
-//! UTF-8; `--crash-on-hover` exits when asked for a hover.
+//! UTF-8; `--crash-on-hover` exits when asked for a hover; `--ignore-exit`
+//! ignores `exit` and only stops when its input closes; `--stubborn` starts
+//! a long-lived process that shares its output, and waits for it instead of
+//! stopping.
 
 use std::collections::HashMap;
 use std::io::{BufReader, Write};
@@ -19,6 +22,7 @@ use serde_json::{Value, json};
 struct Server {
   utf16: bool,
   crash_on_hover: bool,
+  ignore_exit: bool,
   documents: HashMap<String, String>,
   out: std::io::Stdout,
 }
@@ -269,6 +273,7 @@ impl Server {
         Value::Null
       }
       "shutdown" => Value::Null,
+      "exit" if self.ignore_exit => return,
       "exit" => std::process::exit(0),
       _ => {
         // Responses to our own requests have no method and need no answer.
@@ -291,9 +296,24 @@ impl Server {
 
 fn main() {
   let args: Vec<String> = std::env::args().collect();
+  let flag = |name: &str| args.iter().any(|arg| arg == name);
+  // The process `--stubborn` starts: it outlives any test that fails.
+  if flag("--linger") {
+    std::thread::sleep(Duration::from_secs(60));
+    return;
+  }
+  let stubborn = flag("--stubborn");
+  let lingering = stubborn.then(|| {
+    std::process::Command::new(std::env::current_exe().expect("own path"))
+      .arg("--linger")
+      .stdin(std::process::Stdio::null())
+      .spawn()
+      .expect("starts")
+  });
   let mut server = Server {
-    utf16: args.iter().any(|arg| arg == "--utf16"),
-    crash_on_hover: args.iter().any(|arg| arg == "--crash-on-hover"),
+    utf16: flag("--utf16"),
+    crash_on_hover: flag("--crash-on-hover"),
+    ignore_exit: flag("--ignore-exit") || stubborn,
     documents: HashMap::new(),
     out: std::io::stdout(),
   };
@@ -302,5 +322,8 @@ fn main() {
     if let Ok(message) = serde_json::from_slice::<Value>(&body) {
       server.handle(message);
     }
+  }
+  if let Some(mut lingering) = lingering {
+    let _ = lingering.wait();
   }
 }

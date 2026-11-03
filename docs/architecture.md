@@ -595,7 +595,9 @@ server (`lsp/`).
 - **Failures are contained.** A server that exits fails its pending requests, drops its
   documents' diagnostics, and is restarted on demand up to three times, then marked failed.
   Opening or closing a folder, or changing `[lsp]` settings, restarts all servers. On exit, the
-  app asks every server to shut down and kills those that don't within 2 seconds.
+  app asks every server to shut down and kills those that don't within 2 seconds. Killing a
+  server kills every process it started too: each server runs in its own job object on Windows
+  (which also kills it if Ferrite crashes) and its own process group on Unix.
 
 ## Terminals
 

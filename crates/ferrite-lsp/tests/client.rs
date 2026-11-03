@@ -2,7 +2,7 @@
 
 use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use ferrite_lsp::convert::{content_changes, path_to_uri, to_offsets, to_position};
 use ferrite_lsp::lsp_types::{
@@ -247,6 +247,25 @@ fn crashes_fail_pending_requests_and_are_reported() {
     .any(|event| matches!(event, ServerEvent::Exited));
   assert!(exited);
   assert!(!harness.server.is_alive());
+}
+
+#[test]
+fn shutdown_closes_the_input_of_servers_that_ignore_exit() {
+  let harness = start(&["--ignore-exit"]);
+  let started = Instant::now();
+  harness.server.shutdown();
+  // Well before shutdown gives up and kills it.
+  assert!(started.elapsed() < Duration::from_secs(1));
+}
+
+#[test]
+fn killing_a_server_stops_the_processes_it_started() {
+  let harness = start(&["--stubborn"]);
+  harness.server.shutdown();
+  // The server's output closes only once its lingering process is gone too.
+  let exited = std::iter::from_fn(|| harness.events.recv_timeout(TIMEOUT).ok())
+    .any(|event| matches!(event, ServerEvent::Exited));
+  assert!(exited);
 }
 
 #[test]

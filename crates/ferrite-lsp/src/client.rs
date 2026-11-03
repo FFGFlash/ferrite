@@ -11,7 +11,7 @@
 use std::collections::HashMap;
 use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
-use std::process::{Child, ChildStdin, Command, Stdio};
+use std::process::{ChildStdin, Command, Stdio};
 use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError, mpsc};
 use std::thread;
@@ -34,6 +34,7 @@ use serde_json::{Value, json};
 
 use crate::convert::{PositionEncoding, path_to_uri};
 use crate::framing::{read_message, write_message};
+use crate::process::ServerProcess;
 
 /// How long a server may take to answer `initialize`.
 const INITIALIZE_TIMEOUT: Duration = Duration::from_secs(60);
@@ -106,13 +107,35 @@ impl Pending {
   }
 }
 
+/// Messages for the server's stdin. Its one sender is shared, so closing it
+/// closes stdin once the queued messages are written.
+struct Outgoing(Mutex<Option<mpsc::Sender<Vec<u8>>>>);
+
+impl Outgoing {
+  fn send(&self, body: Vec<u8>) -> Result<(), LspError> {
+    match self
+      .0
+      .lock()
+      .unwrap_or_else(PoisonError::into_inner)
+      .as_ref()
+    {
+      Some(sender) => sender.send(body).map_err(|_| LspError::Exited),
+      None => Err(LspError::Exited),
+    }
+  }
+
+  fn close(&self) {
+    self.0.lock().unwrap_or_else(PoisonError::into_inner).take();
+  }
+}
+
 pub struct LanguageServer {
   name: String,
-  outgoing: Mutex<Option<mpsc::Sender<Vec<u8>>>>,
+  outgoing: Arc<Outgoing>,
   pending: Arc<Pending>,
   next_id: AtomicI64,
   alive: Arc<AtomicBool>,
-  child: Mutex<Child>,
+  process: Mutex<ServerProcess>,
   capabilities: ServerCapabilities,
   encoding: PositionEncoding,
 }
@@ -138,20 +161,15 @@ impl LanguageServer {
       .stdin(Stdio::piped())
       .stdout(Stdio::piped())
       .stderr(Stdio::piped());
-    #[cfg(windows)]
-    {
-      use std::os::windows::process::CommandExt;
-      // Do not open a console window for the server.
-      const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-      process.creation_flags(CREATE_NO_WINDOW);
-    }
-    let mut child = process.spawn().map_err(spawn_error)?;
+    let mut server_process = ServerProcess::spawn(&mut process).map_err(spawn_error)?;
+    let child = server_process.child();
     let missing = || spawn_error(std::io::Error::other("missing stdio pipe"));
     let stdin = child.stdin.take().ok_or_else(missing)?;
     let stdout = child.stdout.take().ok_or_else(missing)?;
     let stderr = child.stderr.take().ok_or_else(missing)?;
 
-    let (outgoing, queue) = mpsc::channel::<Vec<u8>>();
+    let (sender, queue) = mpsc::channel::<Vec<u8>>();
+    let outgoing = Arc::new(Outgoing(Mutex::new(Some(sender))));
     let pending = Arc::new(Pending::default());
     let alive = Arc::new(AtomicBool::new(true));
     spawn_thread(format!("lsp-write-{name}"), move || {
@@ -194,11 +212,11 @@ impl LanguageServer {
 
     let mut server = Self {
       name: name.to_owned(),
-      outgoing: Mutex::new(Some(outgoing)),
+      outgoing,
       pending,
       next_id: AtomicI64::new(1),
       alive,
-      child: Mutex::new(child),
+      process: Mutex::new(server_process),
       capabilities: ServerCapabilities::default(),
       encoding: PositionEncoding::Utf16,
     };
@@ -273,11 +291,10 @@ impl LanguageServer {
   fn send(&self, message: &Value) -> Result<(), LspError> {
     let body =
       serde_json::to_vec(message).map_err(|error| LspError::Protocol(error.to_string()))?;
-    let outgoing = self.outgoing.lock().unwrap_or_else(PoisonError::into_inner);
-    match outgoing.as_ref() {
-      Some(sender) if self.is_alive() => sender.send(body).map_err(|_| LspError::Exited),
-      _ => Err(LspError::Exited),
+    if !self.is_alive() {
+      return Err(LspError::Exited);
     }
+    self.outgoing.send(body)
   }
 
   /// Sends a notification. Failures (the server has exited) are reported
@@ -347,43 +364,37 @@ impl LanguageServer {
 
   /// Asks the server to shut down and exit, killing it if it does not.
   pub fn shutdown(&self) {
-    if self.is_alive() {
-      let _ = self.request::<lsp_types::request::Shutdown>((), SHUTDOWN_TIMEOUT, || false);
+    let acknowledged = self.is_alive() && {
+      let answer = self.request::<lsp_types::request::Shutdown>((), SHUTDOWN_TIMEOUT, || false);
       self.notify::<lsp_types::notification::Exit>(());
-    }
+      answer.is_ok()
+    };
     // Closing stdin also tells the server to go away.
-    self
-      .outgoing
-      .lock()
-      .unwrap_or_else(PoisonError::into_inner)
-      .take();
+    self.outgoing.close();
     let deadline = Instant::now() + SHUTDOWN_TIMEOUT;
-    let mut child = self.child.lock().unwrap_or_else(PoisonError::into_inner);
+    let mut process = self.process.lock().unwrap_or_else(PoisonError::into_inner);
     while Instant::now() < deadline {
-      if !matches!(child.try_wait(), Ok(None)) {
+      if process.has_exited() {
         return;
       }
       thread::sleep(POLL_INTERVAL);
     }
-    tracing::warn!(server = %self.name, "language server did not exit; killing it");
-    let _ = child.kill();
-    let _ = child.wait();
+    if acknowledged {
+      // It has nothing left to do but free its memory, which takes
+      // rust-analyzer several seconds on a large workspace.
+      tracing::info!(server = %self.name, "language server shut down but is still exiting; stopping it");
+    } else {
+      tracing::warn!(server = %self.name, "language server did not exit; killing it");
+    }
+    process.kill();
   }
 
   fn kill(&self) {
-    let mut child = self.child.lock().unwrap_or_else(PoisonError::into_inner);
-    let _ = child.kill();
-    let _ = child.wait();
-  }
-}
-
-impl Drop for LanguageServer {
-  fn drop(&mut self) {
-    let child = self.child.get_mut().unwrap_or_else(PoisonError::into_inner);
-    if matches!(child.try_wait(), Ok(None)) {
-      let _ = child.kill();
-      let _ = child.wait();
-    }
+    self
+      .process
+      .lock()
+      .unwrap_or_else(PoisonError::into_inner)
+      .kill();
   }
 }
 
@@ -406,7 +417,7 @@ fn read_loop(
   name: &str,
   stdout: std::process::ChildStdout,
   pending: &Pending,
-  outgoing: &mpsc::Sender<Vec<u8>>,
+  outgoing: &Outgoing,
   on_event: &EventHandler,
 ) {
   let mut reader = BufReader::new(stdout);

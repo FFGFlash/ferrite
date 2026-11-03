@@ -43,6 +43,7 @@ semver = "1.0.28"
 toml = "1.1.8"
 toml_edit = "0.25.17"
 # Only LF, CR and CRLF break lines (matching LSP), not Unicode line separators.
+rustix = { version = "1.1.5", features = ["process"] }
 ropey = { version = "1.6.1", default-features = false, features = [
   "cr_lines",
   "simd",
@@ -81,6 +82,9 @@ wasmtime = { version = "48.0.8", default-features = false, features = [
   "std",
 ] }
 wat = "1.262.0"
+# Job objects without unsafe code, so stopping a language server stops
+# everything it started.
+win32job = "2.0.3"
 # The version Tauri already uses.
 windows-version = "0.1.7"
 wit-component = { version = "0.262.0", default-features = false }
