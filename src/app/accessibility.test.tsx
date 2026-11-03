@@ -91,6 +91,9 @@ describe('accessibility (axe)', () => {
           viewers: [],
           languages: [],
           languageServers: [],
+          programs: [],
+          colors: [],
+          viewContainers: [],
         },
         storedBytes: 0,
         usage: {
@@ -127,7 +130,7 @@ describe('accessibility (axe)', () => {
       ignored: false,
     })
     workspaceStore.set({
-      info: { root: '/w', name: 'w' },
+      info: { root: '/w', name: 'w', trust: 'trusted' },
       listings: new Map([['/w', [entry('src', true), entry('README.md', false)]]]),
       indexing: false,
     })
@@ -218,7 +221,11 @@ describe('accessibility (axe)', () => {
       apply: vi.fn(() => Promise.resolve(view)),
       clipboard: vi.fn(() => Promise.resolve(view)),
     }
-    workspaceStore.set({ info: { root: '/w', name: 'w' }, listings: new Map(), indexing: false })
+    workspaceStore.set({
+      info: { root: '/w', name: 'w', trust: 'trusted' },
+      listings: new Map(),
+      indexing: false,
+    })
     const document = {
       id: 1,
       title: 'main.rs',

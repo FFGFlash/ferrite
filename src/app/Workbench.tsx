@@ -7,6 +7,8 @@ import { Notifications } from '../components/Notifications'
 import { Palette } from '../components/Palette'
 import { PerfOverlay } from '../components/PerfOverlay'
 import { StatusBar } from '../components/StatusBar'
+import { ConfirmDialog } from '../components/ConfirmDialog'
+import { TrustDialog } from '../components/TrustDialog'
 import { DockArea } from '../dock/DockArea'
 import type { AppInfo } from '../ipc'
 import './Workbench.css'
@@ -31,6 +33,8 @@ export function Workbench({ appInfo }: WorkbenchProps) {
       </ErrorBoundary>
       <Notifications />
       <Palette />
+      <TrustDialog />
+      <ConfirmDialog />
       <ContextMenu />
       <DragGhost />
       <PerfOverlay />

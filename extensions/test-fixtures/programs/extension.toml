@@ -1,0 +1,62 @@
+# Used by the extension host's integration tests for the API 1.6
+# interfaces: workspace, processes, and explorer.
+id = "test.programs"
+name = "Programs"
+version = "0.1.0"
+description = "Runs programs, watches files, and marks them in the explorer on request."
+api_version = "1"
+entrypoint = "../../target/wasm32-unknown-unknown/release/programs.wasm"
+activation = ["on-startup"]
+on_folder_changed = "test.programs.folder"
+
+[permissions]
+files_read = true
+processes = true
+
+# Every test machine has the Rust compiler.
+[[programs]]
+name = "rustc"
+
+[colors.modified]
+description = "Changed files"
+dark = "#e2c08d"
+light = "#895503"
+
+[[commands]]
+id = "test.programs.run"
+title = "Run a Program"
+
+[[commands]]
+id = "test.programs.unknown"
+title = "Run an Undeclared Program"
+
+[[commands]]
+id = "test.programs.spawn"
+title = "Start a Program"
+
+[[commands]]
+id = "test.programs.finished"
+title = "Report a Finished Program"
+hidden = true
+
+[[commands]]
+id = "test.programs.watch"
+title = "Watch the Argument"
+
+[[commands]]
+id = "test.programs.changed"
+title = "Report Changes"
+hidden = true
+
+[[commands]]
+id = "test.programs.mark"
+title = "Mark the Argument"
+
+[[commands]]
+id = "test.programs.badMark"
+title = "Mark with an Undeclared Color"
+
+[[commands]]
+id = "test.programs.folder"
+title = "Report the Folder"
+hidden = true

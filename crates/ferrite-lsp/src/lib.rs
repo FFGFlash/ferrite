@@ -14,7 +14,6 @@ pub mod client;
 pub mod config;
 pub mod convert;
 pub mod framing;
-mod process;
 
 pub use client::{
   CONTENT_MODIFIED, EventHandler, LanguageServer, LspError, REQUEST_CANCELLED, ServerCommand,

@@ -296,6 +296,11 @@ impl LspState {
     path: &Path,
     language: &Language,
   ) -> Option<Wanted> {
+    // Servers build and run the project's code; trusting the folder
+    // restarts them all.
+    if !crate::trust::workspace_trusted(app) {
+      return None;
+    }
     let languages = app.state::<LanguagesState>();
     let configs = inner.configs.get_or_insert_with(|| {
       app

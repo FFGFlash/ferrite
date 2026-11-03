@@ -228,7 +228,11 @@ describe('Palette', () => {
       start: { line: 4, column: 7 },
       end: { line: 4, column: 12 },
     })
-    workspaceStore.set({ info: { root: '/w', name: 'w' }, listings: new Map(), indexing: false })
+    workspaceStore.set({
+      info: { root: '/w', name: 'w', trust: 'trusted' },
+      listings: new Map(),
+      indexing: false,
+    })
     try {
       render(<Palette />)
       act(() => openPalette('#'))
@@ -276,7 +280,11 @@ describe('Palette', () => {
       folderNames: new Map<string, string>(),
       folderNamesExpanded: new Map<string, string>(),
     }
-    workspaceStore.set({ info: { root: '/w', name: 'w' }, listings: new Map(), indexing: false })
+    workspaceStore.set({
+      info: { root: '/w', name: 'w', trust: 'trusted' },
+      listings: new Map(),
+      indexing: false,
+    })
     try {
       render(<Palette />)
       act(() => openPalette(''))

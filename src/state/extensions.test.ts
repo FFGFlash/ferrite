@@ -59,6 +59,9 @@ function extension(overrides: Partial<ExtensionStatus> = {}): ExtensionStatus {
       viewers: [],
       languages: [],
       languageServers: [],
+      programs: [],
+      colors: [],
+      viewContainers: [],
     },
     storedBytes: 0,
     usage: {
@@ -105,6 +108,11 @@ describe('extensions state', () => {
       forFiles,
       forFolders,
       patterns,
+      view: null,
+      contexts: [],
+      inline: false,
+      icon: null,
+      when: null,
     })
     applyStatuses([
       extension({

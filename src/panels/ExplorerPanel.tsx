@@ -1,4 +1,12 @@
-import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type RefObject } from 'react'
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type CSSProperties,
+  type KeyboardEvent,
+  type RefObject,
+} from 'react'
 import { CopyMinus, FilePlus, FolderOpen, FolderPlus } from 'lucide-react'
 import { executeCommand, primaryKeybinding, getCommand } from '../commands/registry'
 import type { DirectoryEntry } from '../ipc/workspace'
@@ -8,6 +16,7 @@ import { isMac } from '../editor/keymap'
 import { documentsStore, openPath } from '../state/documents'
 import { iconThemeStore, type LoadedIconTheme } from '../state/iconTheme'
 import { contributedMenuItems, runContributed } from '../state/extensions'
+import { rowMark, useFileMarks } from '../state/fileMarks'
 import { layoutStore } from '../state/layout'
 import { reportError } from '../state/notifications'
 import { fileProblemsStore, problemsByPath, type PathProblems } from '../state/problems'
@@ -164,6 +173,7 @@ export function ExplorerPanel() {
   const light = useStore(themeKind) === 'light'
   const fileProblems = useStore(fileProblemsStore)
   const problems = useMemo(() => problemsByPath(fileProblems), [fileProblems])
+  const marks = useFileMarks()
   const treeRef = useRef<HTMLUListElement>(null)
   const activePath = documents.find(document => document.id === activeId)?.path ?? null
   /** The folder a drag would drop into. */
@@ -399,7 +409,13 @@ export function ExplorerPanel() {
           const folder = row.entry.directory ? { expanded: row.expanded } : null
           const icon = entryIcon(row.entry.name, folder, iconTheme, light)
           const counts = problems.get(row.entry.path)
-          const described = counts && describeProblems(counts, row.entry.directory)
+          const mark = rowMark(marks.index, row.entry.path, row.entry.directory, marks.color)
+          const described =
+            [counts && describeProblems(counts, row.entry.directory), mark?.tooltip]
+              .filter(Boolean)
+              .join('. ') || undefined
+          // A folder's problem dot says enough; a file shows both counts and badges.
+          const badge = counts && row.entry.directory ? null : mark?.badge
           const isRenaming = renaming === row.entry.path
           const folderPath = row.entry.directory ? row.entry.path : parentOf(row.entry.path)
           return [
@@ -430,10 +446,17 @@ export function ExplorerPanel() {
               aria-expanded={row.entry.directory ? row.expanded : undefined}
               aria-selected={row.entry.path === activePath}
               data-focused={index === focusIndex || undefined}
-              data-ignored={row.ignored || undefined}
+              data-ignored={row.ignored || mark?.faded || undefined}
               data-problems={counts ? (counts.errors > 0 ? 'error' : 'warning') : undefined}
+              data-marked={mark?.color ? true : undefined}
               aria-description={described}
-              style={indent(row.depth)}
+              style={
+                {
+                  ...indent(row.depth),
+                  // A variable, so a problem's color still wins (ExplorerPanel.css).
+                  ...(mark?.color && { '--explorer-mark-color': mark.color }),
+                } as CSSProperties
+              }
               title={described ? `${row.entry.path}\n${described}` : row.entry.path}
               onClick={() => !isRenaming && activate(row)}
               onContextMenu={event => {
@@ -460,10 +483,15 @@ export function ExplorerPanel() {
               ) : (
                 <span className="explorer-tree__name">{row.entry.name}</span>
               )}
-              {counts && !isRenaming && (
-                // A file's count; a folder's dot says something inside has problems.
-                <span className="explorer-tree__problems" aria-hidden="true">
-                  {row.entry.directory ? '●' : counts.errors + counts.warnings}
+              {(counts || badge) && !isRenaming && (
+                <span className="explorer-tree__badges" aria-hidden="true">
+                  {counts && (
+                    // A file's count; a folder's dot says something inside has problems.
+                    <span className="explorer-tree__problems">
+                      {row.entry.directory ? '●' : counts.errors + counts.warnings}
+                    </span>
+                  )}
+                  {badge && <span className="explorer-tree__mark">{badge}</span>}
                 </span>
               )}
             </li>,

@@ -10,6 +10,7 @@ export type Permission =
   | 'files-write'
   | 'language-servers'
   | 'network'
+  | 'processes'
 
 export type ExtensionState =
   | 'inactive'
@@ -79,7 +80,7 @@ export interface KeybindingContribution {
   editorFocus: boolean
 }
 
-export type MenuLocation = 'editor/context' | 'explorer/context'
+export type MenuLocation = 'editor/context' | 'explorer/context' | 'view/title' | 'view/item'
 
 export interface MenuContribution {
   location: MenuLocation
@@ -91,11 +92,36 @@ export interface MenuContribution {
   forFolders: boolean
   /** File name patterns (`*.md`, `*.{ts,tsx}`); only matching files get it. Empty: all. */
   patterns: string[]
+  /** For view menus: the view, `<extension id>.<view id>`. */
+  view: string | null
+  /** For `view/item`: the item contexts it's for; empty means every item. */
+  contexts: string[]
+  /** A button rather than a menu entry. */
+  inline: boolean
+  /** A named icon. */
+  icon: string | null
+  /** Shown only while the view has this flag (or with `!`, hasn't). */
+  when: string | null
 }
 
 export interface ViewContribution {
   id: string
   /** `<extension id>.<view id>`. */
+  fullId: string
+  title: string
+  icon: string
+  /** The container it's a section of; `null` for a view of its own. */
+  container: string | null
+  /** A text box above its items. */
+  input: { placeholder: string | null; command: string | null } | null
+  /** Run to load an opened item's children. */
+  onExpand: string | null
+}
+
+/** An activity bar entry whose views are sections. */
+export interface ViewContainerContribution {
+  id: string
+  /** `<extension id>.<container id>`. */
   fullId: string
   title: string
   icon: string
@@ -186,6 +212,25 @@ export interface LanguageServerContribution {
   rootMarkers: string[]
 }
 
+/** A program an extension runs. */
+export interface ProgramContribution {
+  name: string
+  /** On the PATH, or a path in the extension's folder. */
+  command: string
+  /** A path in the open folder, preferred when there (trusted folders only). */
+  workspace: string | null
+}
+
+/** A color an extension's explorer marks use, which themes can change. */
+export interface ColorContribution {
+  name: string
+  /** `<extension id>.<name>`: the token themes and `workbench.colors` set. */
+  id: string
+  description: string
+  dark: string
+  light: string
+}
+
 export interface Contributions {
   themes: ThemeContribution[]
   iconThemes: IconThemeContribution[]
@@ -197,6 +242,9 @@ export interface Contributions {
   viewers: ViewerContribution[]
   languages: LanguageContribution[]
   languageServers: LanguageServerContribution[]
+  programs: ProgramContribution[]
+  colors: ColorContribution[]
+  viewContainers: ViewContainerContribution[]
 }
 
 export interface StatusItem {
@@ -211,6 +259,19 @@ export interface StatusItem {
   command: string | null
 }
 
+export type ItemIcon =
+  | { kind: 'named'; name: string }
+  | { kind: 'file'; path: string }
+  | { kind: 'folder'; path: string }
+
+export interface ItemMark {
+  badge: string | null
+  /** A color's token, `<extension id>.<name>`. */
+  color: string | null
+  strikethrough: boolean
+  faded: boolean
+}
+
 export interface ViewEntry {
   id: string
   parent: string | null
@@ -220,12 +281,53 @@ export interface ViewEntry {
   expanded: boolean
   command: string | null
   argument: string | null
+  icon: ItemIcon | null
+  mark: ItemMark | null
+  /** Which `view/item` menus apply to it. */
+  context: string | null
+  /** It can be opened with no children listed: opening asks the extension for them. */
+  expandable: boolean
+}
+
+export interface Welcome {
+  text: string
+  buttons: { label: string; command: string; argument: string | null }[]
 }
 
 export interface ViewContent {
+  welcome: Welcome | null
+  /** Shown on its header and activity bar entry; 0 shows none. */
+  badge: number
+  /** What its menus' `when` test. */
+  flags: string[]
+  /** The text in its text box. */
+  input: string
   message: string | null
   items: ViewEntry[]
 }
+
+/** A question an extension asks the user. */
+export type Prompt = { id: number; extension: string } & (
+  | {
+      type: 'pick'
+      title: string
+      items: { label: string; description: string | null; value: string }[]
+    }
+  | { type: 'input'; title: string; value: string; placeholder: string | null }
+  | {
+      type: 'confirm'
+      message: string
+      detail: string | null
+      buttons: string[]
+      destructive: boolean
+    }
+)
+
+export type PromptReply =
+  | { type: 'cancelled' }
+  | { type: 'picked'; value: string }
+  | { type: 'text'; text: string }
+  | { type: 'button'; index: number }
 
 /** An open extension preview: a tab of formatted text. */
 export interface PreviewInfo {
@@ -347,6 +449,31 @@ export interface ResourceUsage {
 
 export type MessageLevel = 'info' | 'warning' | 'error'
 
+/** A mark an extension puts on a file or folder in the explorer. */
+export interface FileMark {
+  path: string
+  /** One or two characters, such as `M`. */
+  badge: string | null
+  /** A color's token, `<extension id>.<name>`. */
+  color: string | null
+  tooltip: string | null
+  /** Shown dimmed. */
+  faded: boolean
+  /** Marks everything inside a folder too. */
+  inherit: boolean
+  /** Folders that contain it show its color and a dot. */
+  propagate: boolean
+  /** Among marks propagated to a folder, the highest wins. */
+  priority: number
+}
+
+/** One extension's explorer marks. */
+export interface ExtensionMarks {
+  /** The extension's id. */
+  extension: string
+  marks: FileMark[]
+}
+
 export const listExtensions = () => call<ExtensionStatus[]>('extensions_list')
 export const reloadExtensions = () => call<void>('extensions_reload')
 /** Runs an extension command for the active document; resolves when it finishes. */
@@ -358,6 +485,20 @@ export const runExtensionCommand = (
 /** A file icon theme with its icons; `null` if no enabled extension has it. */
 export const getIconTheme = (id: string) => call<IconTheme | null>('extensions_icon_theme', { id })
 export const listStatusItems = () => call<StatusItem[]>('extension_status_items')
+export const listFileMarks = () => call<ExtensionMarks[]>('extension_file_marks')
+/** Runs a command from a view's menu or button for the selected items' arguments. */
+export const runViewCommand = (command: string, argument: string | null, selection: string[]) =>
+  call<void>('extension_run_view_command', { command, argument, selection })
+/** Asks a view's extension for the children of an opened item. */
+export const expandViewItem = (view: string, item: string) =>
+  call<void>('extension_view_expand', { view, item })
+/** The text in a view's text box changed. */
+export const setViewInput = (view: string, text: string) =>
+  call<void>('extension_view_input', { view, text })
+/** Views' badges, by full view id. */
+export const listViewBadges = () => call<Record<string, number>>('extension_view_badges')
+export const answerPrompt = (id: number, reply: PromptReply) =>
+  call<void>('extension_prompt_answer', { id, reply })
 export const getViewContent = (view: string) => call<ViewContent>('extension_view', { view })
 /** Tells the backend a view is shown, which may start its extension. */
 export const viewOpened = (view: string) => call<void>('extension_view_opened', { view })

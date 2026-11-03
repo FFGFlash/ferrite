@@ -26,6 +26,13 @@ use crate::settings::FrontendSettings;
 pub enum AppEvent {
   /// A workspace folder was opened or closed.
   WorkspaceChanged { workspace: Option<WorkspaceInfo> },
+  /// Whether the user trusts the open folder changed.
+  WorkspaceTrustChanged { workspace: WorkspaceInfo },
+  /// An extension asked the user to trust the open folder.
+  WorkspaceTrustRequested {
+    /// The extension's id.
+    extension: String,
+  },
   /// Listings of these directories may have changed.
   FilesChanged { directories: Vec<String> },
   /// A clean document was reloaded because its file changed on disk.
@@ -105,6 +112,14 @@ pub enum AppEvent {
   ExtensionShowView { view: String },
   /// A document's extension decorations changed.
   DecorationsChanged { document_id: u64 },
+  /// Extensions' explorer marks changed.
+  ExtensionFileMarksChanged,
+  /// An extension asks the user something, replacing any prompt showing.
+  ExtensionPrompt {
+    prompt: ferrite_extension_host::Prompt,
+  },
+  /// An extension's prompt was withdrawn (the extension stopped).
+  ExtensionPromptClosed { id: u64 },
   /// An extension asked to select and show a range in a document.
   ExtensionReveal {
     document_id: u64,
@@ -162,6 +177,7 @@ pub enum NoticeLevel {
 pub struct WorkspaceInfo {
   pub root: String,
   pub name: String,
+  pub trust: crate::trust::Trust,
 }
 
 /// Events kept before the frontend first subscribes.

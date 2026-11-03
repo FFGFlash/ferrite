@@ -44,12 +44,20 @@ export function contributionList(extension: ExtensionStatus): string[] {
     [menus.length, 'menu item'],
     [decorations.length, 'decoration type'],
     [extension.contributions.languageServers.length, 'language server'],
+    [extension.contributions.colors.length, 'color'],
   ] as const
+  const { programs } = extension.contributions
   return [
     // Named, as a list of languages says more than a count.
     ...(languages.length > 0
       ? [
           `${languages.length === 1 ? 'Language' : 'Languages'}: ${languages.map(l => l.name).join(', ')}`,
+        ]
+      : []),
+    // Named too: they run on the user's computer.
+    ...(programs.length > 0
+      ? [
+          `${programs.length === 1 ? 'Program' : 'Programs'}: ${programs.map(p => p.command).join(', ')}`,
         ]
       : []),
     ...parts

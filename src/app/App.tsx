@@ -10,6 +10,7 @@ import { applySettings } from '../state/appearance'
 import { loadDocuments } from '../state/documents'
 import { listenToBackend } from '../state/events'
 import { refreshExtensions } from '../state/extensions'
+import { refreshFileMarks } from '../state/fileMarks'
 import { restoreLayout } from '../state/layout'
 import { reportError } from '../state/notifications'
 import { followFileProblems, refreshSettingsProblem } from '../state/problems'
@@ -61,6 +62,8 @@ async function restoreSession(): Promise<void> {
     // Previews still open (after a window reload) go with their documents.
     loadDocuments(activeFile).then(documentsRestored).then(refreshPreviews),
     refreshExtensions(),
+    // Marks extensions set before the window loaded (or reloaded).
+    refreshFileMarks(),
     loadTerminals(),
   ])
   await runRequestedBenchmark()

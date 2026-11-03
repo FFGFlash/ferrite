@@ -92,6 +92,8 @@ pub struct Manifest {
   pub commands: Vec<CommandContribution>,
   pub configuration: BTreeMap<String, ConfigProperty>,
   pub contributions: Contributions,
+  /// Run when the open folder, or whether it's trusted, changes. (1.6)
+  pub on_folder_changed: Option<String>,
 }
 
 impl Manifest {
@@ -162,6 +164,13 @@ struct RawManifest {
   languages: Vec<contributions::RawLanguage>,
   #[serde(default)]
   language_servers: Vec<contributions::RawLanguageServer>,
+  #[serde(default)]
+  programs: Vec<contributions::RawProgram>,
+  #[serde(default)]
+  colors: BTreeMap<String, contributions::RawColor>,
+  #[serde(default)]
+  view_containers: Vec<contributions::RawViewContainer>,
+  on_folder_changed: Option<String>,
 }
 
 #[derive(Deserialize, Default)]
@@ -185,6 +194,8 @@ struct RawPermissions {
   language_servers: bool,
   #[serde(default)]
   network: bool,
+  #[serde(default)]
+  processes: bool,
 }
 
 #[derive(Deserialize)]
@@ -414,10 +425,25 @@ pub fn parse(
   if raw.permissions.network {
     permissions.push(Permission::Network);
   }
+  if raw.permissions.processes {
+    permissions.push(Permission::Processes);
+  }
   if raw.permissions.language_servers == raw.language_servers.is_empty() {
     return Err(invalid(
       "permissions.language_servers must be requested exactly when language_servers are declared",
     ));
+  }
+  if raw.permissions.processes == raw.programs.is_empty() {
+    return Err(invalid(
+      "permissions.processes must be requested exactly when programs are declared",
+    ));
+  }
+  if let Some(command) = &raw.on_folder_changed
+    && !commands.iter().any(|c| &c.id == command)
+  {
+    return Err(invalid(format!(
+      "on_folder_changed: command {command:?} is not one of this extension's commands"
+    )));
   }
 
   let mut configuration = BTreeMap::new();
@@ -449,6 +475,9 @@ pub fn parse(
       viewers: raw.viewers,
       languages: raw.languages,
       language_servers: raw.language_servers,
+      programs: raw.programs,
+      colors: raw.colors,
+      view_containers: raw.view_containers,
     },
     &raw.id,
     &commands,
@@ -489,6 +518,7 @@ pub fn parse(
     commands,
     configuration,
     contributions,
+    on_folder_changed: raw.on_folder_changed,
   })
 }
 
@@ -648,6 +678,148 @@ minimum = 0
 
   fn error_of(text: &str) -> String {
     parse_text(text).expect_err("rejected").to_string()
+  }
+
+  #[test]
+  fn reads_programs_colors_and_the_folder_command() {
+    let text = VALID.replace(
+      "documents_read = true",
+      "documents_read = true\nprocesses = true",
+    ) + r##"
+[[programs]]
+name = "git"
+
+[[programs]]
+name = "prettier"
+command = "bin/prettier"
+workspace = "node_modules/.bin/prettier"
+
+[colors.modified]
+description = "Changed files"
+dark = "#E2C08D"
+light = "#895503"
+
+[colors.added]
+dark = "#81b88b"
+"##;
+    let text = text.replacen(
+      "[engines]",
+      "on_folder_changed = \"example.tidy.trim\"\n\n[engines]",
+      1,
+    );
+    let manifest = parse_text(&text).expect("valid");
+    assert_eq!(
+      manifest.on_folder_changed.as_deref(),
+      Some("example.tidy.trim")
+    );
+    assert!(manifest.permissions.contains(&Permission::Processes));
+    let programs = &manifest.contributions.programs;
+    assert_eq!(programs[0].command, "git");
+    assert_eq!(programs[1].command, "bin/prettier");
+    assert_eq!(
+      programs[1].workspace.as_deref(),
+      Some("node_modules/.bin/prettier")
+    );
+    let modified = manifest.contributions.color("modified").expect("declared");
+    assert_eq!(modified.id, "example.tidy.modified");
+    assert_eq!(modified.dark, "#e2c08d");
+    let added = manifest.contributions.color("added").expect("declared");
+    assert_eq!(added.light, added.dark, "light defaults to dark");
+  }
+
+  const VIEWS: &str = r#"
+[[view_containers]]
+id = "scm"
+title = "Source Control"
+icon = "source-control"
+
+[[views]]
+id = "changes"
+title = "Changes"
+container = "scm"
+input = { placeholder = "Message", command = "example.tidy.trim" }
+
+[[views]]
+id = "commits"
+title = "Commits"
+container = "scm"
+on_expand = "example.tidy.trim"
+
+[[menus]]
+location = "view/item"
+view = "changes"
+contexts = ["staged"]
+command = "example.tidy.trim"
+inline = true
+icon = "remove"
+
+[[menus]]
+location = "view/title"
+view = "commits"
+command = "example.tidy.trim"
+when = "!tree"
+"#;
+
+  #[test]
+  fn reads_view_containers_and_view_menus() {
+    let manifest = parse_text(&format!("{VALID}{VIEWS}")).expect("valid");
+    let contributions = &manifest.contributions;
+    assert_eq!(contributions.view_containers[0].full_id, "example.tidy.scm");
+    let changes = contributions.view("changes").expect("declared");
+    assert_eq!(changes.container.as_deref(), Some("example.tidy.scm"));
+    assert_eq!(
+      changes
+        .input
+        .as_ref()
+        .and_then(|input| input.command.as_deref()),
+      Some("example.tidy.trim")
+    );
+    let commits = contributions.view("commits").expect("declared");
+    assert_eq!(commits.on_expand.as_deref(), Some("example.tidy.trim"));
+    let item = &contributions.menus[0];
+    assert_eq!(item.view.as_deref(), Some("example.tidy.changes"));
+    assert_eq!(item.contexts, vec!["staged"]);
+    assert!(item.inline);
+    assert_eq!(contributions.menus[1].when.as_deref(), Some("!tree"));
+  }
+
+  #[test]
+  fn view_menus_and_containers_are_checked() {
+    let views = format!("{VALID}{VIEWS}");
+    let bad = |from: &str, to: &str| error_of(&views.replacen(from, to, 1));
+    assert!(bad("container = \"scm\"", "container = \"nope\"").contains("not declared"));
+    assert!(bad("view = \"changes\"", "view = \"nope\"").contains("not declared"));
+    assert!(bad("icon = \"remove\"", "icon = \"nope\"").contains("named icons"));
+    assert!(bad("icon = \"remove\"\n", "").contains("needs an icon"));
+    assert!(bad("when = \"!tree\"", "when = \"a b\"").contains("flag name"));
+    let explorer = VALID.to_owned()
+      + "\n[[menus]]\nlocation = \"explorer/context\"\ncommand = \"example.tidy.trim\"\ninline = true\n";
+    assert!(error_of(&explorer).contains("only apply to view menus"));
+    let empty = VALID.to_owned() + "\n[[view_containers]]\nid = \"empty\"\ntitle = \"Empty\"\n";
+    assert!(error_of(&empty).contains("has no views"));
+  }
+
+  #[test]
+  fn programs_need_the_processes_permission_and_the_other_way_round() {
+    let programs = "\n[[programs]]\nname = \"git\"\n";
+    assert!(error_of(&format!("{VALID}{programs}")).contains("permissions.processes"));
+    let asks = VALID.replace(
+      "documents_read = true",
+      "documents_read = true\nprocesses = true",
+    );
+    assert!(error_of(&asks).contains("permissions.processes"));
+    let escapes = asks.clone() + "\n[[programs]]\nname = \"x\"\ncommand = \"../x\"\n";
+    assert!(error_of(&escapes).contains("inside the extension's folder"));
+    let absolute = asks.clone() + "\n[[programs]]\nname = \"x\"\nworkspace = \"/bin/x\"\n";
+    assert!(error_of(&absolute).contains("inside the open folder"));
+    let bad_color = VALID.to_owned() + "\n[colors.x]\ndark = \"red\"\n";
+    assert!(error_of(&bad_color).contains("hex color"));
+    let unknown = VALID.replacen(
+      "[engines]",
+      "on_folder_changed = \"example.tidy.nope\"\n\n[engines]",
+      1,
+    );
+    assert!(error_of(&unknown).contains("on_folder_changed"));
   }
 
   #[test]

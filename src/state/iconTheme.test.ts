@@ -41,6 +41,9 @@ const icons = (state: ExtensionStatus['state'] = 'ready') =>
       decorations: [],
       languages: [],
       languageServers: [],
+      programs: [],
+      colors: [],
+      viewContainers: [],
     },
   }) as unknown as ExtensionStatus
 

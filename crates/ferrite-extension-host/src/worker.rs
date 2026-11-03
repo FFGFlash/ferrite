@@ -12,7 +12,7 @@
 use std::collections::{BTreeSet, HashSet, VecDeque};
 use std::panic::AssertUnwindSafe;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc::Sender;
+use std::sync::mpsc::{self, Sender};
 use std::sync::{Arc, Condvar, Mutex, PoisonError, Weak};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
@@ -21,23 +21,50 @@ use wasmtime::Store;
 
 use crate::api::ApiContext;
 use crate::bindings::Extension;
+use crate::bindings::ferrite::extension::processes::FinishedProcess;
+use crate::bindings::ferrite::extension::prompts::PromptAnswer;
 use crate::bindings::ferrite::extension::types::{
   Activation, CommandContext, DocumentChange, DocumentInfo, Permission as WitPermission,
   TextChange, WebviewMessage,
 };
+use crate::bindings::ferrite::extension::views::ExpandingItem;
+use crate::bindings::ferrite::extension::workspace::FileChanges;
 use crate::host::Shared;
 use crate::manifest::Manifest;
 use crate::permissions::Permission;
+use crate::processes::ProcessTable;
 use crate::runtime::{Call, Interrupt, Limiter, MemoryExceeded, Runtime, StoreState};
 use crate::usage::Usage;
 
 /// Changed text kept in one pending notification; beyond this the extension
 /// is told to re-read the document instead.
 pub const MAX_PENDING_CHANGE_BYTES: usize = 1024 * 1024;
+/// Changed paths kept in one pending watch notification; beyond this the
+/// extension is told to look at everything again.
+pub const MAX_PENDING_PATHS: usize = 10_000;
 /// Error messages from extensions are cut to this length.
 const MAX_ERROR_CHARS: usize = 1_000;
 
 pub type Reply = Sender<Result<(), String>>;
+
+/// What a command was run for, which the extension reads during it.
+#[derive(Default)]
+pub enum Payload {
+  #[default]
+  None,
+  /// A webview's `on_message`; see `webviews::message`.
+  Message(WebviewMessage),
+  /// A program `spawn` started ended; see `processes::finished`.
+  Finished(FinishedProcess),
+  /// Watched files changed; see `workspace::changes`.
+  Changes(FileChanges),
+  /// Run from a view's menu or button; see `views::selection`.
+  Selection(Vec<String>),
+  /// A view item is being opened; see `views::expanding`.
+  Expand(ExpandingItem),
+  /// The user answered a prompt; see `prompts::answer`.
+  Answer(PromptAnswer),
+}
 
 /// Why a worker stopped running its extension.
 pub struct Failure {
@@ -75,10 +102,27 @@ pub enum Event {
     context: CommandContext,
     /// From a view item or menu; see `command-argument`.
     argument: Option<String>,
-    /// For a webview's `on_message` command; see `webviews::message`.
-    message: Option<WebviewMessage>,
+    payload: Payload,
     reply: Reply,
   },
+}
+
+impl Event {
+  /// A command nobody waits for, run for `payload`. Its error, if any, is
+  /// logged.
+  pub fn background(command: String, argument: Option<String>, payload: Payload) -> Self {
+    let (reply, _) = std::sync::mpsc::channel();
+    Self::Command {
+      command,
+      context: CommandContext {
+        document: None,
+        selections: Vec::new(),
+      },
+      argument,
+      payload,
+      reply,
+    }
+  }
 }
 
 impl Event {
@@ -93,6 +137,21 @@ impl Event {
 
 fn change_bytes(changes: &[TextChange]) -> usize {
   changes.iter().map(|change| change.text.len()).sum()
+}
+
+/// Adds `later` changed paths to `pending`, sorted and without repeats, up
+/// to [`MAX_PENDING_PATHS`].
+pub fn merge_changes(pending: &mut FileChanges, later: &FileChanges) {
+  pending.overflow |= later.overflow;
+  if !pending.overflow {
+    pending.paths.extend(later.paths.iter().cloned());
+    pending.paths.sort_unstable();
+    pending.paths.dedup();
+  }
+  if pending.overflow || pending.paths.len() > MAX_PENDING_PATHS {
+    pending.overflow = true;
+    pending.paths.clear();
+  }
 }
 
 struct QueueState {
@@ -209,6 +268,37 @@ impl Queue {
     Ok(())
   }
 
+  /// Queues a command nobody waits for: a spawned program's end, or file
+  /// changes. These are few (programs and watches are limited), so they
+  /// are queued even when the queue is full, as dropping them would lose
+  /// the outcome. Changes for a watch whose command is still waiting are
+  /// merged into it.
+  pub fn push_background(&self, event: Event) {
+    let mut state = self.lock();
+    if state.stopped {
+      return;
+    }
+    if let Event::Command {
+      payload: Payload::Changes(changes),
+      ..
+    } = &event
+    {
+      let waiting = state.events.iter_mut().find_map(|pending| match pending {
+        Event::Command {
+          payload: Payload::Changes(pending),
+          ..
+        } if pending.watch == changes.watch => Some(pending),
+        _ => None,
+      });
+      if let Some(pending) = waiting {
+        merge_changes(pending, changes);
+        return;
+      }
+    }
+    state.events.push_back(event);
+    self.ready.notify_one();
+  }
+
   /// Waits for the next event. `None` once the queue is stopped.
   fn pop(&self) -> Option<Event> {
     let mut state = self.lock();
@@ -254,6 +344,8 @@ pub struct Setup {
   pub queue: Arc<Queue>,
   pub cancel: Arc<AtomicBool>,
   pub usage: Arc<Usage>,
+  /// Programs it started with `spawn`.
+  pub processes: Arc<ProcessTable>,
 }
 
 /// The host's handle on a running worker.
@@ -262,6 +354,7 @@ pub struct Worker {
   pub granted: BTreeSet<Permission>,
   pub queue: Arc<Queue>,
   pub cancel: Arc<AtomicBool>,
+  pub processes: Arc<ProcessTable>,
   pub thread: Option<JoinHandle<()>>,
 }
 
@@ -271,9 +364,11 @@ impl Worker {
   }
 
   /// Asks the worker to finish: it deactivates the extension after the
-  /// event it is processing, which is cancelled if `cancel` is set.
+  /// event it is processing, which is cancelled if `cancel` is set. The
+  /// programs it started are stopped.
   pub fn stop(&self, cancel: bool) {
     self.queue.stop("The extension was stopped.");
+    self.processes.kill_all();
     if cancel {
       self.cancel.store(true, Ordering::Relaxed);
     }
@@ -286,6 +381,7 @@ pub fn spawn(shared: Weak<Shared>, setup: Setup) -> Worker {
     granted: setup.granted.clone(),
     queue: setup.queue.clone(),
     cancel: setup.cancel.clone(),
+    processes: setup.processes.clone(),
     thread: None,
   };
   let id = setup.manifest.id.clone();
@@ -295,6 +391,8 @@ pub fn spawn(shared: Weak<Shared>, setup: Setup) -> Worker {
     .spawn(move || {
       let outcome = std::panic::catch_unwind(AssertUnwindSafe(|| run(&shared, &setup)))
         .unwrap_or_else(|_| Err("stopped because of an internal error".into()));
+      // However it ended, nothing is left to hear from its programs.
+      setup.processes.kill_all();
       if let Some(shared) = shared.upgrade() {
         shared.worker_finished(&setup.manifest.id, setup.generation, outcome);
       }
@@ -331,7 +429,8 @@ fn wit_permission(permission: Permission) -> Option<WitPermission> {
     Permission::FilesRead
     | Permission::FilesWrite
     | Permission::LanguageServers
-    | Permission::Network => None,
+    | Permission::Network
+    | Permission::Processes => None,
   }
 }
 
@@ -430,19 +529,25 @@ fn run(shared: &Weak<Shared>, setup: &Setup) -> Result<(), Failure> {
         command,
         context,
         argument,
-        message,
+        payload,
         reply,
       } => {
         store.data_mut().api.argument = argument;
-        store.data_mut().api.message = message;
+        store.data_mut().api.payload = payload;
         let result = guarded(&mut store, budgets.command, "The command", |store| {
           extension.call_run_command(&mut *store, &command, &context)
         });
         store.data_mut().api.argument = None;
-        store.data_mut().api.message = None;
+        store.data_mut().api.payload = Payload::None;
         match result {
           Ok(outcome) => {
-            let _ = reply.send(outcome.map_err(|message| truncate(&message)));
+            // Nobody waits for a command run in the background, such as
+            // for a finished program: its error goes to the log.
+            if let Err(mpsc::SendError(Err(message))) =
+              reply.send(outcome.map_err(|message| truncate(&message)))
+            {
+              tracing::warn!(extension = %setup.manifest.id, %command, "{message}");
+            }
           }
           Err(reason) => {
             return Err(Failure {
@@ -628,7 +733,7 @@ mod tests {
         selections: Vec::new(),
       },
       argument: None,
-      message: None,
+      payload: Payload::None,
       reply,
     };
     assert!(
@@ -652,7 +757,7 @@ mod tests {
           selections: Vec::new(),
         },
         argument: None,
-        message: None,
+        payload: Payload::None,
         reply,
       })
       .expect("queued");

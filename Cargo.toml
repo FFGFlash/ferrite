@@ -13,6 +13,7 @@ license = "MIT OR Apache-2.0"
 ferrite-core = { path = "crates/ferrite-core" }
 ferrite-extension-host = { path = "crates/ferrite-extension-host" }
 ferrite-lsp = { path = "crates/ferrite-lsp" }
+ferrite-process = { path = "crates/ferrite-process" }
 ferrite-syntax = { path = "crates/ferrite-syntax" }
 ferrite-tasks = { path = "crates/ferrite-tasks" }
 ferrite-terminal = { path = "crates/ferrite-terminal" }

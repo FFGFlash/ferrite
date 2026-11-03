@@ -14,18 +14,13 @@ test = false
 doc = false
 
 [dependencies]
+ferrite-process = { workspace = true }
 ferrite-text = { workspace = true }
 lsp-types = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
-
-[target.'cfg(unix)'.dependencies]
-rustix = { workspace = true }
-
-[target.'cfg(windows)'.dependencies]
-win32job = { workspace = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }

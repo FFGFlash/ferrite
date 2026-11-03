@@ -72,7 +72,10 @@ describe('ProblemsPanel', () => {
     fileProblemsStore.set({ files: [], leftOut: 0 })
     collapsedGroups.set(new Set())
     outputChannel.set('ferrite')
-    workspaceStore.update(state => ({ ...state, info: { root: 'C:\\work', name: 'work' } }))
+    workspaceStore.update(state => ({
+      ...state,
+      info: { root: 'C:\\work', name: 'work', trust: 'trusted' },
+    }))
   })
 
   it('says when there are no problems', () => {

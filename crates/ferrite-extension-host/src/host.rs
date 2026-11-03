@@ -24,18 +24,23 @@ use crate::bindings::ferrite::extension::types::{
   ApiError, CommandContext, DocumentInfo, PreviewInstance, Range as WitRange, TextChange,
   ViewedFile, Webview as WitWebview, WebviewMessage,
 };
+use crate::bindings::ferrite::extension::workspace::FileChanges;
 use crate::config::{self, ConfigValue};
 use crate::contributions::{LanguageContribution, LanguageServerContribution};
 use crate::icons::IconTheme;
 use crate::manifest::{self, MANIFEST_FILE, Manifest};
+use crate::marks::{ExtensionMarks, FileMark};
 use crate::permissions::{Decision, Decisions, Permission};
 use crate::preview::{self, PreviewContent, PreviewInfo};
+use crate::processes::ProcessTable;
+use crate::prompts::{Prompt, PromptKind, PromptReply};
 use crate::runtime::{MemoryPool, Runtime};
 use crate::storage::{Scope, Storage};
 use crate::usage::{ResourceUsage, Usage};
 use crate::webview::{self, Resource, WebviewInfo, WebviewRecord, WebviewTheme};
 use crate::worker::{
-  self, Budgets, Event, Failure, MAX_PENDING_CHANGE_BYTES, Queue, Setup, Worker,
+  self, Budgets, Event, Failure, MAX_PENDING_CHANGE_BYTES, MAX_PENDING_PATHS, Payload, Queue,
+  Setup, Worker,
 };
 use crate::{
   CommandInfo, ConfiguredSetting, Embedder, ExtensionConfiguration, ExtensionDecoration,
@@ -51,6 +56,8 @@ const SYNC_HISTORY: usize = 8;
 const COMMAND_SAFETY_MARGIN: Duration = Duration::from_secs(120);
 /// How long shutdown waits for extensions to deactivate.
 const SHUTDOWN_WAIT: Duration = Duration::from_millis(1500);
+/// Most watches per extension.
+pub const MAX_WATCHES: usize = 32;
 
 /// A diagnostic as byte ranges in the text at its set's version.
 #[derive(Debug, Clone)]
@@ -191,6 +198,27 @@ struct Viewed {
   stale: bool,
 }
 
+/// A prompt waiting for the user's answer.
+struct PendingPrompt {
+  id: u64,
+  extension: String,
+  generation: u64,
+  /// Run with the answer.
+  command: String,
+}
+
+/// A path an extension watches (`workspace::watch`).
+struct Watch {
+  id: u64,
+  extension: String,
+  generation: u64,
+  path: PathBuf,
+  command: String,
+  /// For a path outside the open folder, its own watcher. Paths inside it
+  /// get the workspace's changes ([`ExtensionHost::files_changed`]).
+  own_watcher: Option<ferrite_workspace::WorkspaceWatcher>,
+}
+
 struct State {
   options: HostOptions,
   decisions: Decisions,
@@ -204,6 +232,13 @@ struct State {
   views: BTreeMap<String, ViewContent>,
   /// Open previews, by preview id.
   previews: BTreeMap<String, PreviewRecord>,
+  /// Explorer marks, by extension id.
+  marks: BTreeMap<String, Arc<Vec<FileMark>>>,
+  /// The prompt showing, if any.
+  prompt: Option<PendingPrompt>,
+  next_prompt: u64,
+  watches: Vec<Watch>,
+  next_watch: u64,
   next_generation: u64,
   shutting_down: bool,
 }
@@ -302,6 +337,7 @@ impl Shared {
       queue,
       cancel: Arc::new(AtomicBool::new(false)),
       usage: entry.usage.clone(),
+      processes: Arc::new(ProcessTable::default()),
     };
     tracing::info!(extension = %setup.manifest.id, "starting extension");
     let worker = worker::spawn(self.me.clone(), setup);
@@ -324,18 +360,12 @@ impl Shared {
           continue;
         };
         // Nobody waits for the outcome: a failure leaves the tab without
-        // content, and the extension's log says why.
-        let (reply, _) = mpsc::channel();
-        let _ = worker.queue.push_command(Event::Command {
+        // content, and the log says why.
+        let _ = worker.queue.push_command(Event::background(
           command,
-          context: CommandContext {
-            document: None,
-            selections: Vec::new(),
-          },
-          argument: Some(viewed.path.display().to_string()),
-          message: None,
-          reply,
-        });
+          Some(viewed.path.display().to_string()),
+          Payload::None,
+        ));
       }
     }
     outbox.push(Notification::ExtensionsChanged);
@@ -353,8 +383,21 @@ impl Shared {
   }
 
   /// Removes what a stopped extension showed: diagnostics, decorations,
-  /// status bar content, view content, and previews.
+  /// status bar content, view content, explorer marks, and previews. Its
+  /// watches stop.
   fn forget_output(state: &mut State, id: &str, outbox: &mut Outbox) {
+    state.watches.retain(|watch| watch.extension != id);
+    if state.marks.remove(id).is_some() {
+      outbox.push(Notification::FileMarksChanged);
+    }
+    if state
+      .prompt
+      .as_ref()
+      .is_some_and(|prompt| prompt.extension == id)
+      && let Some(prompt) = state.prompt.take()
+    {
+      outbox.push(Notification::PromptClosed(prompt.id));
+    }
     for (&document, record) in &mut state.documents {
       if record.diagnostics.remove(id).is_some() {
         outbox.push(Notification::DiagnosticsChanged(document));
@@ -406,6 +449,149 @@ impl Shared {
     }
   }
 
+  /// Queues `event` for an extension, if this start of it (`generation`)
+  /// is still running.
+  pub fn deliver(&self, extension: &str, generation: u64, event: Event) {
+    let state = self.lock();
+    let worker = state
+      .extensions
+      .iter()
+      .find(|entry| entry.manifest.id == extension)
+      .and_then(|entry| match &entry.run {
+        Run::Running { worker, .. } if worker.generation == generation => Some(worker),
+        _ => None,
+      });
+    if let Some(worker) = worker {
+      worker.queue.push_background(event);
+    }
+  }
+
+  /// The path the user set for one of an extension's programs, if any.
+  pub fn program_path(&self, extension: &str, program: &str) -> Option<String> {
+    self
+      .lock()
+      .options
+      .programs
+      .get(&format!("{extension}.{program}"))
+      .filter(|path| !path.trim().is_empty())
+      .cloned()
+  }
+
+  /// Starts watching `path` (resolved) for an extension. A path outside
+  /// the open folder (`outside`) gets a watcher of its own.
+  pub fn add_watch(
+    &self,
+    extension: &str,
+    generation: u64,
+    path: PathBuf,
+    outside: bool,
+    command: String,
+  ) -> Result<u64, String> {
+    let id = {
+      let mut state = self.lock();
+      let count = state
+        .watches
+        .iter()
+        .filter(|watch| watch.extension == extension)
+        .count();
+      if count >= MAX_WATCHES {
+        return Err(format!("at most {MAX_WATCHES} watches"));
+      }
+      state.next_watch += 1;
+      state.next_watch
+    };
+    let watcher = if outside {
+      let shared = self.me.clone();
+      let watcher = ferrite_workspace::WorkspaceWatcher::new(&path, move |changed| {
+        if let Some(shared) = shared.upgrade() {
+          shared.dispatch_changes(&changed, |watch| watch.id == id);
+        }
+      })
+      .map_err(|error| error.to_string())?;
+      Some(watcher)
+    } else {
+      None
+    };
+    self.lock().watches.push(Watch {
+      id,
+      extension: extension.to_owned(),
+      generation,
+      path,
+      command,
+      own_watcher: watcher,
+    });
+    Ok(id)
+  }
+
+  pub fn remove_watch(&self, extension: &str, id: u64) {
+    self
+      .lock()
+      .watches
+      .retain(|watch| watch.extension != extension || watch.id != id);
+  }
+
+  /// Runs the commands of the watches `which` picks for the `changed`
+  /// paths under them.
+  fn dispatch_changes(&self, changed: &[PathBuf], which: impl Fn(&Watch) -> bool) {
+    let state = self.lock();
+    for watch in state.watches.iter().filter(|watch| which(watch)) {
+      let mut paths: Vec<String> = changed
+        .iter()
+        .filter(|path| path.starts_with(&watch.path))
+        .map(|path| path.display().to_string())
+        .collect();
+      if paths.is_empty() {
+        continue;
+      }
+      paths.sort_unstable();
+      paths.dedup();
+      let overflow = paths.len() > MAX_PENDING_PATHS;
+      if overflow {
+        paths.clear();
+      }
+      let worker = state
+        .extensions
+        .iter()
+        .find(|entry| entry.manifest.id == watch.extension)
+        .and_then(|entry| match &entry.run {
+          Run::Running { worker, .. } if worker.generation == watch.generation => Some(worker),
+          _ => None,
+        });
+      if let Some(worker) = worker {
+        worker.queue.push_background(Event::background(
+          watch.command.clone(),
+          None,
+          Payload::Changes(FileChanges {
+            watch: watch.id,
+            paths,
+            overflow,
+          }),
+        ));
+      }
+    }
+  }
+
+  /// Replaces an extension's explorer marks.
+  pub fn set_file_marks(&self, extension: &str, marks: Vec<FileMark>) {
+    let changed = {
+      let mut state = self.lock();
+      let before = state.marks.get(extension);
+      if before.map_or(marks.is_empty(), |before| **before == marks) {
+        false
+      } else {
+        if marks.is_empty() {
+          state.marks.remove(extension);
+        } else {
+          state.marks.insert(extension.to_owned(), Arc::new(marks));
+        }
+        true
+      }
+    };
+    if changed {
+      self.embedder.notify(Notification::FileMarksChanged);
+    }
+  }
+
   /// Sets (or hides, with `None`) one of an extension's status bar items.
   pub fn set_status_item(&self, extension: &str, item: &str, content: Option<StatusContent>) {
     let changed = {
@@ -424,19 +610,75 @@ impl Shared {
   }
 
   /// Changes the content of a view.
-  pub fn update_view(&self, full_id: &str, change: impl FnOnce(&mut ViewContent)) {
-    let changed = {
+  pub fn update_view<R>(&self, full_id: &str, change: impl FnOnce(&mut ViewContent) -> R) -> R {
+    let (result, changed) = {
       let mut state = self.lock();
       let content = state.views.entry(full_id.to_owned()).or_default();
       let before = content.clone();
-      change(content);
-      *content != before
+      let result = change(content);
+      (result, *content != before)
     };
     if changed {
       self
         .embedder
         .notify(Notification::ViewChanged(full_id.to_owned()));
     }
+    result
+  }
+
+  /// A view's content, as last set.
+  pub fn view_snapshot(&self, full_id: &str) -> ViewContent {
+    self.lock().views.get(full_id).cloned().unwrap_or_default()
+  }
+
+  /// Shows a prompt for an extension, cancelling the one showing (whose
+  /// command runs with `cancelled`). Returns its id.
+  pub fn show_prompt(
+    &self,
+    extension: &str,
+    generation: u64,
+    command: String,
+    kind: PromptKind,
+  ) -> u64 {
+    let (id, name, replaced) = {
+      let mut state = self.lock();
+      state.next_prompt += 1;
+      let id = state.next_prompt;
+      let name = state
+        .extensions
+        .iter()
+        .find(|entry| entry.manifest.id == extension)
+        .map_or_else(|| extension.to_owned(), |entry| entry.manifest.name.clone());
+      let replaced = state.prompt.replace(PendingPrompt {
+        id,
+        extension: extension.to_owned(),
+        generation,
+        command,
+      });
+      (id, name, replaced)
+    };
+    if let Some(replaced) = replaced {
+      self.answer_prompt(replaced, PromptReply::Cancelled);
+    }
+    self.embedder.notify(Notification::Prompt(Prompt {
+      id,
+      extension: name,
+      kind,
+    }));
+    id
+  }
+
+  /// Runs a prompt's command with the user's reply.
+  fn answer_prompt(&self, prompt: PendingPrompt, reply: PromptReply) {
+    self.deliver(
+      &prompt.extension,
+      prompt.generation,
+      Event::background(
+        prompt.command,
+        None,
+        Payload::Answer(reply.into_answer(prompt.id)),
+      ),
+    );
   }
 
   /// Opens a preview, or updates its title, and asks to show it. A webview
@@ -907,19 +1149,27 @@ impl CommandTicket {
 }
 
 /// What a permission allows, for asking the user: for language servers,
-/// the commands that would run.
+/// the commands that would run, and for processes, the programs.
 fn describe(permission: Permission, manifest: &Manifest) -> String {
   let description = permission.description();
-  if permission != Permission::LanguageServers {
-    return description.to_owned();
-  }
-  let commands: Vec<String> = manifest
-    .contributions
-    .language_servers
-    .iter()
-    .map(|server| server.command_line())
-    .collect();
-  format!("{description}: {}", commands.join("; "))
+  let contributions = &manifest.contributions;
+  let programs: Vec<String> = match permission {
+    Permission::LanguageServers => contributions
+      .language_servers
+      .iter()
+      .map(|server| server.command_line())
+      .collect(),
+    Permission::Processes => contributions
+      .programs
+      .iter()
+      .map(|program| match &program.workspace {
+        Some(workspace) => format!("{} (or the folder's {workspace})", program.command),
+        None => program.command.clone(),
+      })
+      .collect(),
+    _ => return description.to_owned(),
+  };
+  format!("{description}: {}", programs.join("; "))
 }
 
 /// Loads and runs extensions for an editor. See the crate documentation.
@@ -948,6 +1198,11 @@ impl ExtensionHost {
         status: BTreeMap::new(),
         views: BTreeMap::new(),
         previews: BTreeMap::new(),
+        marks: BTreeMap::new(),
+        prompt: None,
+        next_prompt: 0,
+        watches: Vec::new(),
+        next_watch: 0,
         next_generation: 0,
         shutting_down: false,
       }),
@@ -1351,17 +1606,17 @@ impl ExtensionHost {
     document: Option<DocumentId>,
     argument: Option<String>,
   ) -> Result<CommandTicket, String> {
-    self.run(command, document, argument, None)
+    self.run(command, document, argument, Payload::None)
   }
 
-  /// Runs an extension command, with a webview's message if it's run for
-  /// one.
+  /// Runs an extension command, with what it's run for, such as a
+  /// webview's message.
   fn run(
     &self,
     command: &str,
     document: Option<DocumentId>,
     argument: Option<String>,
-    message: Option<WebviewMessage>,
+    payload: Payload,
   ) -> Result<CommandTicket, String> {
     let selections = document
       .and_then(|id| {
@@ -1424,7 +1679,7 @@ impl ExtensionHost {
               command: command.to_owned(),
               context,
               argument,
-              message,
+              payload,
               reply,
             })
             .map(|()| CommandTicket {
@@ -1856,7 +2111,12 @@ impl ExtensionHost {
     let Some(command) = command else {
       return Ok(());
     };
-    self.run(&command, None, None, Some(WebviewMessage { source, data }))?;
+    self.run(
+      &command,
+      None,
+      None,
+      Payload::Message(WebviewMessage { source, data }),
+    )?;
     Ok(())
   }
 
@@ -1951,6 +2211,132 @@ impl ExtensionHost {
       );
     }
     found
+  }
+
+  /// Runs a command from a view's menu or button, for the items selected
+  /// (`selection`, their arguments; see `views::selection`). `argument`
+  /// is the clicked item's.
+  pub fn run_view_command(
+    &self,
+    command: &str,
+    argument: Option<String>,
+    selection: Vec<String>,
+  ) -> Result<CommandTicket, String> {
+    self.run(command, None, argument, Payload::Selection(selection))
+  }
+
+  /// The user opened a view item that has no children listed: runs the
+  /// view's `on_expand` command for it, starting the extension if needed.
+  pub fn expand_view_item(&self, view: &str, item: &str) -> Result<CommandTicket, String> {
+    let (command, local) = {
+      let state = self.shared.lock();
+      let declared = state
+        .extensions
+        .iter()
+        .flat_map(|entry| &entry.manifest.contributions.views)
+        .find(|declared| declared.full_id == view)
+        .ok_or_else(|| format!("No extension provides the view {view}."))?;
+      (declared.on_expand.clone(), declared.id.clone())
+    };
+    let Some(command) = command else {
+      return Ok(CommandTicket::done());
+    };
+    let argument = self
+      .shared
+      .view_snapshot(view)
+      .items
+      .into_iter()
+      .find(|entry| entry.id == item)
+      .ok_or_else(|| format!("The view has no item {item}."))?
+      .argument;
+    self.run(
+      &command,
+      None,
+      None,
+      Payload::Expand(crate::bindings::ferrite::extension::views::ExpandingItem {
+        view: local,
+        item: item.to_owned(),
+        argument,
+      }),
+    )
+  }
+
+  /// The user changed the text in a view's text box. Extensions read it
+  /// when they need it, so they aren't told.
+  pub fn set_view_input(&self, view: &str, text: String) {
+    if text.len() <= 64 * 1024 {
+      self
+        .shared
+        .lock()
+        .views
+        .entry(view.to_owned())
+        .or_default()
+        .input = text;
+    }
+  }
+
+  /// The badges of views that have one, by full view id.
+  pub fn view_badges(&self) -> BTreeMap<String, u32> {
+    self
+      .shared
+      .lock()
+      .views
+      .iter()
+      .filter(|(_, content)| content.badge > 0)
+      .map(|(id, content)| (id.clone(), content.badge))
+      .collect()
+  }
+
+  /// The user answered a prompt (or closed it): runs its command. Answers
+  /// to a prompt no longer showing are ignored.
+  pub fn prompt_answered(&self, id: u64, reply: PromptReply) {
+    let prompt = {
+      let mut state = self.shared.lock();
+      if state.prompt.as_ref().is_some_and(|prompt| prompt.id == id) {
+        state.prompt.take()
+      } else {
+        None
+      }
+    };
+    if let Some(prompt) = prompt {
+      self.shared.answer_prompt(prompt, reply);
+    }
+  }
+
+  /// Files in the open folder changed on disk: runs the commands of
+  /// extensions watching them.
+  pub fn files_changed(&self, changed: &[PathBuf]) {
+    self
+      .shared
+      .dispatch_changes(changed, |watch| watch.own_watcher.is_none());
+  }
+
+  /// The open folder, or whether it's trusted, changed: runs running
+  /// extensions' `on_folder_changed` commands.
+  pub fn folder_changed(&self) {
+    let state = self.shared.lock();
+    for entry in &state.extensions {
+      if let (Some(command), Run::Running { worker, .. }) =
+        (&entry.manifest.on_folder_changed, &entry.run)
+      {
+        worker
+          .queue
+          .push_background(Event::background(command.clone(), None, Payload::None));
+      }
+    }
+  }
+
+  /// Every extension's explorer marks, from extensions that are running.
+  pub fn file_marks(&self) -> Vec<ExtensionMarks> {
+    let state = self.shared.lock();
+    state
+      .marks
+      .iter()
+      .map(|(id, marks)| ExtensionMarks {
+        extension: id.clone(),
+        marks: marks.clone(),
+      })
+      .collect()
   }
 
   /// Restarts an extension (e.g. after it failed, or was rebuilt).

@@ -213,6 +213,22 @@ const SPECS: &[Spec] = &[
     value: |s| json!(s.extensions.development),
   },
   Spec {
+    path: &["extensions", "programs"],
+    section: "Extensions",
+    title: "Program Paths",
+    description: "Where to find a program an extension runs, by \"<extension id>.<program>\" (such as \"ferrite.git.git\"), when it isn't on the PATH.",
+    kind: Kind::Table,
+    value: |s| json!(s.extensions.programs.keys().collect::<Vec<_>>()),
+  },
+  Spec {
+    path: &["security", "workspace_trust"],
+    section: "Security",
+    title: "Workspace Trust",
+    description: "Ask whether you trust a folder's files before running programs on it: language servers, and programs extensions run (such as Git). Turned off, every folder is trusted.",
+    kind: Kind::Boolean,
+    value: |s| json!(s.security.workspace_trust),
+  },
+  Spec {
     path: &["keybindings"],
     section: "Keyboard Shortcuts",
     title: "Keybindings",

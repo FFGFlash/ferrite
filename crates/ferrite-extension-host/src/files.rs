@@ -223,6 +223,28 @@ impl Host for StoreState {
     tracing::info!(extension = %id, path = %path.display(), "extension wrote a file");
     Ok(())
   }
+
+  fn delete(&mut self, path: String, to_trash: bool) -> Result<(), FileError> {
+    let shared = self.api.require_files(Permission::FilesWrite)?;
+    let folder = folder(&shared)?;
+    let path = resolve(&folder, &path, false)?;
+    if path == folder.root {
+      return Err(FileError::OutsideFolder);
+    }
+    // Links are deleted, not what they point to.
+    if std::fs::symlink_metadata(&path).is_err() {
+      return Err(FileError::NotFound);
+    }
+    ferrite_workspace::delete_entry(&path, to_trash)
+      .map_err(|error| FileError::Failed(error.to_string()))?;
+    tracing::info!(
+      extension = %self.api.extension_id(),
+      path = %path.display(),
+      to_trash,
+      "extension deleted a file"
+    );
+    Ok(())
+  }
 }
 
 fn save(shared: &Shared, document: DocumentId) -> Result<(), FileError> {
@@ -246,6 +268,7 @@ mod tests {
     let folder = OpenFolder {
       root: root.clone(),
       exclude: ferrite_workspace::ExcludeFilter::new(&["node_modules"]).expect("valid"),
+      trusted: true,
     };
     let at = |path: &Path| path.display().to_string();
 

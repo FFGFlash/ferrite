@@ -1,18 +1,56 @@
-import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react'
-import { getViewContent, viewOpened, type ViewContent, type ViewEntry } from '../ipc/extensions'
-import { runContributed, viewVersions } from '../state/extensions'
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type CSSProperties,
+  type KeyboardEvent,
+  type MouseEvent,
+} from 'react'
+import { openContextMenu, type MenuEntry } from '../components/contextMenuState'
+import { entryIcon } from '../components/fileIcons'
+import { FileIcon } from '../components/FileIcon'
+import { Icon, isActionIcon } from '../components/Icon'
+import { isMac } from '../editor/keymap'
+import {
+  expandViewItem,
+  runViewCommand,
+  setViewInput,
+  viewOpened,
+  type ItemIcon,
+  type ViewContent,
+  type ViewEntry,
+} from '../ipc/extensions'
+import { extensionsStore, runContributed } from '../state/extensions'
+import { useColorResolver } from '../state/fileMarks'
+import { iconThemeStore } from '../state/iconTheme'
 import { reportError } from '../state/notifications'
 import { useStore } from '../state/store'
+import {
+  forContext,
+  sectionsOf,
+  useContributedViews,
+  useViewContent,
+  viewMenus,
+  whenHolds,
+  type ViewMenuItem,
+} from '../state/views'
+import { themeKind } from '../themes/theme'
 import './ExtensionViewPanel.css'
 
 interface Row {
   item: ViewEntry
   depth: number
   hasChildren: boolean
+  /** A placeholder for children being loaded (or none found). */
+  pending?: boolean
 }
 
-/** The rows shown with the items whose ids are in `open` expanded. */
-function visibleRows(items: readonly ViewEntry[], open: ReadonlySet<string>): Row[] {
+/**
+ * The rows shown, with the items `isOpen` says are open expanded: those the
+ * user opened, and those the extension says start open.
+ */
+function visibleRows(items: readonly ViewEntry[], isOpen: (item: ViewEntry) => boolean): Row[] {
   const children = new Map<string | null, ViewEntry[]>()
   for (const item of items) {
     const siblings = children.get(item.parent) ?? []
@@ -22,10 +60,20 @@ function visibleRows(items: readonly ViewEntry[], open: ReadonlySet<string>): Ro
   const rows: Row[] = []
   const visit = (parent: string | null, depth: number) => {
     for (const item of children.get(parent) ?? []) {
-      const hasChildren = children.has(item.id)
-      rows.push({ item, depth, hasChildren })
-      if (hasChildren && open.has(item.id)) {
+      const listed = children.has(item.id)
+      rows.push({ item, depth, hasChildren: listed || item.expandable })
+      if (!isOpen(item)) {
+        continue
+      }
+      if (listed) {
         visit(item.id, depth + 1)
+      } else if (item.expandable) {
+        rows.push({
+          item: { ...item, id: `${item.id}\0pending` },
+          depth: depth + 1,
+          hasChildren: false,
+          pending: true,
+        })
       }
     }
   }
@@ -33,72 +81,446 @@ function visibleRows(items: readonly ViewEntry[], open: ReadonlySet<string>): Ro
   return rows
 }
 
+const fail = (what: string) => (error: unknown) => reportError(what, error)
+
 /**
- * A side bar view contributed by an extension. The extension sets its items
- * (a tree) and message; activating an item runs the item's command with its
- * argument. The view is rendered by the workbench from that data only.
+ * A side bar view contributed by an extension, on its own: its header's
+ * buttons go in the side bar's header ({@link ExtensionViewActions}).
  */
 export function ExtensionViewPanel({ view }: { view: string }) {
-  const version = useStore(viewVersions)[view] ?? 0
-  const [content, setContent] = useState<ViewContent | null>(null)
-  const [open, setOpen] = useState<ReadonlySet<string>>(new Set())
+  return (
+    <div className="extension-view">
+      <ViewBody view={view} />
+    </div>
+  )
+}
+
+/** The buttons and "…" menu of a view's header (`view/title` menus). */
+export function ExtensionViewActions({ view }: { view: string }) {
+  const content = useViewContent(view)
+  const extensions = useStore(extensionsStore)
+  const menus = useMemo(() => viewMenus(view, 'view/title', extensions), [view, extensions])
+  const flags = content?.flags ?? []
+  const shown = menus.filter(menu => whenHolds(menu.when, flags))
+  const run = (menu: ViewMenuItem) => runViewCommand(menu.command, null, []).catch(fail(menu.title))
+  const buttons = shown.filter(menu => menu.inline)
+  const more = shown.filter(menu => !menu.inline)
+  return (
+    <>
+      {buttons.map(menu => (
+        <button
+          key={menu.command}
+          type="button"
+          className="dock-action"
+          title={menu.title}
+          aria-label={menu.title}
+          onClick={event => {
+            event.stopPropagation()
+            void run(menu)
+          }}
+        >
+          <MenuIcon name={menu.icon} />
+        </button>
+      ))}
+      {more.length > 0 && (
+        <button
+          type="button"
+          className="dock-action"
+          title="More Actions…"
+          aria-label="More Actions…"
+          aria-haspopup="menu"
+          onClick={event => {
+            event.stopPropagation()
+            const rect = event.currentTarget.getBoundingClientRect()
+            openContextMenu(
+              rect.left,
+              rect.bottom,
+              grouped(more, menu => () => void run(menu)),
+            )
+          }}
+        >
+          <Icon name="more" size={16} />
+        </button>
+      )}
+    </>
+  )
+}
+
+function MenuIcon({ name }: { name: string | null }) {
+  return name && isActionIcon(name) ? <Icon name={name} size={16} /> : null
+}
+
+/** Menu entries, with a separator between groups. */
+function grouped(
+  menus: readonly ViewMenuItem[],
+  run: (menu: ViewMenuItem) => () => void,
+): MenuEntry[] {
+  const entries: MenuEntry[] = []
+  menus.forEach((menu, index) => {
+    if (index > 0 && menus[index - 1]?.group !== menu.group) {
+      entries.push(null)
+    }
+    entries.push({ label: menu.title, run: run(menu) })
+  })
+  return entries
+}
+
+/**
+ * An activity bar entry whose views are sections: each has a header with
+ * its title, badge, and buttons, and can be collapsed.
+ */
+export function ExtensionContainerPanel({ container }: { container: string }) {
+  const extensions = useStore(extensionsStore)
+  const views = useContributedViews()
+  const sections = useMemo(() => sectionsOf(container, extensions), [container, extensions])
+  const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(new Set())
+  return (
+    <div className="extension-container">
+      {sections.map(section => {
+        const open = !collapsed.has(section)
+        return (
+          <section
+            key={section}
+            className="extension-section"
+            data-open={open || undefined}
+            aria-label={views.get(section)?.title}
+          >
+            <SectionHeader
+              view={section}
+              title={views.get(section)?.title ?? section}
+              open={open}
+              toggle={() =>
+                setCollapsed(current => {
+                  const next = new Set(current)
+                  if (open) {
+                    next.add(section)
+                  } else {
+                    next.delete(section)
+                  }
+                  return next
+                })
+              }
+            />
+            {open && (
+              <div className="extension-view extension-section__body">
+                <ViewBody view={section} />
+              </div>
+            )}
+          </section>
+        )
+      })}
+    </div>
+  )
+}
+
+function SectionHeader({
+  view,
+  title,
+  open,
+  toggle,
+}: {
+  view: string
+  title: string
+  open: boolean
+  toggle: () => void
+}) {
+  const content = useViewContent(view)
+  const badge = content?.badge ?? 0
+  return (
+    <div className="extension-section__header">
+      <button
+        type="button"
+        className="extension-section__toggle"
+        aria-expanded={open}
+        onClick={toggle}
+      >
+        <span className="extension-view__chevron" aria-hidden="true">
+          {open ? '▾' : '▸'}
+        </span>
+        <span className="extension-section__title">{title}</span>{' '}
+        {badge > 0 && <span className="extension-view__badge">{badge}</span>}
+      </button>
+      {open && (
+        <span className="extension-section__actions">
+          <ExtensionViewActions view={view} />
+        </span>
+      )}
+    </div>
+  )
+}
+
+/** A view's text box, welcome message, message, and items. */
+function ViewBody({ view }: { view: string }) {
+  const content = useViewContent(view)
+  const declared = useContributedViews().get(view)
+
+  useEffect(() => {
+    void viewOpened(view).catch(fail('Opening the view'))
+  }, [view])
+
+  if (!content) {
+    return null
+  }
+  const empty = content.items.length === 0
+  return (
+    <>
+      {declared?.input && (
+        <ViewInput
+          view={view}
+          content={content}
+          placeholder={declared.input.placeholder}
+          command={declared.input.command}
+        />
+      )}
+      {content.message && <p className="extension-view__message">{content.message}</p>}
+      {empty && content.welcome && (
+        <div className="extension-view__welcome">
+          {content.welcome.text.split(/\n\s*\n/).map((paragraph, index) => (
+            <p key={index}>{paragraph}</p>
+          ))}
+          {content.welcome.buttons.map(button => (
+            <button
+              key={button.label}
+              type="button"
+              className="panel-button extension-view__welcome-button"
+              onClick={() =>
+                void runContributed(button.command, button.argument).catch(fail(button.label))
+              }
+            >
+              {button.label}
+            </button>
+          ))}
+        </div>
+      )}
+      {!empty && <ViewTree view={view} items={content.items} flags={content.flags} />}
+    </>
+  )
+}
+
+/** How long typing pauses before the text box's text is sent. */
+const INPUT_DELAY = 150
+
+function ViewInput({
+  view,
+  content,
+  placeholder,
+  command,
+}: {
+  view: string
+  content: ViewContent
+  placeholder: string | null
+  command: string | null
+}) {
+  const [text, setText] = useState(content.input)
+  const sent = useRef(content.input)
+  const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+
+  // The extension changed it (e.g. cleared it after a commit). Checked on
+  // every new content, not only when its text differs from the last
+  // content's: typing isn't sent back, so the last content may already
+  // have had the text the extension set.
+  useEffect(() => {
+    if (content.input !== sent.current) {
+      sent.current = content.input
+      setText(content.input)
+    }
+  }, [content])
+  useEffect(() => () => clearTimeout(timer.current), [])
+
+  const send = (value: string) => {
+    clearTimeout(timer.current)
+    sent.current = value
+    return setViewInput(view, value)
+  }
+
+  return (
+    <div className="extension-view__input">
+      <textarea
+        className="extension-view__textarea"
+        rows={Math.min(6, Math.max(1, text.split('\n').length))}
+        value={text}
+        placeholder={placeholder ?? undefined}
+        aria-label={placeholder ?? 'Text'}
+        spellCheck
+        onChange={event => {
+          const value = event.target.value
+          setText(value)
+          clearTimeout(timer.current)
+          timer.current = setTimeout(() => void send(value).catch(fail('Typing')), INPUT_DELAY)
+        }}
+        onKeyDown={event => {
+          if (event.key === 'Enter' && (isMac() ? event.metaKey : event.ctrlKey) && command) {
+            event.preventDefault()
+            event.stopPropagation()
+            send(text)
+              .then(() => runContributed(command))
+              .catch(fail(placeholder ?? 'The command'))
+          }
+        }}
+      />
+    </div>
+  )
+}
+
+function ItemIconView({ icon, open }: { icon: ItemIcon; open: boolean }) {
+  const iconTheme = useStore(iconThemeStore)
+  const light = useStore(themeKind) === 'light'
+  if (icon.kind === 'named') {
+    return isActionIcon(icon.name) ? (
+      <span className="extension-view__icon">
+        <Icon name={icon.name} size={16} />
+      </span>
+    ) : null
+  }
+  const name = icon.path.split(/[/\\]/).pop() ?? icon.path
+  const folder = icon.kind === 'folder' ? { expanded: open } : null
+  return (
+    <FileIcon
+      icon={entryIcon(name, folder, iconTheme, light)}
+      kind={folder ? 'folder' : 'file'}
+      className="extension-view__icon"
+    />
+  )
+}
+
+function ViewTree({
+  view,
+  items,
+  flags,
+}: {
+  view: string
+  items: readonly ViewEntry[]
+  flags: readonly string[]
+}) {
+  const extensions = useStore(extensionsStore)
+  const color = useColorResolver()
+  const itemMenus = useMemo(() => viewMenus(view, 'view/item', extensions), [view, extensions])
+  /** Items the user opened (true) or closed (false); others are as the extension says. */
+  const [toggled, setToggled] = useState<ReadonlyMap<string, boolean>>(new Map())
+  const [selected, setSelected] = useState<ReadonlySet<string>>(new Set())
+  const [anchor, setAnchor] = useState<string | null>(null)
   const [focused, setFocused] = useState(0)
-  const seen = useRef(new Set<string>())
+  /**
+   * Items whose children were asked for, with the content they were missing
+   * from (asked again only if newer content still lacks them), and whether
+   * the answer came.
+   */
+  const [requested, setRequested] = useState<
+    ReadonlyMap<string, { items: readonly ViewEntry[]; done: boolean }>
+  >(new Map())
   const listRef = useRef<HTMLUListElement>(null)
 
   useEffect(() => {
-    void viewOpened(view).catch((error: unknown) => reportError('Opening the view', error))
-  }, [view])
+    const ids = new Set(items.map(item => item.id))
+    setSelected(current => new Set([...current].filter(id => ids.has(id))))
+  }, [items])
 
-  useEffect(() => {
-    let cancelled = false
-    getViewContent(view)
-      .then(next => {
-        if (cancelled) {
-          return
-        }
-        // Items appearing for the first time start as the extension asks.
-        setOpen(current => {
-          const result = new Set(current)
-          for (const item of next.items) {
-            if (!seen.current.has(item.id)) {
-              seen.current.add(item.id)
-              if (item.expanded) {
-                result.add(item.id)
-              }
-            }
-          }
-          return result
-        })
-        setContent(next)
-      })
-      .catch((error: unknown) => reportError('Loading the view', error))
-    return () => {
-      cancelled = true
-    }
-  }, [view, version])
-
-  const rows = useMemo(() => visibleRows(content?.items ?? [], open), [content, open])
+  const isOpen = (item: ViewEntry) => toggled.get(item.id) ?? item.expanded
+  const rows = useMemo(
+    () => visibleRows(items, item => toggled.get(item.id) ?? item.expanded),
+    [items, toggled],
+  )
   const current = Math.min(focused, rows.length - 1)
 
-  const toggle = (id: string, expand?: boolean) =>
-    setOpen(previous => {
-      const next = new Set(previous)
-      if (expand ?? !next.has(id)) {
-        next.add(id)
-      } else {
-        next.delete(id)
+  // Opened items whose children aren't listed: ask for them.
+  useEffect(() => {
+    for (const row of rows) {
+      if (!row.pending) {
+        continue
       }
-      return next
-    })
+      const id = row.item.id.slice(0, -'\0pending'.length)
+      if (requested.get(id)?.items === items) {
+        continue
+      }
+      setRequested(previous => new Map(previous).set(id, { items, done: false }))
+      expandViewItem(view, id)
+        .catch(fail('Loading items'))
+        .finally(() =>
+          setRequested(previous => {
+            const at = previous.get(id)
+            return at?.items === items ? new Map(previous).set(id, { items, done: true }) : previous
+          }),
+        )
+    }
+  }, [rows, requested, items, view])
+
+  const toggle = (id: string, expand?: boolean) => {
+    const item = items.find(candidate => candidate.id === id)
+    if (item) {
+      setToggled(previous => new Map(previous).set(id, expand ?? !isOpen(item)))
+    }
+  }
+
+  const select = (
+    index: number,
+    event: { shiftKey: boolean; ctrlKey: boolean; metaKey: boolean },
+  ) => {
+    const row = rows[index]
+    if (!row || row.pending) {
+      return
+    }
+    setFocused(index)
+    const id = row.item.id
+    if (event.shiftKey && anchor !== null) {
+      const from = rows.findIndex(candidate => candidate.item.id === anchor)
+      const [start, end] = from < index ? [from, index] : [index, from]
+      setSelected(
+        new Set(
+          rows
+            .slice(Math.max(0, start), end + 1)
+            .filter(candidate => !candidate.pending)
+            .map(candidate => candidate.item.id),
+        ),
+      )
+      return
+    }
+    if (isMac() ? event.metaKey : event.ctrlKey) {
+      setSelected(current => {
+        const next = new Set(current)
+        if (next.has(id)) {
+          next.delete(id)
+        } else {
+          next.add(id)
+        }
+        return next
+      })
+    } else {
+      setSelected(new Set([id]))
+    }
+    setAnchor(id)
+  }
 
   const activate = (row: Row) => {
     if (row.item.command) {
-      runContributed(row.item.command, row.item.argument).catch((error: unknown) =>
-        reportError(row.item.label, error),
-      )
+      runContributed(row.item.command, row.item.argument).catch(fail(row.item.label))
     } else if (row.hasChildren) {
       toggle(row.item.id)
+    }
+  }
+
+  /** The arguments a menu command gets: the selection's, if the row is in it. */
+  const selectionFor = (row: Row) => {
+    const chosen = selected.has(row.item.id) ? rows.filter(r => selected.has(r.item.id)) : [row]
+    return chosen.flatMap(r => (r.item.argument === null ? [] : [r.item.argument]))
+  }
+  const menusFor = (row: Row) =>
+    itemMenus.filter(menu => forContext(menu, row.item.context) && whenHolds(menu.when, flags))
+  const runMenu = (menu: ViewMenuItem, row: Row) =>
+    runViewCommand(menu.command, row.item.argument, selectionFor(row)).catch(fail(menu.title))
+
+  const openMenu = (row: Row, index: number, x: number, y: number) => {
+    if (!selected.has(row.item.id)) {
+      setSelected(new Set([row.item.id]))
+      setAnchor(row.item.id)
+    }
+    setFocused(index)
+    const entries = menusFor(row).filter(menu => !menu.inline)
+    if (entries.length > 0) {
+      openContextMenu(
+        x,
+        y,
+        grouped(entries, menu => () => void runMenu(menu, row)),
+      )
     }
   }
 
@@ -109,7 +531,8 @@ export function ExtensionViewPanel({ view }: { view: string }) {
     }
     const move = (index: number) => {
       event.preventDefault()
-      setFocused(Math.max(0, Math.min(rows.length - 1, index)))
+      const next = Math.max(0, Math.min(rows.length - 1, index))
+      select(next, { shiftKey: event.shiftKey, ctrlKey: false, metaKey: false })
     }
     switch (event.key) {
       case 'ArrowDown':
@@ -132,7 +555,7 @@ export function ExtensionViewPanel({ view }: { view: string }) {
         break
       case 'ArrowLeft':
         event.preventDefault()
-        if (row.hasChildren && open.has(row.item.id)) {
+        if (row.hasChildren && isOpen(row.item)) {
           toggle(row.item.id, false)
         } else if (row.item.parent) {
           move(rows.findIndex(candidate => candidate.item.id === row.item.parent))
@@ -142,6 +565,12 @@ export function ExtensionViewPanel({ view }: { view: string }) {
         event.preventDefault()
         activate(row)
         break
+      case 'a':
+        if (isMac() ? event.metaKey : event.ctrlKey) {
+          event.preventDefault()
+          setSelected(new Set(rows.filter(r => !r.pending).map(r => r.item.id)))
+        }
+        break
     }
   }
 
@@ -149,59 +578,138 @@ export function ExtensionViewPanel({ view }: { view: string }) {
     listRef.current?.children[current]?.scrollIntoView({ block: 'nearest' })
   }, [current])
 
+  const label = useContributedViews().get(view)?.title ?? 'Items'
   return (
-    <div className="extension-view">
-      {content?.message && <p className="extension-view__message">{content.message}</p>}
-      {rows.length > 0 && (
-        <ul
-          ref={listRef}
-          className="extension-view__tree"
-          role="tree"
-          aria-label="Items"
-          tabIndex={0}
-          aria-activedescendant={rows[current] ? `${view}-${current}` : undefined}
-          onKeyDown={onKeyDown}
-        >
-          {rows.map((row, index) => (
+    <ul
+      ref={listRef}
+      className="extension-view__tree"
+      role="tree"
+      aria-label={label}
+      aria-multiselectable="true"
+      tabIndex={0}
+      aria-activedescendant={rows[current] ? `${view}-${current}` : undefined}
+      onKeyDown={onKeyDown}
+      onContextMenu={event => {
+        // From the keyboard (Shift+F10, the menu key): the focused row's menu.
+        const row = rows[current]
+        if (event.target !== event.currentTarget || !row || row.pending) {
+          return
+        }
+        event.preventDefault()
+        const rect = listRef.current?.children[current]?.getBoundingClientRect()
+        if (rect) {
+          openMenu(row, current, rect.left + rect.width / 3, rect.bottom)
+        }
+      }}
+    >
+      {rows.map((row, index) => {
+        if (row.pending) {
+          const id = row.item.id.slice(0, -'\0pending'.length)
+          const done = requested.get(id)?.items === items && requested.get(id)?.done
+          return (
             <li
               key={row.item.id}
               id={`${view}-${index}`}
               role="treeitem"
               aria-level={row.depth + 1}
-              aria-expanded={row.hasChildren ? open.has(row.item.id) : undefined}
-              aria-selected={index === current}
-              className="extension-view__row"
-              data-focused={index === current || undefined}
-              style={{ paddingLeft: 8 + row.depth * 12 }}
-              title={row.item.tooltip ?? undefined}
-              onClick={() => {
-                setFocused(index)
-                if (row.hasChildren && !row.item.command) {
-                  toggle(row.item.id)
-                } else {
-                  activate(row)
+              aria-selected={false}
+              className="extension-view__row extension-view__row--pending"
+              style={{ paddingLeft: 8 + row.depth * 12 + 16 }}
+            >
+              {done ? 'No items' : 'Loading…'}
+            </li>
+          )
+        }
+        const { item } = row
+        const mark = item.mark
+        const markColor = mark?.color ? color(mark.color) : null
+        const inline = menusFor(row).filter(menu => menu.inline)
+        return (
+          <li
+            key={item.id}
+            id={`${view}-${index}`}
+            role="treeitem"
+            aria-level={row.depth + 1}
+            aria-expanded={row.hasChildren ? isOpen(item) : undefined}
+            aria-selected={selected.has(item.id)}
+            aria-description={mark?.badge && item.tooltip ? item.tooltip : undefined}
+            className="extension-view__row"
+            data-focused={index === current || undefined}
+            data-faded={mark?.faded || undefined}
+            style={
+              {
+                paddingLeft: 8 + row.depth * 12,
+                ...(markColor && { '--view-mark-color': markColor }),
+              } as CSSProperties
+            }
+            title={item.tooltip ?? undefined}
+            onClick={event => {
+              select(index, event)
+              if (event.shiftKey || (isMac() ? event.metaKey : event.ctrlKey)) {
+                return
+              }
+              if (row.hasChildren && !item.command) {
+                toggle(item.id)
+              } else {
+                activate(row)
+              }
+            }}
+            onContextMenu={(event: MouseEvent) => {
+              event.preventDefault()
+              event.stopPropagation()
+              openMenu(row, index, event.clientX, event.clientY)
+            }}
+          >
+            <span
+              className="extension-view__chevron"
+              onClick={event => {
+                if (row.hasChildren) {
+                  event.stopPropagation()
+                  toggle(item.id)
                 }
               }}
             >
-              <span
-                className="extension-view__chevron"
-                onClick={event => {
-                  if (row.hasChildren) {
-                    event.stopPropagation()
-                    toggle(row.item.id)
-                  }
-                }}
-              >
-                {row.hasChildren ? (open.has(row.item.id) ? '▾' : '▸') : ''}
+              {row.hasChildren ? (isOpen(item) ? '▾' : '▸') : ''}
+            </span>
+            {item.icon && <ItemIconView icon={item.icon} open={isOpen(item)} />}
+            <span
+              className="extension-view__label"
+              data-marked={markColor ? true : undefined}
+              data-strikethrough={mark?.strikethrough || undefined}
+            >
+              {item.label}
+            </span>
+            {item.description && (
+              <span className="extension-view__description">{item.description}</span>
+            )}
+            {inline.length > 0 && (
+              <span className="extension-view__actions">
+                {inline.map(menu => (
+                  <button
+                    key={menu.command}
+                    type="button"
+                    className="extension-view__action"
+                    title={menu.title}
+                    aria-label={menu.title}
+                    tabIndex={-1}
+                    onClick={event => {
+                      event.stopPropagation()
+                      void runMenu(menu, row)
+                    }}
+                  >
+                    <MenuIcon name={menu.icon} />
+                  </button>
+                ))}
               </span>
-              <span className="extension-view__label">{row.item.label}</span>
-              {row.item.description && (
-                <span className="extension-view__description">{row.item.description}</span>
-              )}
-            </li>
-          ))}
-        </ul>
-      )}
-    </div>
+            )}
+            {mark?.badge && (
+              <span className="extension-view__mark" data-marked={markColor ? true : undefined}>
+                {mark.badge}
+              </span>
+            )}
+          </li>
+        )
+      })}
+    </ul>
   )
 }

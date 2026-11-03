@@ -1,7 +1,11 @@
 import { createElement, useMemo, type ComponentType } from 'react'
 import type { IconName } from '../components/Icon'
-import type { ViewContribution } from '../ipc/extensions'
-import { ExtensionViewPanel } from '../panels/ExtensionViewPanel'
+import type { ViewContainerContribution, ViewContribution } from '../ipc/extensions'
+import {
+  ExtensionContainerPanel,
+  ExtensionViewActions,
+  ExtensionViewPanel,
+} from '../panels/ExtensionViewPanel'
 import { extensionsStore, usableExtensions } from '../state/extensions'
 import { useStore } from '../state/store'
 import { ExplorerActions, ExplorerPanel } from '../panels/ExplorerPanel'
@@ -69,25 +73,52 @@ export const builtinViews: readonly ViewDescriptor[] = [
   },
 ]
 
-/** One component per contributed view, kept so React doesn't remount it. */
-const contributedComponents = new Map<string, ComponentType>()
+/** Components per contributed view and container, kept so React doesn't remount them. */
+const contributedComponents = new Map<
+  string,
+  { component: ComponentType; actions?: ComponentType }
+>()
 
 function contributedView(view: ViewContribution): ViewDescriptor {
-  let component = contributedComponents.get(view.fullId)
-  if (!component) {
-    component = () => createElement(ExtensionViewPanel, { view: view.fullId })
-    contributedComponents.set(view.fullId, component)
+  let components = contributedComponents.get(view.fullId)
+  if (!components) {
+    components = {
+      component: () => createElement(ExtensionViewPanel, { view: view.fullId }),
+      actions: () => createElement(ExtensionViewActions, { view: view.fullId }),
+    }
+    contributedComponents.set(view.fullId, components)
   }
-  return { id: view.fullId, title: view.title, icon: view.icon as IconName, component }
+  return { id: view.fullId, title: view.title, icon: view.icon as IconName, ...components }
 }
 
-/** Built-in views followed by those of enabled extensions. */
+/** A container: its views are sections, each with its own header and buttons. */
+function contributedContainer(container: ViewContainerContribution): ViewDescriptor {
+  let components = contributedComponents.get(container.fullId)
+  if (!components) {
+    components = {
+      component: () => createElement(ExtensionContainerPanel, { container: container.fullId }),
+    }
+    contributedComponents.set(container.fullId, components)
+  }
+  return {
+    id: container.fullId,
+    title: container.title,
+    icon: container.icon as IconName,
+    ...components,
+  }
+}
+
+/**
+ * Built-in views followed by those of enabled extensions: their own views,
+ * and their containers (whose views are sections of them).
+ */
 export function listViews(extensions = extensionsStore.get()): readonly ViewDescriptor[] {
   return [
     ...builtinViews,
-    ...usableExtensions(extensions).flatMap(extension =>
-      extension.contributions.views.map(contributedView),
-    ),
+    ...usableExtensions(extensions).flatMap(extension => [
+      ...extension.contributions.viewContainers.map(contributedContainer),
+      ...extension.contributions.views.filter(view => view.container === null).map(contributedView),
+    ]),
   ]
 }
 

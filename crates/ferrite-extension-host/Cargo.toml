@@ -9,6 +9,7 @@ publish = false
 [dependencies]
 base64 = { workspace = true }
 ferrite-core = { workspace = true }
+ferrite-process = { workspace = true }
 ferrite-text = { workspace = true }
 ferrite-workspace = { workspace = true }
 getrandom = { workspace = true }

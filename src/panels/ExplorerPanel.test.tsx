@@ -28,7 +28,8 @@ const { documentsStore } = await import('../state/documents')
 const { DEFAULT_LAYOUT, layoutStore } = await import('../state/layout')
 const { notifications } = await import('../state/notifications')
 const { iconThemeStore } = await import('../state/iconTheme')
-const { themeKind } = await import('../themes/theme')
+const { extensionColorOverrides, themeKind } = await import('../themes/theme')
+const { fileMarksStore } = await import('../state/fileMarks')
 const { ExplorerActions, ExplorerPanel } = await import('./ExplorerPanel')
 const { explorerStore } = await import('./explorerState')
 const { contextMenuStore } = await import('../components/contextMenuState')
@@ -122,7 +123,7 @@ describe('ExplorerPanel', () => {
         <ExplorerPanel />
       </>,
     )
-    await act(async () => setWorkspace({ root: '/w', name: 'w' }))
+    await act(async () => setWorkspace({ root: '/w', name: 'w', trust: 'trusted' }))
     return screen.getByRole('tree', { name: 'w' })
   }
 
@@ -198,6 +199,107 @@ describe('ExplorerPanel', () => {
     act(() => fileProblemsStore.set({ files: [], leftOut: 0 }))
     expect(row('src')).not.toHaveAttribute('data-problems')
     expect(row('main.rs')?.querySelector('.explorer-tree__problems')).toBeNull()
+  })
+
+  it("shows extensions' marks in their colors, which problems override", async () => {
+    const user = userEvent.setup()
+    const color = { description: '', dark: '#e2c08d', light: '#895503' }
+    applyStatuses([
+      {
+        id: 'example.git',
+        name: 'Git',
+        state: 'active',
+        permissions: [],
+        commands: [],
+        contributions: {
+          themes: [],
+          iconThemes: [],
+          keybindings: [],
+          menus: [],
+          views: [],
+          decorations: [],
+          previews: [],
+          viewers: [],
+          languages: [],
+          languageServers: [],
+          programs: [],
+          colors: [
+            { ...color, name: 'modified', id: 'example.git.modified' },
+            { ...color, name: 'untracked', id: 'example.git.untracked', dark: '#73c991' },
+          ],
+        },
+      } as never,
+    ])
+    const mark = (path: string, badge: string, name: string, inherit = false) => ({
+      path,
+      badge,
+      color: `example.git.${name}`,
+      tooltip: name === 'modified' ? 'Modified' : 'Untracked',
+      faded: false,
+      inherit,
+      propagate: true,
+      priority: name === 'modified' ? 3 : 1,
+    })
+    fileMarksStore.set([
+      {
+        extension: 'example.git',
+        marks: [mark('/w/src/main.rs', 'M', 'modified'), mark('/w/target', 'U', 'untracked', true)],
+      },
+    ])
+    themeKind.set('dark')
+    try {
+      const tree = await renderTree()
+      const row = (name: string) => within(tree).getByText(name).closest('li')
+      // The folder holding a change takes its color, with a dot.
+      expect(row('src')).toHaveAttribute('data-marked')
+      expect(row('src')?.style.getPropertyValue('--explorer-mark-color')).toBe('#e2c08d')
+      expect(row('src')?.querySelector('.explorer-tree__mark')).toHaveTextContent('●')
+      expect(row('src')).toHaveAttribute('aria-description', 'Contains: Modified')
+      expect(row('README.md')).not.toHaveAttribute('data-marked')
+
+      await user.click(within(tree).getByText('src'))
+      await within(tree).findByText('main.rs')
+      expect(row('main.rs')?.querySelector('.explorer-tree__mark')).toHaveTextContent('M')
+      expect(row('main.rs')).toHaveAttribute('aria-description', 'Modified')
+
+      // Everything in an untracked folder is untracked; a theme can change the color.
+      listings['/w/target'] = [entry('/w/target/out.txt', false, true)]
+      await user.click(within(tree).getByText('target'))
+      await within(tree).findByText('out.txt')
+      expect(row('out.txt')?.querySelector('.explorer-tree__mark')).toHaveTextContent('U')
+      act(() => extensionColorOverrides.set({ 'example.git.untracked': '#00ff00' }))
+      expect(row('out.txt')?.style.getPropertyValue('--explorer-mark-color')).toBe('#00ff00')
+
+      // A problem's color wins, and both badges show.
+      act(() =>
+        fileProblemsStore.set({
+          files: [
+            {
+              path: '/w/src/main.rs',
+              document: null,
+              title: 'main.rs',
+              problems: [
+                {
+                  start: { line: 0, column: 0 },
+                  end: { line: 0, column: 1 },
+                  severity: 1,
+                  message: 'm',
+                  source: null,
+                },
+              ],
+            },
+          ],
+          leftOut: 0,
+        }),
+      )
+      expect(row('main.rs')).toHaveAttribute('data-problems', 'error')
+      expect(row('main.rs')?.querySelector('.explorer-tree__badges')).toHaveTextContent('1M')
+      expect(row('main.rs')).toHaveAttribute('aria-description', '1 error. Modified')
+    } finally {
+      fileMarksStore.set([])
+      extensionColorOverrides.set({})
+      applyStatuses([])
+    }
   })
 
   it('expands folders lazily and opens files', async () => {
@@ -590,6 +692,11 @@ describe('ExplorerPanel', () => {
       forFiles: !forFolders,
       forFolders,
       patterns,
+      view: null,
+      contexts: [],
+      inline: false,
+      icon: null,
+      when: null,
     })
     applyStatuses([
       {
@@ -612,6 +719,9 @@ describe('ExplorerPanel', () => {
           viewers: [],
           languages: [],
           languageServers: [],
+          programs: [],
+          colors: [],
+          viewContainers: [],
         },
       } as never,
     ])

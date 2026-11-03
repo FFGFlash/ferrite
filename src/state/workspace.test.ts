@@ -27,7 +27,7 @@ describe('revealPath', () => {
     layoutStore.set({ ...DEFAULT_LAYOUT, expanded: ['/w/docs'] })
     vi.mocked(ipc.listDirectory).mockResolvedValue([])
     workspaceStore.set({
-      info: { root: '/w', name: 'w' },
+      info: { root: '/w', name: 'w', trust: 'trusted' },
       listings: new Map([['/w/src', []]]),
       indexing: false,
     })

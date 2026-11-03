@@ -14,11 +14,11 @@
 use std::cell::RefCell;
 use std::collections::HashMap;
 
+use ferrite_extension_api::files::{self, FileError};
 use ferrite_extension_api::types::{
   Activation, ApiError, CommandContext, ConfigValue, Diagnostic, DocumentChange, DocumentId,
   DocumentInfo, LogLevel, MessageLevel, Permission, Position, Range, Severity, TextEdit,
 };
-use ferrite_extension_api::files::{self, FileError};
 use ferrite_extension_api::{Guest, export_extension, host, workbench};
 
 /// Lines read per request.
@@ -347,7 +347,8 @@ fn trim_files(path: &str) -> Result<String, String> {
     };
     let trimmed = trim_text(&text);
     if trimmed != text {
-      files::write_file(file, &trimmed).map_err(|error| format!("{file}: {}", describe_file(&error)))?;
+      files::write_file(file, &trimmed)
+        .map_err(|error| format!("{file}: {}", describe_file(&error)))?;
       changed += 1;
     }
   }

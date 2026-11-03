@@ -104,6 +104,15 @@ const TEMPLATE: &str = r##"# Ferrite settings. Uncomment a line to change it; sa
 # Settings that extensions declare, by extension id:
 # [extensions.settings."example.tidy"]
 # max_line_length = 120
+#
+# Where to find programs extensions run, if not on the PATH:
+# [extensions.programs]
+# "ferrite.git.git" = "C:/Program Files/Git/cmd/git.exe"
+
+[security]
+# Ask whether you trust a folder's files before running programs on it
+# (language servers, and programs extensions run, such as Git).
+# workspace_trust = true
 
 [keybindings]
 # Change a command's keys (find command ids in the Keyboard Shortcuts list).
@@ -129,8 +138,25 @@ pub struct Settings {
   pub lsp: LspSettings,
   pub terminal: TerminalSettings,
   pub extensions: ExtensionsSettings,
+  pub security: SecuritySettings,
   /// Command id to its keys, overriding the defaults.
   pub keybindings: BTreeMap<String, KeybindingSetting>,
+}
+
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct SecuritySettings {
+  /// Ask whether to trust each folder before running programs on it.
+  /// Turned off, every folder is trusted.
+  pub workspace_trust: bool,
+}
+
+impl Default for SecuritySettings {
+  fn default() -> Self {
+    Self {
+      workspace_trust: true,
+    }
+  }
 }
 
 /// One key or several; `""` or `[]` removes a command's keys.
@@ -159,6 +185,8 @@ pub struct ExtensionsSettings {
   pub development: Vec<String>,
   /// Values for the settings extensions declare, by extension id.
   pub settings: BTreeMap<String, toml::Table>,
+  /// Paths of programs extensions run, by `<extension id>.<program>`.
+  pub programs: BTreeMap<String, String>,
 }
 
 impl Default for ExtensionsSettings {
@@ -167,6 +195,7 @@ impl Default for ExtensionsSettings {
       enabled: true,
       development: Vec::new(),
       settings: BTreeMap::new(),
+      programs: BTreeMap::new(),
     }
   }
 }
@@ -654,6 +683,9 @@ fn apply(app: &AppHandle, previous: &Settings, settings: &Settings, announce: bo
     app.state::<crate::lsp::LspState>().restart_all(app);
   }
   crate::extensions::settings_changed(app, previous, settings);
+  if previous.security != settings.security {
+    crate::trust::changed(app);
+  }
   events::emit(
     app,
     AppEvent::SettingsChanged {
@@ -775,6 +807,32 @@ pub fn edit(
   ferrite_workspace::write_file_atomically(&path, text.as_bytes())
     .map_err(|error| CommandError::new("settings", format!("Could not write settings: {error}")))?;
   reload_and_announce(app, false)
+}
+
+/// Sets one of an extension's settings (`None` removes it), as the
+/// extension asked (`host::set-configuration`); the value was checked
+/// against its declaration.
+pub fn set_extension_setting(
+  app: &AppHandle,
+  extension: &str,
+  key: &str,
+  value: Option<toml::Value>,
+) -> Result<(), CommandError> {
+  let value = match value {
+    None => None,
+    Some(toml::Value::Boolean(b)) => Some(toml_edit::Value::from(b)),
+    Some(toml::Value::Integer(i)) => Some(toml_edit::Value::from(i)),
+    Some(toml::Value::Float(f)) => Some(toml_edit::Value::from(f)),
+    Some(toml::Value::String(s)) => Some(toml_edit::Value::from(s)),
+    Some(other) => {
+      return Err(CommandError::new(
+        "invalidSettings",
+        format!("{other} isn't a setting's value"),
+      ));
+    }
+  };
+  let path = ["extensions", "settings", extension, key].map(str::to_owned);
+  edit(app, |document| set_value(document, &path, value))
 }
 
 /// Sets the value at `path` (`None` removes it), creating the tables on the

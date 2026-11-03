@@ -28,7 +28,17 @@ pub static THEME_TOKENS: LazyLock<BTreeSet<String>> = LazyLock::new(|| {
 });
 /// Icons a view can use in the activity bar, and a preview on its tab.
 pub const VIEW_ICONS: &[&str] = &[
-  "list", "check", "bolt", "book", "bug", "tag", "star", "flag", "bell",
+  "list",
+  "check",
+  "bolt",
+  "book",
+  "bug",
+  "tag",
+  "star",
+  "flag",
+  "bell",
+  "source-control",
+  "history",
 ];
 /// Named icons for tab actions and webview pages, as SVG path data, shared
 /// with the frontend (`scripts/action-icons.mjs` generates them).
@@ -100,6 +110,15 @@ pub enum MenuLocation {
   /// path as the argument.
   #[serde(rename = "explorer/context")]
   ExplorerContext,
+  /// A view's header: a button (`inline`) or an entry in its "…" menu.
+  /// (1.7)
+  #[serde(rename = "view/title")]
+  ViewTitle,
+  /// A view's items: a button on the row (`inline`) or an entry in its
+  /// context menu, for items whose context is in `contexts`. The command
+  /// gets the item's argument, and `views::selection`. (1.7)
+  #[serde(rename = "view/item")]
+  ViewItem,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -117,6 +136,17 @@ pub struct MenuContribution {
   /// ignoring case: the item is shown only for files whose names match one
   /// (the active document's, in the editor). Empty: every file.
   pub patterns: Vec<String>,
+  /// For `view/title` and `view/item`: the view, `<extension id>.<view id>`.
+  pub view: Option<String>,
+  /// For `view/item`: the item contexts it's for; empty means every item.
+  pub contexts: Vec<String>,
+  /// A button rather than a menu entry; it needs an icon.
+  pub inline: bool,
+  /// One of [`ACTION_ICONS`].
+  pub icon: Option<String>,
+  /// Shown only while the view has this flag set (`set-flags`), or with
+  /// `!`, while it doesn't.
+  pub when: Option<String>,
 }
 
 /// Most patterns in a menu item, and the longest pattern.
@@ -177,6 +207,33 @@ pub struct ViewContribution {
   /// The id the extension uses.
   pub id: String,
   /// `<extension id>.<view id>`, unique in the workbench.
+  pub full_id: String,
+  pub title: String,
+  pub icon: String,
+  /// The container it's a section of, `<extension id>.<container id>`;
+  /// `None` for a view with an activity bar entry of its own. (1.7)
+  pub container: Option<String>,
+  /// A text box above its items. (1.7)
+  pub input: Option<ViewInput>,
+  /// Run to load the children of an item opened without any. (1.7)
+  pub on_expand: Option<String>,
+}
+
+/// A view's text box, such as a commit message. (1.7)
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ViewInput {
+  pub placeholder: Option<String>,
+  /// Run by Ctrl+Enter (Cmd+Enter on macOS).
+  pub command: Option<String>,
+}
+
+/// An activity bar entry whose views are shown as sections. (1.7)
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ViewContainerContribution {
+  pub id: String,
+  /// `<extension id>.<container id>`.
   pub full_id: String,
   pub title: String,
   pub icon: String,
@@ -372,6 +429,34 @@ impl LanguageServerContribution {
   }
 }
 
+/// A program the extension runs with the `processes` interface. (1.6)
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProgramContribution {
+  /// What the extension's code calls it.
+  pub name: String,
+  /// A program on the `PATH`, or a path inside the extension's folder.
+  pub command: String,
+  /// A path inside the open folder, such as `node_modules/.bin/prettier`,
+  /// run instead when the folder has it and is trusted.
+  pub workspace: Option<String>,
+}
+
+/// A color the extension's explorer marks use, which themes and the user's
+/// `workbench.colors` can change. (1.6)
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ColorContribution {
+  /// The name the extension uses.
+  pub name: String,
+  /// `<extension id>.<name>`: the token themes set.
+  pub id: String,
+  pub description: String,
+  /// Hex colors for dark and light themes.
+  pub dark: String,
+  pub light: String,
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Contributions {
@@ -386,6 +471,9 @@ pub struct Contributions {
   pub viewers: Vec<ViewerContribution>,
   pub languages: Vec<LanguageContribution>,
   pub language_servers: Vec<LanguageServerContribution>,
+  pub programs: Vec<ProgramContribution>,
+  pub colors: Vec<ColorContribution>,
+  pub view_containers: Vec<ViewContainerContribution>,
 }
 
 impl Contributions {
@@ -415,6 +503,13 @@ impl Contributions {
     self.viewers.iter().find(|viewer| viewer.id == id)
   }
 
+  pub fn container(&self, id: &str) -> Option<&ViewContainerContribution> {
+    self
+      .view_containers
+      .iter()
+      .find(|container| container.id == id)
+  }
+
   pub fn view(&self, id: &str) -> Option<&ViewContribution> {
     self.views.iter().find(|view| view.id == id)
   }
@@ -428,6 +523,14 @@ impl Contributions {
       .decorations
       .iter()
       .find(|decoration| decoration.name == name)
+  }
+
+  pub fn program(&self, name: &str) -> Option<&ProgramContribution> {
+    self.programs.iter().find(|program| program.name == name)
+  }
+
+  pub fn color(&self, name: &str) -> Option<&ColorContribution> {
+    self.colors.iter().find(|color| color.name == name)
   }
 }
 
@@ -465,6 +568,12 @@ pub struct RawMenu {
   group: Option<String>,
   targets: Option<Vec<String>>,
   patterns: Option<Vec<String>>,
+  view: Option<String>,
+  contexts: Option<Vec<String>>,
+  #[serde(default)]
+  inline: bool,
+  icon: Option<String>,
+  when: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -482,6 +591,24 @@ pub struct RawStatusItem {
 #[serde(deny_unknown_fields)]
 pub struct RawView {
   pub(crate) id: String,
+  title: String,
+  icon: Option<String>,
+  container: Option<String>,
+  input: Option<RawViewInput>,
+  on_expand: Option<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RawViewInput {
+  placeholder: Option<String>,
+  command: Option<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RawViewContainer {
+  id: String,
   title: String,
   icon: Option<String>,
 }
@@ -585,6 +712,23 @@ pub struct RawLanguageServer {
   root_markers: Vec<String>,
 }
 
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RawProgram {
+  name: String,
+  command: Option<String>,
+  workspace: Option<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RawColor {
+  #[serde(default)]
+  description: String,
+  dark: String,
+  light: Option<String>,
+}
+
 /// The contribution sections of a manifest, as written.
 #[derive(Default)]
 pub struct RawContributions {
@@ -599,6 +743,25 @@ pub struct RawContributions {
   pub viewers: Vec<RawViewer>,
   pub languages: Vec<RawLanguage>,
   pub language_servers: Vec<RawLanguageServer>,
+  pub programs: Vec<RawProgram>,
+  pub colors: BTreeMap<String, RawColor>,
+  pub view_containers: Vec<RawViewContainer>,
+}
+
+/// A view menu's `when`: a flag name, or `!` and one.
+fn check_when(section: &str, when: &str) -> Result<(), ManifestError> {
+  let flag = when.strip_prefix('!').unwrap_or(when);
+  if (1..=64).contains(&flag.len())
+    && flag
+      .chars()
+      .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'))
+  {
+    Ok(())
+  } else {
+    Err(invalid(format!(
+      "{section}: when {when:?} must be a flag name, or ! and one"
+    )))
+  }
 }
 
 /// Validates contributions. Theme colors and icons are read later, by
@@ -635,6 +798,9 @@ pub fn parse(
   limit("viewers", raw.viewers.len(), 10)?;
   limit("languages", raw.languages.len(), 20)?;
   limit("language_servers", raw.language_servers.len(), 10)?;
+  limit("programs", raw.programs.len(), 10)?;
+  limit("view_containers", raw.view_containers.len(), 5)?;
+  limit("colors", raw.colors.len(), 50)?;
 
   let mut contributions = Contributions::default();
   for theme in raw.themes {
@@ -710,16 +876,73 @@ pub fn parse(
     let location = match menu.location.as_str() {
       "editor/context" => MenuLocation::EditorContext,
       "explorer/context" => MenuLocation::ExplorerContext,
+      "view/title" => MenuLocation::ViewTitle,
+      "view/item" => MenuLocation::ViewItem,
       other => {
         return Err(invalid(format!(
-          "menus: location {other:?} must be \"editor/context\" or \"explorer/context\""
+          "menus: location {other:?} must be \"editor/context\", \"explorer/context\", \"view/title\", or \"view/item\""
         )));
       }
     };
     let command = declared("menus", &menu.command)?;
+    let in_view = matches!(location, MenuLocation::ViewTitle | MenuLocation::ViewItem);
+    let view = match (&menu.view, in_view) {
+      (Some(view), true) => {
+        if !raw.views.iter().any(|declared| declared.id == *view) {
+          return Err(invalid(format!(
+            "menus: {command}: view {view:?} is not declared"
+          )));
+        }
+        Some(format!("{extension}.{view}"))
+      }
+      (None, true) => {
+        return Err(invalid(format!(
+          "menus: {command}: a view menu needs the view it's for"
+        )));
+      }
+      (_, false) => {
+        if menu.view.is_some() || menu.contexts.is_some() || menu.inline || menu.when.is_some() {
+          return Err(invalid(format!(
+            "menus: {command}: view, contexts, inline, and when only apply to view menus"
+          )));
+        }
+        None
+      }
+    };
+    if menu.contexts.is_some() && location != MenuLocation::ViewItem {
+      return Err(invalid(format!(
+        "menus: {command}: contexts only apply to \"view/item\""
+      )));
+    }
+    let contexts = menu.contexts.clone().unwrap_or_default();
+    if contexts.len() > MAX_MENU_PATTERNS {
+      return Err(invalid(format!(
+        "menus: {command}: at most {MAX_MENU_PATTERNS} contexts"
+      )));
+    }
+    for context in &contexts {
+      local_id(&format!("menus: {command}: contexts"), context)?;
+    }
+    if let Some(when) = &menu.when {
+      check_when(&format!("menus: {command}"), when)?;
+    }
+    let icon = match &menu.icon {
+      Some(icon) if ACTION_ICONS.contains_key(icon) => Some(icon.clone()),
+      Some(icon) => {
+        return Err(invalid(format!(
+          "menus: {command}: icon {icon:?} must be one of the named icons"
+        )));
+      }
+      None => None,
+    };
+    if menu.inline && icon.is_none() {
+      return Err(invalid(format!(
+        "menus: {command}: an inline button needs an icon"
+      )));
+    }
     let (for_files, for_folders) = match (location, menu.targets) {
       (_, None) => (true, false),
-      (MenuLocation::EditorContext, Some(_)) => {
+      (MenuLocation::EditorContext | MenuLocation::ViewTitle | MenuLocation::ViewItem, Some(_)) => {
         return Err(invalid(format!(
           "menus: {command}: targets only apply to \"explorer/context\""
         )));
@@ -756,6 +979,11 @@ pub fn parse(
       check_pattern(pattern)
         .map_err(|problem| invalid(format!("menus: {command}: pattern {pattern:?} {problem}")))?;
     }
+    if !patterns.is_empty() && in_view {
+      return Err(invalid(format!(
+        "menus: {command}: patterns don't apply to view menus"
+      )));
+    }
     contributions.menus.push(MenuContribution {
       location,
       command,
@@ -763,6 +991,11 @@ pub fn parse(
       for_files,
       for_folders,
       patterns,
+      view,
+      contexts,
+      inline: menu.inline,
+      icon,
+      when: menu.when,
     });
   }
 
@@ -801,9 +1034,43 @@ pub fn parse(
     });
   }
 
+  for container in raw.view_containers {
+    local_id("view_containers", &container.id)?;
+    unique(
+      "view_containers",
+      contributions.view_containers.iter().map(|c| &c.id),
+      &container.id,
+    )?;
+    let icon = container.icon.unwrap_or_else(|| "list".into());
+    if !VIEW_ICONS.contains(&icon.as_str()) {
+      return Err(invalid(format!(
+        "view_containers: icon {icon:?} must be one of {}",
+        VIEW_ICONS.join(", ")
+      )));
+    }
+    contributions
+      .view_containers
+      .push(ViewContainerContribution {
+        full_id: format!("{extension}.{}", container.id),
+        title: text("view_containers", "title", &container.title, 40)?,
+        id: container.id,
+        icon,
+      });
+  }
+
   for view in raw.views {
     local_id("views", &view.id)?;
     unique("views", contributions.views.iter().map(|v| &v.id), &view.id)?;
+    if contributions
+      .view_containers
+      .iter()
+      .any(|c| c.id == view.id)
+    {
+      return Err(invalid(format!(
+        "views: {:?} is also a container's id",
+        view.id
+      )));
+    }
     let icon = view.icon.unwrap_or_else(|| "list".into());
     if !VIEW_ICONS.contains(&icon.as_str()) {
       return Err(invalid(format!(
@@ -811,12 +1078,60 @@ pub fn parse(
         VIEW_ICONS.join(", ")
       )));
     }
+    let section = format!("views.{}", view.id);
+    let container = match view.container {
+      Some(container) => Some(
+        contributions
+          .view_containers
+          .iter()
+          .find(|c| c.id == container)
+          .ok_or_else(|| {
+            invalid(format!(
+              "{section}: container {container:?} is not declared"
+            ))
+          })?
+          .full_id
+          .clone(),
+      ),
+      None => None,
+    };
+    let input = match view.input {
+      Some(input) => Some(ViewInput {
+        placeholder: input
+          .placeholder
+          .map(|placeholder| text(&section, "input.placeholder", &placeholder, 100))
+          .transpose()?,
+        command: input
+          .command
+          .map(|command| declared(&section, &command))
+          .transpose()?,
+      }),
+      None => None,
+    };
     contributions.views.push(ViewContribution {
       full_id: format!("{extension}.{}", view.id),
       title: text("views", "title", &view.title, 40)?,
       id: view.id,
       icon,
+      container,
+      input,
+      on_expand: view
+        .on_expand
+        .map(|command| declared(&section, &command))
+        .transpose()?,
     });
+  }
+  for container in &contributions.view_containers {
+    if !contributions
+      .views
+      .iter()
+      .any(|view| view.container.as_ref() == Some(&container.full_id))
+    {
+      return Err(invalid(format!(
+        "view_containers: {:?} has no views",
+        container.id
+      )));
+    }
   }
 
   for (name, decoration) in raw.decorations {
@@ -1101,6 +1416,66 @@ pub fn parse(
         root_markers: server.root_markers,
       });
   }
+
+  for program in raw.programs {
+    local_id("programs", &program.name)?;
+    unique(
+      "programs",
+      contributions.programs.iter().map(|p| &p.name),
+      &program.name,
+    )?;
+    let section = format!("programs.{}", program.name);
+    let command = program.command.unwrap_or_else(|| program.name.clone());
+    // A program to find on the PATH, or one the extension ships.
+    if command.contains(['/', '\\']) {
+      inside(&section, &command)?;
+    } else {
+      file_name(&section, &command)?;
+    }
+    if let Some(workspace) = &program.workspace {
+      inside(&section, workspace).map_err(|_| {
+        invalid(format!(
+          "{section}: workspace {workspace:?} must be a relative path inside the open folder"
+        ))
+      })?;
+    }
+    contributions.programs.push(ProgramContribution {
+      name: program.name,
+      command,
+      workspace: program.workspace,
+    });
+  }
+
+  for (name, color) in raw.colors {
+    local_id("colors", &name)?;
+    let section = format!("colors.{name}");
+    let check = |field: &str, value: &str| {
+      if is_hex_color(value) {
+        Ok(value.to_lowercase())
+      } else {
+        Err(invalid(format!(
+          "{section}: {field} must be a hex color like \"#e2c08d\", not {value:?}"
+        )))
+      }
+    };
+    let dark = check("dark", &color.dark)?;
+    let light = match &color.light {
+      Some(light) => check("light", light)?,
+      None => dark.clone(),
+    };
+    if color.description.chars().count() > 200 {
+      return Err(invalid(format!(
+        "{section}: description must be at most 200 characters"
+      )));
+    }
+    contributions.colors.push(ColorContribution {
+      id: format!("{extension}.{name}"),
+      name,
+      description: color.description.trim().to_owned(),
+      dark,
+      light,
+    });
+  }
   Ok(contributions)
 }
 
@@ -1197,14 +1572,14 @@ pub fn load_icon_theme(dir: &Path, theme: &mut IconThemeContribution) -> Result<
   Ok(())
 }
 
-/// Checks theme colors: keys must be known tokens, values hex colors.
-/// Also used for the user's `workbench.colors`.
+/// Checks theme colors: keys must be known tokens or extension colors,
+/// values hex colors. Also used for the user's `workbench.colors`.
 pub fn check_theme_colors(
   colors: &BTreeMap<String, String>,
 ) -> Result<BTreeMap<String, String>, String> {
   let mut checked = BTreeMap::new();
   for (token, value) in colors {
-    if !THEME_TOKENS.contains(token) {
+    if !THEME_TOKENS.contains(token) && !is_extension_color(token) {
       return Err(format!("{token:?} is not a theme color"));
     }
     if !is_hex_color(value) {
@@ -1215,6 +1590,27 @@ pub fn check_theme_colors(
     checked.insert(token.clone(), value.to_lowercase());
   }
   Ok(checked)
+}
+
+/// Whether `token` names an extension's color, `<extension id>.<name>`
+/// (such as `ferrite.git.modified`). The extension needn't be loaded: a
+/// theme may color extensions the user hasn't installed.
+pub fn is_extension_color(token: &str) -> bool {
+  let Some((extension, name)) = token.rsplit_once('.') else {
+    return false;
+  };
+  let segment = |segment: &str| {
+    !segment.is_empty()
+      && segment
+        .chars()
+        .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
+  };
+  extension.contains('.')
+    && extension.split('.').all(segment)
+    && (1..=32).contains(&name.len())
+    && name
+      .chars()
+      .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || matches!(c, '-' | '_'))
 }
 
 /// `#rgb`, `#rgba`, `#rrggbb`, or `#rrggbbaa`.
@@ -1483,6 +1879,27 @@ pub(crate) fn inside(section: &str, path: &str) -> Result<PathBuf, ManifestError
 #[cfg(test)]
 mod tests {
   use super::*;
+
+  #[test]
+  fn themes_may_color_extensions() {
+    assert!(is_extension_color("ferrite.git.modified"));
+    assert!(is_extension_color("my-pub.tool.added_2"));
+    assert!(
+      !is_extension_color("git.modified"),
+      "needs a whole extension id"
+    );
+    assert!(!is_extension_color("editor-background"));
+    assert!(!is_extension_color("Ferrite.git.modified"));
+    assert!(!is_extension_color("ferrite.git."));
+    let colors = BTreeMap::from([
+      ("ferrite.git.modified".to_owned(), "#ABCDEF".to_owned()),
+      ("editor-background".to_owned(), "#000".to_owned()),
+    ]);
+    assert_eq!(
+      check_theme_colors(&colors).expect("valid")["ferrite.git.modified"],
+      "#abcdef"
+    );
+  }
 
   #[test]
   fn checks_menu_patterns() {

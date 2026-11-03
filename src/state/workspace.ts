@@ -41,6 +41,11 @@ export function setWorkspace(info: WorkspaceInfo | null): void {
   }
 }
 
+/** Whether the user trusts the open folder changed; its listings stay. */
+export function setWorkspaceTrustInfo(info: WorkspaceInfo): void {
+  workspaceStore.update(state => (state.info?.root === info.root ? { ...state, info } : state))
+}
+
 export async function loadWorkspace(): Promise<void> {
   try {
     setWorkspace(await ipc.getWorkspace())

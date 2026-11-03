@@ -6,8 +6,9 @@
 //! is turned into a component on load) implementing the `extension` world
 //! of `ferrite-extension-api`. Its only capabilities are the functions of
 //! that interface: there is no WASI, so no network, environment, or clock
-//! access, and files only through the `files` interface (the open folder's,
-//! with the user's permission).
+//! access, files only through the `files` interface (the open folder's,
+//! with the user's permission), and programs only those its manifest
+//! declares, with the user's permission, in a trusted folder.
 //!
 //! - **Permissions** requested in the manifest must be granted by the user
 //!   before the extension starts, and are checked on every call.
@@ -30,14 +31,19 @@ mod host;
 pub mod icons;
 pub mod keys;
 pub mod manifest;
+pub mod marks;
 mod permissions;
 pub mod preview;
+mod processes;
+pub mod prompts;
 mod readme;
 mod runtime;
 pub mod storage;
 mod usage;
+mod views;
 pub mod webview;
 mod worker;
+mod workspace;
 
 /// Host bindings generated from the WIT interface.
 mod bindings {
@@ -59,10 +65,12 @@ pub use api::{MAX_DIAGNOSTICS, MAX_EDITS, MAX_READ_BYTES, MAX_READ_LINES};
 pub use config::{ConfigProperty, ConfigType, ConfigValue};
 pub use contributions::Contributions;
 pub use files::{MAX_FILE_BYTES, MAX_LISTED_FILES};
-pub use host::{CommandTicket, ExtensionHost, viewer_id};
+pub use host::{CommandTicket, ExtensionHost, MAX_WATCHES, viewer_id};
 pub use manifest::{MANIFEST_FILE, Manifest, ManifestError};
+pub use marks::{ExtensionMarks, FileMark};
 pub use permissions::{Decision, Permission};
 pub use preview::{PreviewContent, PreviewInfo};
+pub use prompts::{Prompt, PromptKind, PromptReply};
 pub use usage::ResourceUsage;
 
 /// What the host needs from the application.
@@ -84,6 +92,18 @@ pub trait Embedder: Send + Sync + 'static {
     let _ = document;
     Err("documents can't be saved here".into())
   }
+  /// Sets one of an extension's settings in the user's settings (`None`
+  /// removes it), with a value already checked against its declaration.
+  /// Called from extension threads.
+  fn set_setting(
+    &self,
+    extension: &str,
+    key: &str,
+    value: Option<toml::Value>,
+  ) -> Result<(), String> {
+    let _ = (extension, key, value);
+    Err("settings can't be changed here".into())
+  }
 }
 
 /// The folder open in the editor.
@@ -93,6 +113,8 @@ pub struct OpenFolder {
   pub root: PathBuf,
   /// The user's `files.exclude` setting.
   pub exclude: ferrite_workspace::ExcludeFilter,
+  /// Whether the user trusts it: programs run only in trusted folders.
+  pub trusted: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -161,6 +183,19 @@ pub enum Notification {
     value: Option<String>,
     source: Option<String>,
   },
+  /// Extensions' explorer marks changed.
+  FileMarksChanged,
+  /// An extension asked the user to trust the open folder.
+  TrustRequested {
+    /// The extension's id.
+    extension: String,
+  },
+  /// An extension asked to open a file in the editor.
+  OpenFile { path: PathBuf },
+  /// An extension asks the user something; it replaces any prompt showing.
+  Prompt(Prompt),
+  /// A prompt was withdrawn (its extension stopped).
+  PromptClosed(u64),
 }
 
 /// What a status bar item shows.
@@ -199,12 +234,67 @@ pub struct ViewEntry {
   pub expanded: bool,
   pub command: Option<String>,
   pub argument: Option<String>,
+  /// (1.7)
+  pub icon: Option<ItemIcon>,
+  pub mark: Option<ItemMark>,
+  /// Which `view/item` menus apply to it.
+  pub context: Option<String>,
+  /// It can be opened even with no children listed: opening it asks the
+  /// extension for them.
+  pub expandable: bool,
+}
+
+/// A view item's icon. (1.7)
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum ItemIcon {
+  /// One of the named icons.
+  Named { name: String },
+  /// The file icon theme's icon for a file with this path or name.
+  File { path: String },
+  /// The file icon theme's icon for a folder.
+  Folder { path: String },
+}
+
+/// How a view item looks besides its label. (1.7)
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ItemMark {
+  pub badge: Option<String>,
+  /// A color's theme token, `<extension id>.<name>`.
+  pub color: Option<String>,
+  pub strikethrough: bool,
+  pub faded: bool,
+}
+
+/// Shown in a view instead of its items while it has none. (1.7)
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Welcome {
+  pub text: String,
+  pub buttons: Vec<WelcomeButton>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WelcomeButton {
+  pub label: String,
+  pub command: String,
+  pub argument: Option<String>,
 }
 
 /// The content of an extension view.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ViewContent {
+  /// (1.7)
+  pub welcome: Option<Welcome>,
+  /// A count shown on its header and activity bar entry; 0 shows none.
+  pub badge: u32,
+  /// What its menus' `when` test.
+  pub flags: Vec<String>,
+  /// The text in its text box.
+  pub input: String,
   pub message: Option<String>,
   pub items: Vec<ViewEntry>,
 }
@@ -259,6 +349,9 @@ pub struct HostOptions {
   pub permissions_file: Option<PathBuf>,
   /// User configuration, by extension id.
   pub settings: BTreeMap<String, toml::Table>,
+  /// Paths the user set for extensions' programs, by
+  /// `<extension id>.<program name>`.
+  pub programs: BTreeMap<String, String>,
   pub limits: Limits,
   /// Where extensions' storage and webview tabs' states are kept; `None`
   /// keeps them in memory. Read when the host is created.

@@ -43,3 +43,20 @@
 .activitybar__icon {
   display: grid;
 }
+
+/* A count, such as a view's changes. */
+.activitybar__badge {
+  position: absolute;
+  right: 6px;
+  bottom: 6px;
+  min-width: 16px;
+  padding: 0 4px;
+  border-radius: 8px;
+  background: var(--color-button-background);
+  color: var(--color-button-foreground);
+  font-size: 9px;
+  font-weight: 600;
+  line-height: 16px;
+  text-align: center;
+  pointer-events: none;
+}

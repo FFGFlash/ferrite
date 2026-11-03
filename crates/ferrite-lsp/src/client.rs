@@ -10,7 +10,7 @@
 
 use std::collections::HashMap;
 use std::io::{BufRead, BufReader};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::process::{ChildStdin, Command, Stdio};
 use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError, mpsc};
@@ -33,8 +33,9 @@ use serde::de::DeserializeOwned;
 use serde_json::{Value, json};
 
 use crate::convert::{PositionEncoding, path_to_uri};
+use ferrite_process::{ProcessGroup as ServerProcess, resolve_program};
+
 use crate::framing::{read_message, write_message};
-use crate::process::ServerProcess;
 
 /// How long a server may take to answer `initialize`.
 const INITIALIZE_TIMEOUT: Duration = Duration::from_secs(60);
@@ -624,27 +625,6 @@ fn symbol_tags() -> TagSupport<SymbolTag> {
   TagSupport {
     value_set: vec![SymbolTag::DEPRECATED],
   }
-}
-
-/// Finds `program` on the `PATH`, trying the usual executable extensions on
-/// Windows (where npm installs servers as `.cmd` scripts).
-fn resolve_program(program: &str) -> PathBuf {
-  let path = Path::new(program);
-  if path.components().count() > 1 || !cfg!(windows) {
-    return path.to_path_buf();
-  }
-  let extensions = [".exe", ".cmd", ".bat", ".com"];
-  if let Some(dirs) = std::env::var_os("PATH") {
-    for dir in std::env::split_paths(&dirs) {
-      for extension in extensions {
-        let candidate = dir.join(format!("{program}{extension}"));
-        if candidate.is_file() {
-          return candidate;
-        }
-      }
-    }
-  }
-  path.to_path_buf()
 }
 
 #[cfg(test)]

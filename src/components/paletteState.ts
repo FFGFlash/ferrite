@@ -8,11 +8,15 @@ export interface QuickPickItem {
   run: () => void
 }
 
-/** A list to choose from in the palette, such as encodings. */
+/** A list to choose from in the palette, such as encodings, or a line of text to type. */
 export interface QuickPick {
   /** Says what's being chosen; the input's placeholder and accessible name. */
   placeholder: string
   items: readonly QuickPickItem[]
+  /** Asks for text instead of a choice: Enter accepts what's typed. */
+  input?: { value: string; accept: (text: string) => void }
+  /** Runs when the palette closes without a choice. */
+  onCancel?: () => void
 }
 
 export interface PaletteState {
@@ -38,7 +42,16 @@ export function openPalette(initial: string): void {
 
 /** Shows `pick` in the palette; typing filters its items. */
 export function openQuickPick(pick: QuickPick): void {
-  paletteStore.update(state => ({ open: true, initial: '', session: state.session + 1, pick }))
+  const replaced = paletteStore.get()
+  if (replaced.open && replaced.pick?.onCancel) {
+    replaced.pick.onCancel()
+  }
+  paletteStore.update(state => ({
+    open: true,
+    initial: pick.input?.value ?? '',
+    session: state.session + 1,
+    pick,
+  }))
 }
 
 export function closePalette(): void {

@@ -129,6 +129,10 @@ function PaletteDialog({ initial, pick }: { initial: string; pick: QuickPick | n
 
   const dismiss = (restoreFocus: boolean) => {
     closePalette()
+    if (!chosen.current) {
+      chosen.current = true
+      pick?.onCancel?.()
+    }
     if (restoreFocus && returnFocus.current instanceof HTMLElement) {
       // Not scrolled to: an editor's input sits at its cursor, which choosing may move.
       returnFocus.current.focus({ preventScroll: true })
@@ -161,7 +165,14 @@ function PaletteDialog({ initial, pick }: { initial: string; pick: QuickPick | n
         break
       case 'Enter':
         event.preventDefault()
-        choose(items[selected])
+        if (pick?.input) {
+          const accept = pick.input.accept
+          chosen.current = true
+          dismiss(true)
+          accept(value)
+        } else {
+          choose(items[selected])
+        }
         break
       case 'Escape':
         event.preventDefault()
@@ -242,6 +253,12 @@ function usePaletteItems(
   const light = useStore(themeKind) === 'light'
 
   return useMemo((): Items => {
+    if (pick?.input) {
+      return {
+        items: [{ key: 'input', label: 'Press Enter to confirm, or Escape to cancel.' }],
+        empty: null,
+      }
+    }
     if (pick) {
       return {
         items: fuzzyFilter(pick.items, value, item => item.label).map(({ item, match }, index) => ({

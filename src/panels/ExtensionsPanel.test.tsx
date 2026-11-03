@@ -60,6 +60,9 @@ const tidy: ExtensionStatus = {
     viewers: [],
     languages: [],
     languageServers: [],
+    programs: [],
+    colors: [],
+    viewContainers: [],
   },
   storedBytes: 0,
   usage: {

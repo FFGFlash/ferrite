@@ -51,13 +51,215 @@
 }
 
 .extension-view__label {
+  flex: 0 1 auto;
+  min-width: 3ch;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
+/* Gives way before the label does. */
 .extension-view__description {
+  flex: 0 100 auto;
+  min-width: 0;
   overflow: hidden;
   color: var(--color-text-muted);
   font-size: var(--font-size-ui-small);
   text-overflow: ellipsis;
+}
+
+.extension-view__icon {
+  display: inline-flex;
+  flex: none;
+}
+
+.extension-view__label[data-marked] {
+  color: var(--view-mark-color);
+}
+
+.extension-view__label[data-strikethrough] {
+  text-decoration: line-through;
+}
+
+.extension-view__row[data-faded] {
+  opacity: 0.6;
+}
+
+.extension-view__row--pending {
+  color: var(--color-text-muted);
+  cursor: default;
+}
+
+/* A row's buttons: shown while it's hovered, focused, or selected. */
+.extension-view__actions {
+  display: none;
+  flex: none;
+  gap: 2px;
+  margin-left: auto;
+}
+
+.extension-view__row:hover .extension-view__actions,
+.extension-view__row[aria-selected='true'] .extension-view__actions,
+.extension-view__tree:focus-visible .extension-view__row[data-focused] .extension-view__actions {
+  display: flex;
+}
+
+.extension-view__action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-control);
+  background: none;
+  color: inherit;
+  cursor: pointer;
+}
+
+.extension-view__action:hover {
+  background: var(--color-control-hover-background);
+}
+
+.extension-view__mark {
+  flex: none;
+  width: 14px;
+  margin-left: auto;
+  font-size: var(--font-size-ui-small);
+  text-align: center;
+}
+
+.extension-view__actions + .extension-view__mark {
+  margin-left: var(--space-1);
+}
+
+.extension-view__mark[data-marked] {
+  color: var(--view-mark-color);
+}
+
+.extension-view__badge {
+  flex: none;
+  min-width: 16px;
+  padding: 0 4px;
+  border-radius: 8px;
+  background: var(--color-button-background);
+  color: var(--color-button-foreground);
+  font-size: 10px;
+  line-height: 16px;
+  text-align: center;
+}
+
+.extension-view__input {
+  padding: var(--space-1) var(--space-2) var(--space-2) var(--space-4);
+}
+
+.extension-view__textarea {
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
+  resize: none;
+  padding: var(--space-1) var(--space-2);
+  border: 1px solid var(--color-input-border);
+  border-radius: var(--radius-control);
+  outline: none;
+  background: var(--color-input-background);
+  color: var(--color-text);
+  font: inherit;
+  line-height: 1.4;
+  /* Grows with its text, up to 6 lines, then scrolls. */
+  field-sizing: content;
+  max-height: calc(6lh + 2 * var(--space-1) + 2px);
+  overflow-y: auto;
+  scrollbar-width: thin;
+}
+
+.extension-view__textarea:focus {
+  border-color: var(--color-focus-ring);
+}
+
+.extension-view__welcome {
+  padding: var(--space-2) var(--space-4);
+  line-height: 1.4;
+}
+
+.extension-view__welcome p {
+  margin: 0 0 var(--space-2);
+  color: var(--color-text-muted);
+}
+
+.extension-view__welcome-button {
+  display: block;
+  width: 100%;
+}
+
+/* A container's sections share its height; each scrolls on its own. */
+.extension-container {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+
+.extension-section {
+  display: flex;
+  flex-direction: column;
+  flex: none;
+  min-height: 0;
+  border-top: 1px solid var(--color-border);
+}
+
+.extension-section:first-child {
+  border-top: none;
+}
+
+.extension-section[data-open] {
+  flex: 1 1 0;
+}
+
+.extension-section__header {
+  display: flex;
+  align-items: center;
+  flex: none;
+  height: 22px;
+  padding-right: var(--space-1);
+}
+
+.extension-section__toggle {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: var(--space-1);
+  min-width: 0;
+  height: 100%;
+  padding: 0 var(--space-1);
+  border: none;
+  background: none;
+  color: var(--color-text);
+  font: inherit;
+  font-size: var(--font-size-ui-small);
+  font-weight: 600;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+.extension-section__toggle:focus-visible {
+  outline: 1px solid var(--color-focus-ring);
+  outline-offset: -1px;
+}
+
+.extension-section__title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.extension-section__actions {
+  display: flex;
+  flex: none;
+  gap: 2px;
+}
+
+.extension-section__body {
+  flex: 1;
+  overflow: auto;
 }

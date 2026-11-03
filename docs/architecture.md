@@ -44,7 +44,8 @@ Tauri, and nothing in Rust depends on the frontend.
 | `ferrite-workspace`      | Reading and atomically writing files, directory listings with ignore rules, the Go to File index, find in files, file watching, backups of unsaved documents                                                                     | `ferrite-text`, `ignore`, `globset`, `nucleo-matcher`, `notify-debouncer-mini` |
 | `ferrite-core`           | `Editor` (open documents), `Document`, selections, `EditorOp`s (including find/replace), undo history, dirty state, reload from disk, incremental viewport updates. No I/O.                                                      | `ferrite-text`, `ferrite-workspace` (for `FileStamp`)                          |
 | `ferrite-syntax`         | The language registry of extensions' WebAssembly Tree-sitter grammars (none built in); language detection, incremental and interruptible parsing with injected layers, per-line highlight spans                                  | `ferrite-text`, `tree-sitter` (with `wasm`), grammar crates                    |
-| `ferrite-lsp`            | Language server processes and JSON-RPC over stdio, UTF-8/UTF-16 position conversion, incremental document changes from the edit log, server configuration and workspace roots, a scripted test server                            | `ferrite-text`, `lsp-types`, `serde_json`                                      |
+| `ferrite-lsp`            | Language server processes and JSON-RPC over stdio, UTF-8/UTF-16 position conversion, incremental document changes from the edit log, server configuration and workspace roots, a scripted test server                            | `ferrite-process`, `ferrite-text`, `lsp-types`, `serde_json`                   |
+| `ferrite-process`        | Starting programs (language servers, extensions' programs) in a process group with no console window, so stopping one stops what it started; finding programs on the `PATH`                                                      | `win32job` (Windows), `rustix` (Unix)                                          |
 | `ferrite-extension-api`  | The extension API: the WIT interface (`wit/extension.wit`) and the Rust bindings extensions build against (`Guest`, `export_extension!`). Standalone, so extensions outside the repository can use it                            | `wit-bindgen`                                                                  |
 | `ferrite-extension-host` | Extension discovery, manifest validation, permission decisions, a worker thread and bounded event queue per extension, Wasmtime with deadlines and memory limits, the host side of the API (validated reads, edits, diagnostics) | `ferrite-core`, `ferrite-text`, `wasmtime`, `wit-component`, `semver`, `toml`  |
 | `ferrite-tasks`          | Bounded background scheduler (priorities, keyed replacement, cancellation) and timing histograms                                                                                                                                 | `tracing`                                                                      |
@@ -693,6 +694,29 @@ connects it to the editor, settings, and frontend. The developer guide is
   not in `.git`. A file open in the editor goes through its document: reads include unsaved
   changes, and writes become one undoable change, saved (`Embedder::save`, which never asks or
   overwrites a file changed on disk) only if the document had no unsaved changes.
+- **Programs** (API 1.6, `processes.rs`; [ADR 0026](adr/0026-programs-trust-and-explorer-marks.md)).
+  An extension runs only the programs its manifest declares (`[[programs]]`), with the
+  `processes` permission, while the open folder is trusted. Each runs in a `ferrite-process`
+  group with its output collected on threads (32 MiB). `run` waits within the call's deadline;
+  `spawn` returns at once, and a thread waits and queues the result as a background command
+  (`Event::background`, which a full queue still takes). The worker's `ProcessTable` stops what's
+  left when the instance ends.
+- **Watching** (`workspace.rs`). Watches inside the open folder use the app's workspace watcher
+  (`ExtensionHost::files_changed`); a path outside it gets a `WorkspaceWatcher` of its own.
+  Changes for a watch whose command is still queued merge into it.
+- **Explorer marks** (`marks.rs`) are kept per extension, replaced whole, and fetched by the
+  frontend on `FileMarksChanged`; colors are sent as theme tokens (`<extension id>.<name>`) the
+  frontend resolves for the theme.
+- **Views and prompts** (API 1.7, `views.rs`, `prompts.rs`;
+  [ADR 0027](adr/0027-tree-views-and-prompts.md)). Tree items, children loaded on demand, text
+  boxes, welcome messages, badges, and flags live in each view's `ViewContent`; the frontend
+  fetches it once per change for a view's header and items (`src/state/views.ts`). Commands from
+  view menus carry the selection (`Payload::Selection`), `on_expand` the item
+  (`Payload::Expand`), and a prompt's command the answer (`Payload::Answer`). One prompt is
+  pending at a time; a new one cancels it.
+- **Workspace Trust** (`src-tauri/src/trust.rs`). The app decides whether the open folder is
+  trusted (`OpenFolder::trusted`), asks the user, and gates language servers itself; trust
+  changes restart language servers and run extensions' `on_folder_changed` commands.
 - **Limits and failures:**
   - Memory, stack, and table limits come from a `ResourceLimiter`. Besides each instance's limit
     (128 MiB), all running extensions together may use 512 MiB: instances reserve what their

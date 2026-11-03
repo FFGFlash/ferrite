@@ -25,6 +25,9 @@ pub enum Permission {
   /// Let its webview pages load content and code from the web (API 1.5).
   /// Enforced by the pages' content security policy.
   Network,
+  /// Run the programs the manifest declares (`processes` interface, API
+  /// 1.6), in trusted folders.
+  Processes,
 }
 
 impl Permission {
@@ -36,6 +39,7 @@ impl Permission {
       Self::FilesWrite => "Change and create files in the open folder",
       Self::LanguageServers => "Run language servers, which are programs on this computer",
       Self::Network => "Let its pages load content and code from the web",
+      Self::Processes => "Run programs on this computer, in folders you trust",
     }
   }
 }

@@ -16,8 +16,9 @@ use ferrite_extension_host::icons::IconTheme;
 use ferrite_extension_host::preview::PreviewElement;
 use ferrite_extension_host::webview::WebviewInfo;
 use ferrite_extension_host::{
-  Embedder, ExtensionHost, ExtensionStatus, HostOptions, Limits, MANIFEST_FILE, Notification,
-  OpenFolder, Permission, PreviewContent, PreviewInfo, StatusItem, ViewContent,
+  Embedder, ExtensionHost, ExtensionMarks, ExtensionStatus, HostOptions, Limits, MANIFEST_FILE,
+  Notification, OpenFolder, Permission, PreviewContent, PreviewInfo, PromptReply, StatusItem,
+  ViewContent,
 };
 use serde::{Serialize, Serializer};
 use tauri::{AppHandle, Manager, State, WebviewWindow};
@@ -139,6 +140,7 @@ impl Embedder for AppEmbedder {
   fn open_folder(&self) -> Option<OpenFolder> {
     let root = self.app.state::<WorkspaceState>().root()?;
     Some(OpenFolder {
+      trusted: crate::trust::trust_of(&self.app, &root) == crate::trust::Trust::Trusted,
       root,
       exclude: self.app.state::<SettingsState>().get().exclude_filter(),
     })
@@ -146,6 +148,15 @@ impl Embedder for AppEmbedder {
 
   fn save(&self, document: DocumentId) -> Result<(), String> {
     crate::editor::save_quietly(&self.app, document)
+  }
+
+  fn set_setting(
+    &self,
+    extension: &str,
+    key: &str,
+    value: Option<toml::Value>,
+  ) -> Result<(), String> {
+    settings::set_extension_setting(&self.app, extension, key, value).map_err(|error| error.message)
   }
 
   // Called with the editor lock possibly held, so this only emits events.
@@ -218,6 +229,14 @@ impl Embedder for AppEmbedder {
         value,
         source,
       },
+      Notification::FileMarksChanged => AppEvent::ExtensionFileMarksChanged,
+      Notification::OpenFile { path } => AppEvent::OpenFile {
+        path: path.display().to_string(),
+        active: true,
+      },
+      Notification::Prompt(prompt) => AppEvent::ExtensionPrompt { prompt },
+      Notification::PromptClosed(id) => AppEvent::ExtensionPromptClosed { id },
+      Notification::TrustRequested { extension } => AppEvent::WorkspaceTrustRequested { extension },
     };
     events::emit(&self.app, event);
   }
@@ -250,6 +269,7 @@ fn options(app: &AppHandle, settings: &Settings) -> HostOptions {
     },
     permissions_file: dir.map(|dir| dir.join(PERMISSIONS_FILE)),
     settings: settings.extensions.settings.clone(),
+    programs: settings.extensions.programs.clone(),
     limits: Limits::default(),
     storage_dir: app
       .path()
@@ -357,6 +377,80 @@ pub fn extensions_icon_theme(state: State<'_, ExtensionsState>, id: String) -> O
     .host()
     .and_then(|host| host.icon_theme(&id))
     .map(|theme| (*theme).clone())
+}
+
+/// Runs a command from a view's menu or button for the selected items
+/// (their arguments) and waits for it. `argument` is the clicked item's.
+#[tauri::command]
+pub async fn extension_run_view_command(
+  app: AppHandle,
+  command: String,
+  argument: Option<String>,
+  selection: Vec<String>,
+) -> Result<(), CommandError> {
+  let ticket = {
+    let state = app.state::<ExtensionsState>();
+    host(&state)?
+      .run_view_command(&command, argument, selection)
+      .map_err(|message| CommandError::new("extension", message))?
+  };
+  wait(ticket).await
+}
+
+/// The user opened a view item with no children listed: asks its
+/// extension for them, and waits.
+#[tauri::command]
+pub async fn extension_view_expand(
+  app: AppHandle,
+  view: String,
+  item: String,
+) -> Result<(), CommandError> {
+  let ticket = {
+    let state = app.state::<ExtensionsState>();
+    host(&state)?
+      .expand_view_item(&view, &item)
+      .map_err(|message| CommandError::new("extension", message))?
+  };
+  wait(ticket).await
+}
+
+async fn wait(ticket: ferrite_extension_host::CommandTicket) -> Result<(), CommandError> {
+  tauri::async_runtime::spawn_blocking(move || ticket.wait())
+    .await
+    .map_err(CommandError::internal)?
+    .map_err(|message| CommandError::new("extension", message))
+}
+
+/// The text in a view's text box changed.
+#[tauri::command]
+pub fn extension_view_input(state: State<'_, ExtensionsState>, view: String, text: String) {
+  if let Some(host) = state.host() {
+    host.set_view_input(&view, text);
+  }
+}
+
+/// Views' badges, by full view id.
+#[tauri::command]
+pub fn extension_view_badges(state: State<'_, ExtensionsState>) -> BTreeMap<String, u32> {
+  state
+    .host()
+    .map_or_else(BTreeMap::new, ExtensionHost::view_badges)
+}
+
+/// The user answered an extension's prompt, or closed it.
+#[tauri::command]
+pub fn extension_prompt_answer(state: State<'_, ExtensionsState>, id: u64, reply: PromptReply) {
+  if let Some(host) = state.host() {
+    host.prompt_answered(id, reply);
+  }
+}
+
+/// Every running extension's explorer marks.
+#[tauri::command]
+pub fn extension_file_marks(state: State<'_, ExtensionsState>) -> Vec<ExtensionMarks> {
+  state
+    .host()
+    .map_or_else(Vec::new, ExtensionHost::file_marks)
 }
 
 #[tauri::command]

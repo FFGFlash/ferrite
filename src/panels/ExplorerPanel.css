@@ -95,7 +95,12 @@
   background: var(--color-list-drop-background);
 }
 
-/* After the ignored color: a problem shows even in an ignored file. */
+/* An extension's mark, such as a Git status: after the ignored color. */
+.explorer-tree__row[data-marked] {
+  color: var(--explorer-mark-color);
+}
+
+/* After the ignored and mark colors: a problem shows even in an ignored file. */
 .explorer-tree__row[data-problems='error'] {
   color: var(--color-list-error-foreground);
 }
@@ -104,12 +109,19 @@
   color: var(--color-list-warning-foreground);
 }
 
-.explorer-tree__problems {
+/* Problem counts, then marks' badges, at the end of the row. */
+.explorer-tree__badges {
+  display: flex;
   flex: none;
+  gap: var(--space-1);
   margin-left: auto;
   padding-left: var(--space-2);
   font-size: var(--font-size-ui-small);
   font-variant-numeric: tabular-nums;
+}
+
+.explorer-tree__mark {
+  color: var(--explorer-mark-color, inherit);
 }
 
 .explorer-tree__row--input {

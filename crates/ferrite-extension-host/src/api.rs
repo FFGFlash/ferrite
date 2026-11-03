@@ -29,9 +29,10 @@ use crate::host::{Shared, StoredDiagnostic};
 use crate::manifest::Manifest;
 use crate::permissions::Permission;
 use crate::preview::{self, MAX_KEY_BYTES, MAX_TITLE_CHARS, PreviewInfo};
+use crate::processes::ProcessTable;
 use crate::runtime::StoreState;
 use crate::storage::StorageError;
-use crate::worker::Setup;
+use crate::worker::{Payload, Setup};
 use crate::{Embedder, Notification, Severity, StatusContent, ViewEntry};
 
 /// Most lines returned by one `read-lines` call.
@@ -98,15 +99,35 @@ pub struct ApiContext {
   config: Arc<RwLock<BTreeMap<String, ConfigValue>>>,
   logs: RateLimit,
   messages: RateLimit,
+  /// Which start of the extension this is.
+  generation: u64,
+  processes: Arc<ProcessTable>,
   /// The argument of the command being run.
   pub argument: Option<String>,
-  /// The webview message the running command was run for.
-  pub message: Option<WebviewMessage>,
+  /// What the running command was run for: a webview message, a finished
+  /// program, or file changes.
+  pub payload: Payload,
 }
 
 impl ApiContext {
   pub fn extension_id(&self) -> &str {
     &self.id
+  }
+
+  pub(crate) fn manifest(&self) -> &Manifest {
+    &self.manifest
+  }
+
+  pub(crate) fn generation(&self) -> u64 {
+    self.generation
+  }
+
+  pub(crate) fn processes(&self) -> Arc<ProcessTable> {
+    self.processes.clone()
+  }
+
+  pub(crate) fn weak_shared(&self) -> Weak<Shared> {
+    self.shared.clone()
   }
 }
 
@@ -121,8 +142,10 @@ impl ApiContext {
       config: setup.config.clone(),
       logs: RateLimit::new(200.0, 50.0),
       messages: RateLimit::new(10.0, 1.0),
+      generation: setup.generation,
+      processes: setup.processes.clone(),
       argument: None,
-      message: None,
+      payload: Payload::None,
     }
   }
 
@@ -496,6 +519,43 @@ impl Host for StoreState {
       .notify(Notification::DiagnosticsChanged(DocumentId::from_raw(id)));
     Ok(())
   }
+
+  fn set_configuration(
+    &mut self,
+    key: String,
+    value: Option<WitConfigValue>,
+  ) -> Result<(), ApiError> {
+    let api = &self.api;
+    let property = api
+      .manifest
+      .configuration
+      .get(&key)
+      .ok_or_else(|| ApiError::InvalidArgument(format!("no setting {key:?} is declared")))?;
+    let value = value.map(|value| match value {
+      WitConfigValue::Boolean(b) => toml::Value::Boolean(b),
+      WitConfigValue::Integer(i) => toml::Value::Integer(i),
+      WitConfigValue::Number(f) => toml::Value::Float(f),
+      WitConfigValue::Text(s) => toml::Value::String(s),
+    });
+    let effective = match &value {
+      Some(value) => property
+        .check(value)
+        .map_err(|problem| ApiError::InvalidArgument(format!("{key} {problem}")))?,
+      None => property.default.clone(),
+    };
+    api
+      .shared()?
+      .embedder
+      .set_setting(&api.id, &key, value)
+      .map_err(ApiError::InvalidArgument)?;
+    // In effect at once, before the settings file is read again.
+    api
+      .config
+      .write()
+      .unwrap_or_else(std::sync::PoisonError::into_inner)
+      .insert(key, effective);
+    Ok(())
+  }
 }
 
 /// Most items in one view.
@@ -504,7 +564,7 @@ pub const MAX_VIEW_ITEMS: usize = 5_000;
 pub const MAX_DECORATIONS: usize = 10_000;
 
 impl ApiContext {
-  fn own_command(&self, command: Option<&String>) -> Result<(), ApiError> {
+  pub(crate) fn own_command(&self, command: Option<&String>) -> Result<(), ApiError> {
     match command {
       Some(command) if !self.manifest.declares_command(command) => Err(ApiError::InvalidArgument(
         format!("{command:?} is not one of this extension's commands"),
@@ -590,7 +650,7 @@ impl ApiContext {
     }
   }
 
-  fn view(&self, view: &str) -> Result<String, ApiError> {
+  pub(crate) fn view_id(&self, view: &str) -> Result<String, ApiError> {
     self
       .manifest
       .contributions
@@ -625,7 +685,7 @@ impl WorkbenchHost for StoreState {
 
   fn set_view_items(&mut self, view: String, items: Vec<ViewItem>) -> Result<(), ApiError> {
     let api = &self.api;
-    let full_id = api.view(&view)?;
+    let full_id = api.view_id(&view)?;
     if items.len() > MAX_VIEW_ITEMS {
       return Err(ApiError::TooLarge(format!(
         "a view can show at most {MAX_VIEW_ITEMS} items"
@@ -663,6 +723,10 @@ impl WorkbenchHost for StoreState {
         expanded: item.expanded,
         command: item.command,
         argument: item.argument.map(|text| cut(&text, 4_000)),
+        icon: None,
+        mark: None,
+        context: None,
+        expandable: false,
       });
     }
     api
@@ -672,7 +736,7 @@ impl WorkbenchHost for StoreState {
   }
 
   fn set_view_message(&mut self, view: String, message: Option<String>) -> Result<(), ApiError> {
-    let full_id = self.api.view(&view)?;
+    let full_id = self.api.view_id(&view)?;
     let message = message.map(|text| cut(&text, 500));
     self
       .api
@@ -682,7 +746,7 @@ impl WorkbenchHost for StoreState {
   }
 
   fn show_view(&mut self, view: String) -> Result<(), ApiError> {
-    let full_id = self.api.view(&view)?;
+    let full_id = self.api.view_id(&view)?;
     self
       .api
       .shared()?
@@ -916,7 +980,10 @@ impl WebviewsHost for StoreState {
   }
 
   fn message(&mut self) -> Option<WebviewMessage> {
-    self.api.message.clone()
+    match &self.api.payload {
+      Payload::Message(message) => Some(message.clone()),
+      _ => None,
+    }
   }
 }
 

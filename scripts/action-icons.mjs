@@ -58,6 +58,12 @@ const icons = {
   'chevron-right': 'chevron-right',
   'chevron-up': 'chevron-up',
   'chevron-down': 'chevron-down',
+  'check': 'check',
+  'undo': 'undo-2',
+  'list-tree': 'list-tree',
+  'list-flat': 'list',
+  'branch': 'git-branch',
+  'commit': 'git-commit-horizontal',
 }
 
 const num = value => Number(value)

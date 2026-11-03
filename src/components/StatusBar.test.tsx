@@ -4,6 +4,8 @@ import { describe, expect, it, vi } from 'vitest'
 import { registerCommands } from '../commands/registry'
 import { editorStatus } from '../state/editorStatus'
 import { statusItemsStore } from '../state/extensions'
+import { trustPrompt } from '../state/trust'
+import { workspaceStore } from '../state/workspace'
 import { StatusBar } from './StatusBar'
 
 describe('StatusBar', () => {
@@ -72,5 +74,24 @@ describe('StatusBar', () => {
     expect(screen.getByRole('button', { name: /^Language: SVG\./ })).toHaveTextContent('SVG')
     unregister()
     editorStatus.set(null)
+  })
+
+  it('shows Restricted Mode while the folder is not trusted', async () => {
+    const user = userEvent.setup()
+    const info = { root: '/w', name: 'w', trust: 'untrusted' as const }
+    workspaceStore.set({ info, listings: new Map(), indexing: false })
+    render(<StatusBar appInfo={null} />)
+    await user.click(screen.getByRole('button', { name: 'Restricted Mode' }))
+    expect(trustPrompt.get()).toEqual({ requestedBy: null })
+    act(() =>
+      workspaceStore.set({
+        info: { ...info, trust: 'trusted' },
+        listings: new Map(),
+        indexing: false,
+      }),
+    )
+    expect(screen.queryByRole('button', { name: 'Restricted Mode' })).toBeNull()
+    trustPrompt.set(null)
+    workspaceStore.set({ info: null, listings: new Map(), indexing: false })
   })
 })

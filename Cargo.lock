@@ -1271,6 +1271,7 @@ version = "0.1.0"
 dependencies = [
  "base64 0.23.1",
  "ferrite-core",
+ "ferrite-process",
  "ferrite-text",
  "ferrite-workspace",
  "getrandom 0.4.3",
@@ -1291,13 +1292,21 @@ dependencies = [
 name = "ferrite-lsp"
 version = "0.1.0"
 dependencies = [
+ "ferrite-process",
  "ferrite-text",
  "lsp-types",
- "rustix",
  "serde",
  "serde_json",
  "tempfile",
  "thiserror 2.0.21",
+ "tracing",
+]
+
+[[package]]
+name = "ferrite-process"
+version = "0.1.0"
+dependencies = [
+ "rustix",
  "tracing",
  "win32job",
 ]

@@ -11,7 +11,9 @@ import {
   type ResolvedItem,
 } from '../dock/items'
 import { groups } from '../dock/model'
+import { extensionsStore } from '../state/extensions'
 import { useStore } from '../state/store'
+import { sectionsOf, viewBadges } from '../state/views'
 import { useDropTarget } from './drag'
 import './ActivityBar.css'
 
@@ -26,6 +28,19 @@ export function ActivityBar() {
   const layout = useStore(dockStore)
   const views = useViews()
   const resolve = useResolver()
+  const badges = useStore(viewBadges)
+  const extensions = useStore(extensionsStore)
+  /** A view's badge, or the sum of a container's sections'. */
+  const badgeOf = (resolved: ResolvedItem) => {
+    if (resolved.kind !== 'view') {
+      return 0
+    }
+    const sections = sectionsOf(resolved.view.id, extensions)
+    return (sections.length > 0 ? sections : [resolved.view.id]).reduce(
+      (sum, view) => sum + (badges[view] ?? 0),
+      0,
+    )
+  }
   const [dropping, setDropping] = useState(false)
   const dropRef = useDropTarget<HTMLElement>({
     over: drag => {
@@ -52,21 +67,29 @@ export function ActivityBar() {
 
   return (
     <nav ref={dropRef} className="activitybar" aria-label="Views" data-drop={dropping || undefined}>
-      {items.map(resolved => (
-        <button
-          key={resolved.item}
-          type="button"
-          className="activitybar__item"
-          aria-label={itemLabel(resolved)}
-          aria-pressed={shown.has(resolved.item)}
-          title={itemTooltip(resolved)}
-          data-kind={resolved.kind}
-          onPointerDown={event => startItemDrag(event, resolved.item, itemTitle(resolved))}
-          onClick={() => toggleItem(resolved.item)}
-        >
-          <ItemIcon resolved={resolved} className="activitybar__icon" size={24} />
-        </button>
-      ))}
+      {items.map(resolved => {
+        const badge = badgeOf(resolved)
+        return (
+          <button
+            key={resolved.item}
+            type="button"
+            className="activitybar__item"
+            aria-label={badge > 0 ? `${itemLabel(resolved)} (${badge})` : itemLabel(resolved)}
+            aria-pressed={shown.has(resolved.item)}
+            title={itemTooltip(resolved)}
+            data-kind={resolved.kind}
+            onPointerDown={event => startItemDrag(event, resolved.item, itemTitle(resolved))}
+            onClick={() => toggleItem(resolved.item)}
+          >
+            <ItemIcon resolved={resolved} className="activitybar__icon" size={24} />
+            {badge > 0 && (
+              <span className="activitybar__badge" aria-hidden="true">
+                {badge > 999 ? '999+' : badge}
+              </span>
+            )}
+          </button>
+        )
+      })}
     </nav>
   )
 }

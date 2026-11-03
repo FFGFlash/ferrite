@@ -23,6 +23,7 @@ mod perf;
 mod problems;
 mod settings;
 mod terminal;
+mod trust;
 mod ui_state;
 mod workspace;
 
@@ -91,6 +92,11 @@ pub fn run() {
       let args: Vec<String> = std::env::args().skip(1).collect();
       let bench = bench::BenchState::from_args(&args, launched_at);
       let benchmarking = bench.active();
+      // Benchmarks trust their folders and keep no decisions.
+      app.manage(trust::TrustState::load(
+        app.path().app_config_dir().ok().filter(|_| !benchmarking),
+        benchmarking,
+      ));
       let load_extensions =
         !benchmarking || bench.with_extensions() || !bench.languages().is_empty();
       app.manage(bench);
@@ -188,6 +194,7 @@ pub fn run() {
       workspace::workspace_open,
       workspace::workspace_open_dialog,
       workspace::workspace_close,
+      trust::workspace_set_trust,
       workspace::workspace_list_dir,
       workspace::workspace_create,
       entries::workspace_rename,
@@ -219,6 +226,12 @@ pub fn run() {
       extensions::extensions_reload,
       extensions::extension_run_command,
       extensions::extension_status_items,
+      extensions::extension_file_marks,
+      extensions::extension_run_view_command,
+      extensions::extension_view_expand,
+      extensions::extension_view_input,
+      extensions::extension_view_badges,
+      extensions::extension_prompt_answer,
       extensions::extension_view,
       extensions::extensions_icon_theme,
       extensions::extension_view_opened,

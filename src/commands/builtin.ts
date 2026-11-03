@@ -33,6 +33,7 @@ import { layoutStore, updateLayout } from '../state/layout'
 import { notify } from '../state/notifications'
 import { resetZoom, zoomIn, zoomOut } from '../state/zoom'
 import { closeFolder, collapseAll, openFolder, workspaceStore } from '../state/workspace'
+import { promptForTrust } from '../state/trust'
 import { isMac } from '../editor/keymap'
 import {
   beginCreate,
@@ -263,6 +264,13 @@ export const builtinCommands: Command[] = [
     keybinding: 'mod+k f',
     enabled: hasWorkspace,
     run: closeFolder,
+  },
+  {
+    id: 'workspace.manageTrust',
+    category: 'Workspaces',
+    title: 'Manage Workspace Trust',
+    enabled: hasWorkspace,
+    run: () => promptForTrust(),
   },
   {
     id: 'file.save',

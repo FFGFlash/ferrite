@@ -18,12 +18,31 @@ import { refreshSettingsIfLoaded } from './settings'
 import { showView } from './viewRequests'
 import { filesChanged } from './viewers'
 import { storageChanged, webviewChanged, webviewMessage } from './webviews'
-import { refreshDirectories, setIndexing, setWorkspace } from './workspace'
+import { refreshFileMarks } from './fileMarks'
+import { containerOf, refreshViewBadges } from './views'
+import { promptClosed, showPrompt } from './prompts'
+import { trustRequested } from './trust'
+import { refreshDirectories, setIndexing, setWorkspace, setWorkspaceTrustInfo } from './workspace'
 
 export function handleEvent(event: AppEvent): void {
   switch (event.type) {
     case 'workspaceChanged':
       setWorkspace(event.workspace)
+      break
+    case 'workspaceTrustChanged':
+      setWorkspaceTrustInfo(event.workspace)
+      break
+    case 'workspaceTrustRequested':
+      trustRequested(event.extension)
+      break
+    case 'extensionFileMarksChanged':
+      void refreshFileMarks()
+      break
+    case 'extensionPrompt':
+      showPrompt(event.prompt)
+      break
+    case 'extensionPromptClosed':
+      promptClosed(event.id)
       break
     case 'filesChanged':
       refreshDirectories(event.directories)
@@ -84,6 +103,7 @@ export function handleEvent(event: AppEvent): void {
       break
     case 'extensionsChanged':
       void refreshExtensions()
+      void refreshViewBadges()
       // Their settings, themes, and icon themes.
       refreshSettingsIfLoaded()
       break
@@ -98,9 +118,11 @@ export function handleEvent(event: AppEvent): void {
       break
     case 'extensionViewChanged':
       viewChanged(event.view)
+      void refreshViewBadges()
       break
     case 'extensionShowView':
-      showView(event.view, true)
+      // A section shows with its container.
+      showView(containerOf(event.view) ?? event.view, true)
       break
     case 'extensionReveal':
       revealInDocument(event.documentId, event.start, event.end)

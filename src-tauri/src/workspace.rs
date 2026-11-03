@@ -28,11 +28,12 @@ use crate::editor::protocol::{DocumentSummary, SearchQueryDto};
 use crate::entries::entry_error;
 use crate::error::CommandError;
 use crate::events::{self, AppEvent, WorkspaceInfo};
+use crate::extensions::ExtensionsState;
 use crate::lsp::LspState;
 use crate::perf::Perf;
 use crate::settings::SettingsState;
 use crate::ui_state::UiStateStore;
-use crate::{dialogs, paths};
+use crate::{dialogs, paths, trust};
 
 /// Most Go to File results returned.
 const MAX_FILE_RESULTS: usize = 100;
@@ -48,12 +49,22 @@ struct Active {
 }
 
 impl Active {
-  fn info(&self) -> WorkspaceInfo {
+  fn info(&self, app: &AppHandle) -> WorkspaceInfo {
     WorkspaceInfo {
       root: self.root.display().to_string(),
       name: self.name.clone(),
+      trust: trust::trust_of(app, &self.root),
     }
   }
+}
+
+/// The open folder, and whether the user trusts it.
+pub fn info(app: &AppHandle) -> Option<WorkspaceInfo> {
+  app
+    .state::<WorkspaceState>()
+    .lock()
+    .as_ref()
+    .map(|active| active.info(app))
 }
 
 #[derive(Default)]
@@ -107,7 +118,7 @@ pub fn open(app: &AppHandle, path: &Path) -> Result<WorkspaceInfo, CommandError>
     root: root.clone(),
     name,
   };
-  let info = active.info();
+  let info = active.info(app);
   start_indexing(app, &active);
   let previous = app.state::<WorkspaceState>().lock().replace(active);
   if let Some(previous) = &previous {
@@ -121,13 +132,16 @@ pub fn open(app: &AppHandle, path: &Path) -> Result<WorkspaceInfo, CommandError>
   app
     .state::<UiStateStore>()
     .update(|state| state.workspace = Some(root.clone()));
-  tracing::info!(root = %root.display(), "opened workspace");
+  tracing::info!(root = %root.display(), trust = ?info.trust, "opened workspace");
   events::emit(
     app,
     AppEvent::WorkspaceChanged {
       workspace: Some(info.clone()),
     },
   );
+  if let Some(host) = app.state::<ExtensionsState>().host() {
+    host.folder_changed();
+  }
   Ok(info)
 }
 
@@ -203,6 +217,9 @@ fn on_files_changed(app: &AppHandle, changed: Vec<PathBuf>) {
     .write()
     .unwrap_or_else(PoisonError::into_inner)
     .update(&changed, &exclude);
+  if let Some(host) = app.state::<ExtensionsState>().host() {
+    host.files_changed(&changed);
+  }
 
   let directories: BTreeSet<String> = changed
     .iter()
@@ -432,8 +449,8 @@ impl From<SearchSummary> for SearchEvent {
 }
 
 #[tauri::command]
-pub fn workspace_get(state: State<'_, WorkspaceState>) -> Option<WorkspaceInfo> {
-  state.lock().as_ref().map(Active::info)
+pub fn workspace_get(app: AppHandle) -> Option<WorkspaceInfo> {
+  info(&app)
 }
 
 #[tauri::command]
@@ -455,10 +472,14 @@ pub async fn workspace_open_dialog(
 
 #[tauri::command]
 pub fn workspace_close(app: AppHandle, state: State<'_, WorkspaceState>) {
-  if let Some(previous) = state.lock().take() {
+  let previous = state.lock().take();
+  if let Some(previous) = previous {
     previous.cancel.store(true, Ordering::Relaxed);
     tracing::info!(root = %previous.root.display(), "closed workspace");
     app.state::<LspState>().restart_all(&app);
+    if let Some(host) = app.state::<ExtensionsState>().host() {
+      host.folder_changed();
+    }
   }
   app.state::<UiStateStore>().update(|ui| ui.workspace = None);
   events::emit(&app, AppEvent::WorkspaceChanged { workspace: None });

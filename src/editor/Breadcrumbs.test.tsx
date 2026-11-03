@@ -56,7 +56,11 @@ describe('Breadcrumbs', () => {
     vi.mocked(ipc.listDirectory).mockResolvedValue([])
     layoutStore.set(DEFAULT_LAYOUT)
     setViewHandler(showView)
-    workspaceStore.set({ info: { root: '/w', name: 'w' }, listings: new Map(), indexing: false })
+    workspaceStore.set({
+      info: { root: '/w', name: 'w', trust: 'trusted' },
+      listings: new Map(),
+      indexing: false,
+    })
   })
 
   it('lists the path with the current file last', () => {

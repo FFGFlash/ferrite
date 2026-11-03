@@ -1,4 +1,4 @@
-import { CircleX, TriangleAlert } from 'lucide-react'
+import { CircleX, ShieldAlert, TriangleAlert } from 'lucide-react'
 import { memo } from 'react'
 import { executeCommand, pendingChord } from '../commands/registry'
 import type { AppInfo } from '../ipc'
@@ -10,6 +10,8 @@ import { statusItemsStore } from '../state/extensions'
 import { showProblems } from '../state/output'
 import { useProblemCounts } from '../state/problems'
 import { useStore } from '../state/store'
+import { promptForTrust } from '../state/trust'
+import { workspaceStore } from '../state/workspace'
 import './StatusBar.css'
 
 interface StatusBarProps {
@@ -31,6 +33,7 @@ export const StatusBar = memo(function StatusBar({ appInfo }: StatusBarProps) {
   return (
     <footer className="statusbar">
       <div className="statusbar__group">
+        <RestrictedModeItem />
         <ProblemsItem />
         {status && (
           <span className="statusbar__item">
@@ -79,6 +82,24 @@ export const StatusBar = memo(function StatusBar({ appInfo }: StatusBarProps) {
     </footer>
   )
 })
+
+/** Shown while the open folder isn't trusted; opens the trust dialog. */
+function RestrictedModeItem() {
+  const info = useStore(workspaceStore).info
+  if (!info || info.trust === 'trusted') {
+    return null
+  }
+  return (
+    <button
+      type="button"
+      className="statusbar__item statusbar__button statusbar__restricted"
+      title="Restricted Mode: language servers and extensions' programs don't run in this folder until you trust it."
+      onClick={() => promptForTrust()}
+    >
+      <ShieldAlert size={14} strokeWidth={1.75} aria-hidden="true" /> Restricted Mode
+    </button>
+  )
+}
 
 /** Errors and warnings in files, Ferrite, and extensions; opens the Problems view. */
 function ProblemsItem() {

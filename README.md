@@ -189,10 +189,11 @@ Extensions are WebAssembly modules that run in a sandbox: they can only use Ferr
 the palette, read open documents, edit them, and show problems as squiggles. They can also
 customize the workbench: color themes, file icon themes, keybindings, context menu items, status
 bar items, side bar views, highlights in the text, and previews (formatted pages, such as rendered
-Markdown), and add languages. They have no access to
-files, the network, or anything else on your computer. Before an extension starts, Ferrite asks
-you to allow the permissions it requests (reading or editing open documents, or running the
-language servers it declares). The
+Markdown), mark files in the explorer, and add languages. They have no access to files, the
+network, or anything else on your computer beyond the permissions they request. Before an
+extension starts, Ferrite asks you to allow them: reading or editing open documents or the open
+folder's files, or running the language servers or programs (such as Git) it declares, which
+run only in folders you [trust](#workspace). The
 Extensions view (`Ctrl+Shift+X`) lists each extension with its icon, name, description, author,
 and how long it took to start (hover over one for the rest). Choose one to open its page: its
 README, permissions (change them there), commands, what it adds, and its resource use, with
@@ -200,7 +201,14 @@ buttons to restart it, turn it off, or open its settings or log. The gear on eac
 same actions. An extension that crashes, loops, or uses too
 much memory is stopped without affecting the editor.
 
-Besides the [language extensions](#languages), six example extensions are included:
+Besides the [language extensions](#languages), the [Git](extensions/git/) extension and six
+examples are included:
+
+- [Git](extensions/git/) adds a Source Control view: stage, unstage, and discard changes, commit
+  them (Ctrl+Enter in the message box), amend or undo the last commit, and browse the current
+  branch's commits and the files each changed. It shows the Git status of files in the explorer,
+  and the branch you're on in the status bar, with `*` when there are changes and how far it is
+  ahead of or behind its upstream. It needs [Git](https://git-scm.com) installed.
 
 - [Tidy](extensions/tidy/) flags trailing whitespace and long lines, and can trim them.
 - [TODOs](extensions/todos/) highlights TODO and FIXME comments and lists them in a side bar
@@ -282,8 +290,19 @@ Reloading keeps open documents and unsaved changes. See
 Open a folder with **File: Open Folder…** (command palette or the Explorer). The explorer shows
 `.gitignore`d entries dimmed, along with everything inside an ignored folder. Files with errors or
 warnings (those listed in **View: Problems**) are colored and show how many, and so are the
-folders that contain them, with a dot. It follows the file you're editing: switching tabs, going to a
+folders that contain them, with a dot. Extensions can mark files too: the [Git](extensions/git/)
+extension colors changed files and shows a letter (**M** modified, **U** untracked, and so on).
+It follows the file you're editing: switching tabs, going to a
 definition, or opening a search result expands the file's folders and selects it.
+
+**Workspace Trust.** Programs that work on a folder can run code from it: a language server
+builds the project, and Git runs hooks. So the first time you open a folder, Ferrite asks
+whether you trust its files (you can trust every folder in its parent instead). Until you do, it
+runs in Restricted Mode, shown in the status bar: language servers don't start and extensions
+can't run programs, while editing and everything else work. Click **Restricted Mode**, or run
+**Workspaces: Manage Workspace Trust**, to change your mind. Decisions are kept in
+`trusted-folders.json` next to `settings.toml`; `security.workspace_trust = false` trusts every
+folder.
 
 To add a file or folder, use the **New File** and **New Folder** buttons in the Explorer header,
 right-click a folder or file, or run **Explorer: New File…** / **Explorer: New Folder…**. The new
@@ -506,6 +525,7 @@ crates/
   ferrite-terminal/   Shells in pseudoterminals, output streaming, flow control
   ferrite-syntax/     Tree-sitter grammars, incremental parsing, highlighting
   ferrite-lsp/        Language server client: processes, JSON-RPC, positions, document sync
+  ferrite-process/    Starting programs, and stopping them with everything they started
   ferrite-text/       Rope-backed text buffer, change sets, positions, Unicode boundaries
   ferrite-workspace/  Files, explorer listings, Go to File index, find in files, watching
   ferrite-core/       Documents, selections, editing operations, undo, dirty state

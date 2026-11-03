@@ -1,11 +1,13 @@
 /// The Ferrite extension API, version 1 (1.1: workbench contributions;
-/// 1.2: previews; 1.3: files; 1.4: viewers; 1.5: webviews and storage).
+/// 1.2: previews; 1.3: files; 1.4: viewers; 1.5: webviews and storage;
+/// 1.6: workspace, processes, and explorer marks; 1.7: tree views,
+/// prompts, deleting files, and opening files).
 ///
 /// An extension is a WebAssembly component targeting the `extension` world.
 /// It can call only the functions it imports here; there is no other
-/// filesystem, network, environment, or clock access. See
+/// filesystem, network, environment, clock, or process access. See
 /// `docs/extensions.md`.
-package ferrite:extension@1.5.0;
+package ferrite:extension@1.7.0;
 
 /// Types shared by the host functions and the extension's exports.
 interface types {
@@ -336,6 +338,12 @@ interface host {
     version: u64,
     diagnostics: list<diagnostic>,
   ) -> result<_, api-error>;
+
+  /// Changes one of the extension's settings in the user's settings, or
+  /// removes it there (`none`), which restores its default. The value must
+  /// fit the setting's declaration. Use it for choices the user makes, such
+  /// as "Always" in a prompt. (1.7)
+  set-configuration: func(key: string, value: option<config-value>) -> result<_, api-error>;
 }
 
 /// Contributions to the workbench: status bar items, side bar views,
@@ -441,6 +449,12 @@ interface files {
   /// unless it had unsaved changes. Writing the text a file already has
   /// changes nothing.
   write-file: func(path: string, text: string) -> result<_, file-error>;
+
+  /// Deletes a file or a folder and everything in it: to the system's
+  /// trash (the Recycle Bin on Windows), where the user can restore it, or
+  /// permanently. Needs `files-write`. Fails, deleting nothing, if the
+  /// trash can't take it. (1.7)
+  delete: func(path: string, to-trash: bool) -> result<_, file-error>;
 }
 
 /// Files opened in one of the extension's viewers: tabs that show a file
@@ -526,6 +540,349 @@ interface storage {
   keys: func(scope: storage-scope) -> list<string>;
 }
 
+/// The folder open in the editor, whether the user trusts it, and changes
+/// to files on disk. (1.6)
+///
+/// The manifest's `on_folder_changed` command runs when the open folder
+/// changes (opened, closed, or another one opened) or the user changes
+/// whether they trust it.
+interface workspace {
+  use files.{file-error};
+
+  record folder-info {
+    /// Absolute.
+    path: string,
+    /// Whether the user trusts the folder's files. Programs (the
+    /// `processes` interface) run only in a trusted folder, since programs
+    /// such as Git and build tools may run code from it. With no folder
+    /// open, nothing needs trust.
+    trusted: bool,
+  }
+
+  /// The open folder, if any. Needs no permission.
+  folder: func() -> option<folder-info>;
+
+  /// Asks the user whether they trust the open folder, if they haven't
+  /// trusted it. Their answer runs `on_folder_changed`.
+  request-trust: func();
+
+  /// Opens a file in the editor, as if the user opened it, and shows it.
+  /// Needs no permission. (1.7)
+  open-file: func(path: string) -> result<_, file-error>;
+
+  /// Changes to files under a watched path, reported to its command.
+  record file-changes {
+    /// What `watch` returned.
+    watch: u64,
+    /// The files and folders that were created, changed, or removed,
+    /// absolute and sorted. Only paths under the watched one.
+    paths: list<string>,
+    /// Too many changed to list (more than 10,000), so `paths` is empty:
+    /// look again at everything under the watched path.
+    overflow: bool,
+  }
+
+  /// Watches a file, or a folder and everything in it. When something
+  /// under it changes, `command` (one of the extension's own) runs, during
+  /// which `changes` lists what did. Changes that arrive while the
+  /// extension is busy are merged into one call.
+  ///
+  /// A path inside the open folder needs `files-read`, and is watched only
+  /// while that folder is open, `.git` included. A path outside it needs
+  /// `processes` (which can read it anyway). At most 32 watches.
+  watch: func(path: string, command: string) -> result<u64, file-error>;
+
+  /// Stops a watch. Watches also stop when the extension does.
+  unwatch: func(watch: u64);
+
+  /// The changes the running command was run for, when it's a watch's
+  /// command; `none` otherwise.
+  changes: func() -> option<file-changes>;
+}
+
+/// Programs the manifest declares in `[[programs]]`, which run on the
+/// user's computer as the user. Needs the `processes` permission, and a
+/// trusted folder (or none). (1.6)
+interface processes {
+  variant process-error {
+    /// The `processes` permission isn't granted.
+    permission-denied,
+    /// The open folder isn't trusted (see `workspace::folder`).
+    untrusted,
+    /// The manifest declares no program with this name.
+    unknown-program(string),
+    /// The program isn't installed, or couldn't be started; why.
+    not-found(string),
+    /// It ran longer than allowed and was stopped.
+    timed-out,
+    /// It was stopped with `kill`.
+    killed,
+    /// The request exceeds one of the host's limits.
+    too-large(string),
+    invalid-argument(string),
+    failed(string),
+  }
+
+  record process-options {
+    /// The folder it runs in, absolute; the open folder by default (which
+    /// must then be open).
+    cwd: option<string>,
+    /// Variables added to Ferrite's environment, or replacing its values.
+    env: list<tuple<string, string>>,
+    /// Written to its standard input, which is then closed. Without it,
+    /// its input is empty.
+    stdin: option<list<u8>>,
+    /// Stops it after this long. `run` stops it at the running command's
+    /// deadline in any case, and `spawn` lets it run until it ends.
+    timeout-ms: option<u32>,
+  }
+
+  record process-output {
+    /// `none` when it didn't exit by itself (it was stopped by a signal).
+    exit-code: option<s32>,
+    stdout: list<u8>,
+    stderr: list<u8>,
+    /// Output beyond 32 MiB (standard output and error together) was
+    /// dropped.
+    truncated: bool,
+  }
+
+  /// Runs a declared program with `args` and waits for it to end, within
+  /// the running call's deadline.
+  run: func(program: string, args: list<string>, options: process-options) -> result<process-output, process-error>;
+
+  /// Starts a declared program and returns at once. When it ends, `command`
+  /// (one of the extension's own) runs, during which `finished` returns
+  /// its outcome. At most 16 run at once; they are stopped when the
+  /// extension stops.
+  spawn: func(program: string, args: list<string>, options: process-options, command: string) -> result<u64, process-error>;
+
+  /// Stops a program `spawn` started, and everything it started. Its
+  /// command still runs, with `killed`. Returns false if it had ended.
+  kill: func(process: u64) -> bool;
+
+  /// A program that `spawn` started, and how it ended.
+  record finished-process {
+    /// What `spawn` returned.
+    process: u64,
+    outcome: result<process-output, process-error>,
+  }
+
+  /// The program the running command was run for, when it's a `spawn`
+  /// command; `none` otherwise.
+  finished: func() -> option<finished-process>;
+}
+
+/// Marks on files and folders in the explorer, such as a version control
+/// status: a color, a short badge, and a tooltip. Needs no permission. (1.6)
+interface explorer {
+  use types.{api-error};
+
+  record file-mark {
+    /// Absolute.
+    path: string,
+    /// One or two characters shown at the end of the row, such as `M`.
+    badge: option<string>,
+    /// The name of a color the manifest declares under `[colors]`, for the
+    /// row's text.
+    color: option<string>,
+    /// Plain text, such as "Modified".
+    tooltip: option<string>,
+    /// Shows the row dimmed.
+    faded: bool,
+    /// Marks everything inside a folder too, as with an untracked folder.
+    inherit: bool,
+    /// Folders that contain it show its color and a dot. Where marks
+    /// propagate to the same folder, the highest `priority` wins.
+    propagate: bool,
+    priority: u8,
+  }
+
+  /// Replaces all of the extension's marks: at most 100,000, one per path.
+  set-file-marks: func(marks: list<file-mark>) -> result<_, api-error>;
+}
+
+/// Side bar views as trees, in API 1.7: items with icons, marks, and
+/// children loaded when opened; buttons and menus for the view and its
+/// items (declared in the manifest); a text box; a welcome message; and a
+/// count badge. Views can be sections of one container (`container` in the
+/// manifest), shown together under one activity bar entry. Needs no
+/// permission.
+interface views {
+  use types.{api-error};
+
+  variant item-icon {
+    none,
+    /// A named icon, as for tab actions (`add`, `check`, `refresh`, ...).
+    named(string),
+    /// The file icon theme's icon for a file with this path or name.
+    file(string),
+    /// The file icon theme's icon for a folder with this path or name.
+    folder(string),
+  }
+
+  /// How an item looks besides its label, as explorer marks do.
+  record item-mark {
+    /// One or two characters at the end of the row, such as `M`.
+    badge: option<string>,
+    /// The name of a color the manifest declares under `[colors]`, for the
+    /// label and the badge.
+    color: option<string>,
+    /// Strikes the label through, as for a deleted file.
+    strikethrough: bool,
+    faded: bool,
+  }
+
+  enum expansion {
+    /// A leaf, unless items name it as their parent.
+    none,
+    collapsed,
+    expanded,
+  }
+
+  record tree-item {
+    /// Unique within the view.
+    id: string,
+    /// The item it's nested under, which must come earlier in the list.
+    parent: option<string>,
+    label: string,
+    /// Shown dimmed after the label.
+    description: option<string>,
+    tooltip: option<string>,
+    icon: item-icon,
+    mark: option<item-mark>,
+    /// Which of the manifest's `view/item` menus apply to it: those whose
+    /// `contexts` list this.
+    context: option<string>,
+    /// Whether it can be opened, and is at first. An item that can be
+    /// opened but has no children listed gets them when it's opened: the
+    /// view's `on_expand` command runs, and calls `set-children`.
+    expansion: expansion,
+    /// Run with `argument` when the item is activated (click or Enter).
+    command: option<string>,
+    argument: option<string>,
+  }
+
+  /// Replaces the items of one of the extension's views: at most 10,000,
+  /// children loaded with `set-children` included.
+  set-items: func(view: string, items: list<tree-item>) -> result<_, api-error>;
+
+  /// Replaces the children of an item (and theirs). Their parents must be
+  /// `parent` or an item listed before them. Returns false, changing
+  /// nothing, if the view has no such item any more.
+  set-children: func(view: string, parent: string, items: list<tree-item>) -> result<bool, api-error>;
+
+  /// A button in a welcome message.
+  record welcome-button {
+    label: string,
+    /// One of the extension's commands, run with `argument`.
+    command: string,
+    argument: option<string>,
+  }
+
+  /// Shown in a view instead of its items while it has none.
+  record welcome {
+    /// Plain text; a blank line starts a paragraph.
+    text: string,
+    buttons: list<welcome-button>,
+  }
+
+  set-welcome: func(view: string, welcome: option<welcome>) -> result<_, api-error>;
+
+  /// A number on the view's header and on its activity bar entry (added up
+  /// for a container's sections); 0 shows none.
+  set-badge: func(view: string, count: u32) -> result<_, api-error>;
+
+  /// The flags the view's menus test with `when` (`"tree"`, `"!tree"`).
+  set-flags: func(view: string, names: list<string>) -> result<_, api-error>;
+
+  /// The text in the view's text box (declared with `[views.input]`).
+  input: func(view: string) -> result<string, api-error>;
+
+  /// Replaces the text in the view's text box.
+  set-input: func(view: string, text: string) -> result<_, api-error>;
+
+  /// The items a command from a view's menu or button was run for: the
+  /// arguments of the selected items, when the clicked item is one of
+  /// them, or of the clicked item alone. Empty otherwise.
+  selection: func() -> list<string>;
+
+  /// An item being opened, for the view's `on_expand` command.
+  record expanding-item {
+    view: string,
+    item: string,
+    argument: option<string>,
+  }
+
+  /// The item the running command was run to load children for, when it's
+  /// a view's `on_expand` command; `none` otherwise.
+  expanding: func() -> option<expanding-item>;
+}
+
+/// Asking the user something: choosing from a list, typing text, or
+/// confirming. Each returns at once with the prompt's id; the answer runs
+/// the given command, during which `answer` returns it. One prompt shows at
+/// a time: a new one cancels the one showing. Needs no permission. (1.7)
+interface prompts {
+  use types.{api-error};
+
+  record pick-item {
+    label: string,
+    /// Shown dimmed after the label.
+    description: option<string>,
+    /// What `answer` returns when it's chosen.
+    value: string,
+  }
+
+  /// Shows a list to choose from (at most 1,000 items), filtered as the
+  /// user types. `title` says what's being chosen.
+  pick: func(title: string, items: list<pick-item>, command: string) -> result<u64, api-error>;
+
+  record input-options {
+    /// Says what to type.
+    title: string,
+    /// The text at first.
+    value: string,
+    placeholder: option<string>,
+  }
+
+  /// Asks for a line of text.
+  input: func(options: input-options, command: string) -> result<u64, api-error>;
+
+  record confirm-options {
+    message: string,
+    /// More about it, shown below.
+    detail: option<string>,
+    /// The choices, the first being the main one; Cancel is added.
+    buttons: list<string>,
+    /// The main choice destroys something (it's shown as a warning).
+    destructive: bool,
+  }
+
+  /// Asks the user to confirm, in a dialog.
+  confirm: func(options: confirm-options, command: string) -> result<u64, api-error>;
+
+  variant answer-value {
+    /// Closed without an answer, or replaced by another prompt.
+    cancelled,
+    /// A `pick`'s chosen item's value.
+    picked(string),
+    /// An `input`'s text.
+    text(string),
+    /// The index of a `confirm`'s button.
+    button(u32),
+  }
+
+  record prompt-answer {
+    /// What the prompt function returned.
+    prompt: u64,
+    value: answer-value,
+  }
+
+  /// The answer the running command was run for; `none` otherwise.
+  answer: func() -> option<prompt-answer>;
+}
+
 world extension {
   use types.{activation, command-context, document-change, document-id, document-info};
 
@@ -535,6 +892,11 @@ world extension {
   import viewers;
   import webviews;
   import storage;
+  import workspace;
+  import processes;
+  import explorer;
+  import views;
+  import prompts;
 
   /// Called once before any other export. An error fails the extension.
   export activate: func(context: activation) -> result<_, string>;

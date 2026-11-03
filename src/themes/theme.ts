@@ -18,6 +18,15 @@ const HEX_COLOR = /^#(?:[0-9a-f]{3,4}|[0-9a-f]{6}|[0-9a-f]{8})$/i
 /** The base theme in effect, for code that picks colors per theme. */
 export const themeKind = createStore<ThemeKind>('dark')
 /**
+ * Colors the theme and the user set for extensions' colors
+ * (`<extension id>.<name>`, such as `ferrite.git.modified`), which aren't
+ * CSS variables: the code that draws them looks them up (`extensionColor`).
+ */
+export const extensionColorOverrides = createStore<Readonly<Record<string, string>>>({})
+
+/** An extension's color token: `<publisher>.<extension>.<name>`, lowercase. */
+const EXTENSION_TOKEN = /^[a-z0-9-]+(?:\.[a-z0-9-]+)+\.[a-z0-9_-]+$/
+/**
  * Counts theme changes, including overrides that keep the base, for code
  * that reads resolved token values (such as the terminal's colors).
  */
@@ -37,12 +46,19 @@ export function applyTheme(kind: ThemeKind, colors: Readonly<Record<string, stri
     root.style.removeProperty(`--color-${token}`)
   }
   overridden = []
+  const forExtensions: Record<string, string> = {}
   for (const [token, value] of Object.entries(colors)) {
-    if (THEME_TOKENS.has(token) && HEX_COLOR.test(value)) {
+    if (!HEX_COLOR.test(value)) {
+      continue
+    }
+    if (THEME_TOKENS.has(token)) {
       root.style.setProperty(`--color-${token}`, value)
       overridden.push(token)
+    } else if (EXTENSION_TOKEN.test(token)) {
+      forExtensions[token] = value
     }
   }
+  extensionColorOverrides.set(forExtensions)
   themeKind.set(kind)
   themeRevision.update(revision => revision + 1)
 }

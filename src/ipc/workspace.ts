@@ -5,12 +5,19 @@
 import { Channel } from '@tauri-apps/api/core'
 import type { DocumentSummary, Position, SearchQuery } from './editor'
 import { call, isDesktop } from './index'
-import type { MessageLevel } from './extensions'
+import type { MessageLevel, Prompt } from './extensions'
 import type { FileDragEvent } from '../components/drag'
+
+/**
+ * Whether the user trusts a folder's files: until they do (`unknown` means
+ * they haven't said), language servers and extensions' programs don't run.
+ */
+export type Trust = 'trusted' | 'untrusted' | 'unknown'
 
 export interface WorkspaceInfo {
   root: string
   name: string
+  trust: Trust
 }
 
 export interface DirectoryEntry {
@@ -135,6 +142,9 @@ export interface SavedUi {
 
 export type AppEvent =
   | { type: 'workspaceChanged'; workspace: WorkspaceInfo | null }
+  | { type: 'workspaceTrustChanged'; workspace: WorkspaceInfo }
+  /** An extension (by id) asked the user to trust the open folder. */
+  | { type: 'workspaceTrustRequested'; extension: string }
   | { type: 'filesChanged'; directories: string[] }
   | { type: 'documentReloaded'; document: DocumentSummary }
   | { type: 'documentChangedOnDisk'; document: DocumentSummary }
@@ -170,6 +180,9 @@ export type AppEvent =
   | { type: 'extensionViewChanged'; view: string }
   | { type: 'extensionShowView'; view: string }
   | { type: 'decorationsChanged'; documentId: number }
+  | { type: 'extensionFileMarksChanged' }
+  | { type: 'extensionPrompt'; prompt: Prompt }
+  | { type: 'extensionPromptClosed'; id: number }
   | { type: 'extensionReveal'; documentId: number; start: Position; end: Position }
   | { type: 'extensionPreviewsChanged' }
   | { type: 'extensionPreviewChanged'; preview: string }
@@ -192,6 +205,9 @@ export const getWorkspace = () => call<WorkspaceInfo | null>('workspace_get')
 export const openWorkspace = (path: string) => call<WorkspaceInfo>('workspace_open', { path })
 export const openWorkspaceDialog = () => call<WorkspaceInfo | null>('workspace_open_dialog')
 export const closeWorkspace = () => call<void>('workspace_close')
+/** Trusts the open folder (or, with `parent`, the folder it's in), or records that the user doesn't. */
+export const setWorkspaceTrust = (trusted: boolean, parent: boolean) =>
+  call<void>('workspace_set_trust', { trusted, parent })
 export const listDirectory = (path: string) =>
   call<DirectoryEntry[]>('workspace_list_dir', { path })
 /** Creates an empty file or a folder; `name` may include subfolders (`src/lib.rs`). */

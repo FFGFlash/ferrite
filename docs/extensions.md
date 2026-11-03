@@ -6,24 +6,30 @@ do only what the [extension API](../crates/ferrite-extension-api/wit/extension.w
 - register commands;
 - read open documents and get notified of changes;
 - edit documents through validated, versioned edits;
-- read and write files in the open folder, such as every file in a folder chosen in the
-  explorer;
+- read, write, and delete files in the open folder, such as every file in a folder chosen in the
+  explorer, and open files in the editor;
 - publish diagnostics (squiggles, hover messages, and entries in the Problems view);
 - customize the workbench: color themes, keybindings, context menu items, status bar items,
-  side bar views, editor decorations, and previews (formatted pages, such as rendered
+  side bar views (trees with buttons, menus, and a text box, as sections of one activity bar
+  entry if they like), editor decorations, and previews (formatted pages, such as rendered
   Markdown);
+- ask the user to choose from a list, type a line of text, or confirm (API 1.7);
 - show kinds of files in viewers: tabs that show a file the extension's way, such as an image,
   instead of as text;
 - show pages of their own (HTML, CSS, and JavaScript) in viewers and previews: webviews, which
   run sandboxed and talk to the extension by messages;
 - keep small values across sessions (storage);
+- run programs the manifest declares, such as Git, in folders the user trusts (API 1.6);
+- watch files for changes, and hear when the open folder changes (API 1.6);
+- mark files and folders in the explorer, with colors themes can change (API 1.6);
 - add languages: syntax highlighting from Tree-sitter grammars, and language servers;
-- read their own settings;
+- read their own settings, and change them as the user chooses (API 1.7);
 - log, and show messages.
 
-There is no network, environment, clock, or process access, and no file access beyond the
-open folder's files (webview pages can reach the web only with the `network` permission). A manifest declares the permissions an extension needs, and the user grants
-them before the extension starts.
+There is no network, environment, or clock access, no file access beyond the open folder's files
+(webview pages can reach the web only with the `network` permission), and no programs but those
+the manifest declares. A manifest declares the permissions an extension needs, and the user
+grants them before the extension starts.
 (Language servers an extension declares are started by Ferrite, not by the extension, and only
 once the user allows it.)
 
@@ -45,6 +51,10 @@ This guide uses these examples:
   the document as you type.
 - [Images](../extensions/images/) shows image files in a webview viewer: a page that draws the
   picture on a background you choose, fit to the tab or zoomed, with its format and size.
+- [Git](../extensions/git/) runs Git to mark changed files in the explorer, show the branch in
+  the status bar, and fill its Source Control view, where changes are staged and committed:
+  [programs](#programs), [watching files](#watching-files), [explorer marks](#explorer-marks),
+  [view containers](#view-containers), [tree items](#tree-items), and [prompts](#prompts).
 
 ## Quick start
 
@@ -191,9 +201,10 @@ as its text. A README can be at most 1 MiB. Tidy, TODOs, and Markdown have both.
 | `files_write`      | Changing and creating files in the open folder (API 1.3)                         |
 | `language_servers` | Ferrite running the extension's [language servers](#language-servers)            |
 | `network`          | Its [webview](#webviews) pages loading content and code from the web (API 1.5)   |
+| `processes`        | Running the [programs](#programs) it declares, in trusted folders (API 1.6)      |
 
-Commands, settings, logging, messages, storage, languages, viewers, and webviews need no
-permission.
+Commands, settings, logging, messages, storage, languages, viewers, webviews, explorer marks,
+and the open folder's path need no permission.
 
 **Requesting a permission doesn't grant it.** When an extension requests permissions the user
 hasn't decided about, Ferrite asks before starting it. The user can allow or deny each
@@ -210,8 +221,8 @@ and `files_write`, which the API 1.0 `permission` type can't name: a call tells 
 
 The full interface, with comments, is
 [`extension.wit`](../crates/ferrite-extension-api/wit/extension.wit). Functions the extension
-calls are in `host`, `workbench`, `files`, `viewers`, `webviews`, and `storage`; the extension
-exports the rest.
+calls are in `host`, `workbench`, `files`, `viewers`, `webviews`, `storage`, `workspace`,
+`processes`, `explorer`, `views`, and `prompts`; the extension exports the rest.
 
 ### Positions and versions
 
@@ -289,6 +300,10 @@ file in a folder the user chose in the explorer. Paths are absolute.
   UTF-16, or a legacy one such as Windows-1252, detected as the editor does). A file open in the
   editor is read from its document, unsaved changes included, so the extension sees what the
   user sees.
+- `delete(path, to-trash)` (API 1.7) deletes a file, or a folder and everything in it: to the
+  system's trash (the Recycle Bin on Windows), where the user can restore it, or permanently.
+  If the trash can't take it, nothing is deleted and the call fails. The open folder itself
+  can't be deleted.
 - `write-file(path, text)` replaces a file's text, or creates the file in an existing folder.
   Line breaks are converted to the file's line ending (a new file gets them as written), and the
   text is written in the file's encoding (a new file in UTF-8). A file
@@ -296,7 +311,7 @@ file in a folder the user chose in the explorer. Paths are absolute.
   unsaved changes (those stay the user's to save). Writing the text a file already has changes
   nothing.
 
-Reading needs `files_read`, and writing `files_write`. Only files inside the open folder can be
+Reading needs `files_read`, and writing and deleting `files_write`. Only files inside the open folder can be
 used: paths are resolved (links and `..` included) first, and files that `files.exclude` hides,
 and anything in a `.git` folder, are refused too. Failures are a `file-error`:
 `permission-denied` (naming the permission), `outside-folder`, `not-found`, `wrong-kind` (a
@@ -306,6 +321,115 @@ lacks).
 
 A command has 10 s, so a command that works through many files should do little per file. Tidy's
 **Trim Trailing Whitespace in Files** trims a few thousand files well within that.
+
+### The open folder and trust
+
+The `workspace` interface (API 1.6) tells an extension about the open folder:
+
+- `folder()` returns its path and whether the user trusts it, or `none`. It needs no permission.
+- `on_folder_changed = "<command>"` in the manifest names a command that runs when the open
+  folder changes (opened, closed, or another one opened) or the user changes whether they trust
+  it. It runs only while the extension is running; an extension started later reads `folder()`
+  in `activate`.
+- `request-trust()` asks the user to trust the folder, naming the extension. Call it when the
+  user does something that needs trust, not on its own: the user is asked when the folder opens
+  anyway.
+- `open-file(path)` (API 1.7) opens a file in the editor and shows it, as if the user opened it
+  (in its viewer, if one is the default for it). It needs no permission.
+
+**Workspace Trust.** Programs that work on a folder may run code from it: a language server
+builds the project, and Git runs hooks and the programs its configuration names. So until the
+user trusts a folder, [programs](#programs) don't run there, and neither do language servers.
+Everything else works. With no folder open, nothing needs trust.
+
+### Watching files
+
+`workspace::watch(path, command)` watches a file, or a folder and everything in it, and returns
+the watch's id. When something under it changes, `command` (one of the extension's own) runs, and
+`workspace::changes()` returns the watch, the changed paths (absolute and sorted), and
+`overflow` if more than 10,000 changed (then `paths` is empty: look at everything again).
+Changes that arrive while the extension is busy are merged into one call. `unwatch(id)` stops a
+watch, and watches stop with the extension.
+
+- **Inside the open folder**, watching needs `files_read`, `.git` included, and lasts while the
+  folder is open. It uses the changes Ferrite watches for anyway.
+- **Outside it** needs `processes`, whose programs could read the path anyway. Git uses this for
+  the `.git` folder of a repository the open folder is inside.
+- At most 32 watches.
+
+```rust
+fn run_command(command: String, _: CommandContext) -> Result<(), String> {
+  match command.as_str() {
+    "example.git.start" => {
+      let folder = workspace::folder().ok_or("no folder is open")?;
+      workspace::watch(&folder.path, "example.git.changed").map_err(|e| format!("{e:?}"))?;
+    }
+    "example.git.changed" => {
+      let changes = workspace::changes().ok_or("not run for changes")?;
+      // ... look again at changes.paths ...
+    }
+    _ => {}
+  }
+  Ok(())
+}
+```
+
+### Programs
+
+The `processes` interface (API 1.6) runs programs on the user's computer. The manifest declares
+each one, and the `processes` permission, which the user grants seeing the list:
+
+```toml
+[permissions]
+processes = true
+
+[[programs]]
+name = "git"                      # what the code calls it; also the command by default
+
+[[programs]]
+name = "prettier"
+command = "bin/prettier"          # optional: on the PATH, or a path in the extension's folder
+workspace = "node_modules/.bin/prettier"   # optional: preferred when the open folder has it
+```
+
+Users can set where a program is in `settings.toml`, by `<extension id>.<name>`:
+
+```toml
+[extensions.programs]
+"ferrite.git.git" = "C:/Program Files/Git/cmd/git.exe"
+```
+
+- **`run(program, args, options)`** runs a program and waits for it. It returns its exit code, its
+  standard output and error (32 MiB together; `truncated` says if more was dropped). It stops the
+  program before the running command's deadline, with `timed-out`.
+- **`spawn(program, args, options, command)`** starts a program and returns its id at once.
+  When it ends, `command` runs, and `processes::finished()` returns the id and the outcome. Use
+  it for anything that may take a while. At most 16 run at once.
+- **`kill(id)`** stops a spawned program and everything it started; its command still runs,
+  with `killed`.
+- **Options**: the folder it runs in (the open folder by default), environment variables to add,
+  bytes for its standard input (otherwise it reads nothing), and a timeout.
+- **Failures** are a `process-error`: `permission-denied`, `untrusted` (the open folder isn't
+  [trusted](#the-open-folder-and-trust)), `unknown-program` (not declared), `not-found` (not
+  installed, with the reason), `timed-out`, `killed`, `too-large`, `invalid-argument`, or
+  `failed`.
+
+Programs run as the user, with Ferrite's environment, in a process group with no console window.
+They are stopped when the extension stops. Their input is empty unless `stdin` is given, so a
+program never waits for typing. Some still wait for an answer in other ways: Git, for example,
+needs `GIT_TERMINAL_PROMPT=0` so that it fails rather than waits for a password.
+
+```rust
+let output = processes::run(
+  "git",
+  &["rev-parse".into(), "--show-toplevel".into()],
+  &ProcessOptions { cwd: None, env: Vec::new(), stdin: None, timeout_ms: None },
+)
+.map_err(|error| format!("{error:?}"))?;
+if output.exit_code == Some(0) {
+  let root = String::from_utf8_lossy(&output.stdout).trim().to_owned();
+}
+```
 
 ### Settings, logging, and messages
 
@@ -323,6 +447,11 @@ max_line_length = 120
 Values are checked against the declaration. Invalid values are listed in the Extensions view and
 the settings editor, and the default is used instead. Values are read at call time, so a changed setting applies on the
 next read.
+
+`set-configuration(key, value)` (API 1.7) changes one of the extension's settings in the user's
+`settings.toml`, or removes it there (`none`), which restores the default. It's for choices the
+user makes in the extension, such as "Always" in a prompt; Git's Smart Commit setting is saved
+this way. The value must fit the declaration.
 
 **Storage** (API 1.5). The `storage` interface keeps small values across sessions, as JSON
 text: `get(scope, key)`, `set(scope, key, value)` (`none` removes it), and `keys(scope)`. The
@@ -492,6 +621,8 @@ targets = ["files", "folders"]    # explorer only; default ["files"]
 - **`patterns`** match a file's name, ignoring case: `*` is any characters, `?` one, and
   `{a,b}` either. An item with patterns isn't shown for untitled documents. At most 20 patterns
   of 100 characters each.
+- **`view/title`** and **`view/item`** (API 1.7) are for side bar views: see
+  [view menus](#view-menus).
 
 ### Status bar items
 
@@ -515,7 +646,7 @@ or hides it with `none`. Text is plain text, at most 100 characters.
 [[views]]
 id = "list"
 title = "TODOs"
-icon = "check"                    # list, check, bolt, book, bug, tag, star, flag, bell
+icon = "check"   # list, check, bolt, book, bug, tag, star, flag, bell, source-control, history
 ```
 
 A view adds an activity bar entry and a side bar panel. Its content is a tree of items:
@@ -530,6 +661,97 @@ A view adds an activity bar entry and a side bar panel. Its content is a tree of
 - **`show-view(view)`** brings the view into the side bar.
 
 Use `on-view:<id>` to start the extension only when its view is first shown.
+
+API 1.7 adds the `views` interface, for views like Git's Source Control view. Everything below
+needs no permission.
+
+#### View containers
+
+Views can be sections of one activity bar entry, a container, each with a header that
+collapses it. Git's Source Control entry has a Changes section and a Commits section:
+
+```toml
+[[view_containers]]
+id = "scm"
+title = "Source Control"
+icon = "source-control"           # as for views
+
+[[views]]
+id = "changes"
+title = "Changes"
+container = "scm"
+input = { placeholder = "Message (Ctrl+Enter to commit)", command = "ferrite.git.commit" }
+
+[[views]]
+id = "commits"
+title = "Commits"
+container = "scm"
+on_expand = "ferrite.git.expandCommit"
+```
+
+A container needs at least one view. A view in a container has no activity bar entry of its
+own; showing it (`show-view`) shows its container.
+
+#### Tree items
+
+**`views::set-items(view, items)`** sets a view's tree, at most 10,000 items. Besides what
+`set-view-items` takes, a `tree-item` has:
+
+- **`icon`**: `named(name)`, one of the [named icons](#named-icons); or `file(path)` or
+  `folder(path)`, the file icon theme's icon for that name.
+- **`mark`**: a badge of one or two characters at the end of the row, a color the manifest
+  declares under [`[colors]`](#explorer-marks) (for the label and the badge), `strikethrough`
+  (as for a deleted file), and `faded`.
+- **`context`**: which of the view's [item menus](#view-menus) apply to it.
+- **`expansion`**: `none`, `collapsed`, or `expanded`. An item that can be opened but has no
+  children listed gets them when the user opens it: the view's `on_expand` command runs,
+  `views::expanding()` returns the view, the item's id, and its argument, and the command
+  replaces the item's children with **`views::set-children(view, item, items)`** (which returns
+  false if the item is gone). The view shows "Loading…" until then, and "No items" if it sets
+  none. Git lists a commit's files this way.
+
+Users select items with the mouse (Ctrl- and Shift-click for several) and the keyboard (arrows,
+Shift+arrows, Ctrl+A). Clicking an item runs its command, if it has one.
+
+#### View menus
+
+```toml
+[[menus]]
+location = "view/item"            # an item's button or right-click menu
+view = "changes"
+contexts = ["changed", "untracked"]   # optional: items with these contexts; default every item
+command = "ferrite.git.stage"
+inline = true                     # a button on the row (shown on hover, focus, or selection)
+icon = "add"                      # one of the named icons; buttons need one
+
+[[menus]]
+location = "view/title"           # the view's header
+view = "changes"
+command = "ferrite.git.viewAsTree"
+group = "3_view"                  # entries are grouped, then sorted by title
+when = "!tree"                    # optional: only while the view hasn't the flag "tree"
+```
+
+- **`view/title`** entries are buttons in the view's header (the side bar's, or the section's)
+  when `inline`, and otherwise entries of its "…" menu. Their commands run with no argument.
+- **`view/item`** entries are buttons on the rows when `inline`, and otherwise entries of the
+  rows' right-click menu (also the menu key, or Shift+F10).
+- **The command** gets the item's argument (`workbench::command-argument()`), and
+  **`views::selection()`** returns the arguments of every selected item when the clicked item
+  is one of them, or of the clicked item alone. Git stages all the selected files this way.
+- **`when`** shows an entry only while the view has a flag, or with `!`, while it doesn't. A
+  view's flags are what **`views::set-flags(view, names)`** last set.
+
+#### Text box, welcome message, and badge
+
+- **A text box** (`input` in the view's manifest entry) sits above the items. Ctrl+Enter (Cmd+Enter
+  on macOS) runs its `command`. **`views::input(view)`** returns its text, and
+  **`views::set-input(view, text)`** replaces it (Git empties it after a commit).
+- **A welcome message**, **`views::set-welcome(view, welcome)`**, shows instead of the items
+  while there are none: text (a blank line starts a paragraph) and up to 4 buttons, each running
+  a command with an optional argument. Git offers **Initialize Repository** this way.
+- **A badge**, **`views::set-badge(view, count)`**, shows a number on the view's header and on
+  its activity bar entry (a container's adds up its sections'). 0 shows none.
 
 ### Decorations
 
@@ -759,13 +981,15 @@ wins. For controls like Ferrite's, link the kit, from any folder:
 
 It has `ferrite-toolbar`, `ferrite-group`, `ferrite-separator`, `ferrite-button` (pressed with
 `aria-pressed="true"`; `ferrite-primary` for the main action), `ferrite-input`, `ferrite-label`,
-and `ferrite-icon`, a 16-pixel icon in the text color. The named icons, for the kit and for tab
-actions: `actual-size`, `add`, `chevron-down`, `chevron-left`, `chevron-right`, `chevron-up`,
-`close`, `code`, `copy`, `crop`, `download`, `edit`, `error`, `eye`, `eye-off`, `file`,
-`filter`, `fit`, `flip-horizontal`, `flip-vertical`, `grid`, `image`, `info`, `layers`, `link`,
-`moon`, `more`, `move`, `open`, `palette`, `pause`, `play`, `refresh`, `remove`, `rotate`,
-`save`, `search`, `settings`, `split`, `stop`, `sun`, `upload`, `warning`, `zoom-in`,
-`zoom-out`.
+and `ferrite-icon`, a 16-pixel icon in the text color.
+
+<a id="named-icons"></a>The named icons, for the kit, tab actions, view menus, and tree items:
+`actual-size`, `add`, `branch`, `check`, `chevron-down`, `chevron-left`, `chevron-right`,
+`chevron-up`, `close`, `code`, `commit`, `copy`, `crop`, `download`, `edit`, `error`, `eye`,
+`eye-off`, `file`, `filter`, `fit`, `flip-horizontal`, `flip-vertical`, `grid`, `image`, `info`,
+`layers`, `link`, `list-flat`, `list-tree`, `moon`, `more`, `move`, `open`, `palette`, `pause`,
+`play`, `refresh`, `remove`, `rotate`, `save`, `search`, `settings`, `split`, `stop`, `sun`,
+`undo`, `upload`, `warning`, `zoom-in`, `zoom-out`.
 
 **Tab actions** are buttons beside the tab while it's active, at most 10. Without a `command`, a
 click goes to the page (`ferrite.onAction(id)`); with one, the command runs with the tab as its
@@ -787,6 +1011,76 @@ styles are fine). With the [`network` permission](#permissions), granted by the 
 also allows `https:` for scripts, styles, images, media, fonts, and `fetch`, and `wss:` for
 sockets.
 
+### Prompts
+
+The `prompts` interface (API 1.7) asks the user something. Each function returns the prompt's id
+at once; the answer runs the command the call names, during which **`prompts::answer()`**
+returns the id and the value:
+
+- **`pick(title, items, command)`** offers a list in the command palette, filtered as the user
+  types (at most 1,000 items, each with a label, an optional description, and a value). The
+  answer is `picked(value)`.
+- **`input(options, command)`** asks for a line of text in the palette, starting with
+  `options.value`. The answer is `text(text)`.
+- **`confirm(options, command)`** asks in a dialog: a message, optional detail, and 1 to 4
+  buttons, the first being the main one (shown last, and in red when `destructive`); Cancel is
+  added. The answer is `button(index)`.
+
+Closing a prompt without answering, or another prompt replacing it (one shows at a time), answers
+`cancelled`. A prompt goes away when its extension stops.
+
+```rust
+let id = prompts::confirm(
+  &ConfirmOptions {
+    message: "Discard the changes to main.rs?".into(),
+    detail: Some("Changes that aren't staged are lost.".into()),
+    buttons: vec!["Discard File".into()],
+    destructive: true,
+  },
+  "example.git.answered",
+)
+.map_err(|e| format!("{e:?}"))?;
+// ... remember what `id` was for; in example.git.answered:
+if let Some(answer) = prompts::answer()
+  && answer.value == AnswerValue::Button(0)
+{
+  // ... discard ...
+}
+```
+
+### Explorer marks
+
+An extension marks files and folders in the explorer with `explorer::set-file-marks(marks)` (API
+1.6), which replaces all its marks. Git marks changed files this way. Each mark has:
+
+- **`path`**, absolute. `/` works on Windows too.
+- **`badge`**: one or two characters at the end of the row, such as `M`.
+- **`color`**: the name of a color the manifest declares, for the row's text.
+- **`tooltip`**: plain text, also read by screen readers.
+- **`faded`**: dims the row, as the explorer does for files Git ignores.
+- **`inherit`**: marks everything inside a folder too, such as an untracked folder.
+- **`propagate`** and **`priority`**: folders that contain the path show its color and a dot.
+  Where several marks reach a folder, the highest priority wins.
+
+A problem's color (an error or warning in the file) wins over a mark's, and both badges show.
+Marks of several extensions on one path show all their badges. Marks need no permission, and
+go when the extension stops. At most 100,000, one per path.
+
+**Colors** are declared in the manifest, and are theme colors: a theme's `[colors]` or the user's
+`[workbench.colors]` can change them, by `<extension id>.<name>`.
+
+```toml
+[colors.modified]
+description = "Files with changes"   # optional
+dark = "#e2c08d"
+light = "#895503"                    # optional; the dark color otherwise
+```
+
+```toml
+# A theme, or [workbench.colors] in settings.toml:
+"ferrite.git.modified" = "#f0c674"
+```
+
 ### Limits
 
 | Item                               | Limit                                   |
@@ -806,8 +1100,15 @@ sockets.
 | Storage                            | 1 MiB per scope; keys 200 bytes         |
 | Preview content                    | 100,000 nodes, 8 MiB of text            |
 | Status text / tooltip              | 100 / 500 characters (cut, not refused) |
-| View items                         | 5,000 per view                          |
+| View items                         | 5,000 per view; 10,000 with `views`     |
+| View containers                    | 5 per extension                         |
+| Pick items / confirm buttons       | 1,000 / 4                               |
 | Decorated ranges                   | 10,000 per type and document            |
+| Programs / colors                  | 10 / 50 per extension                   |
+| Programs running (`spawn`)         | 16 at once                              |
+| Program output                     | 32 MiB; input 16 MiB                    |
+| Watches                            | 32 per extension                        |
+| Explorer marks                     | 100,000 per extension                   |
 
 Misuse fails with `invalid-argument` or `too-large` and changes nothing: an undeclared id, a
 command that isn't the extension's own, or an item whose parent isn't listed before it.
@@ -1099,17 +1400,21 @@ model for testing an extension end to end. Run them with
 Any language that can produce a WebAssembly component for the `extension` world works. The
 component must import nothing but the Ferrite interfaces (`ferrite:extension/host`,
 `ferrite:extension/workbench`, `ferrite:extension/files`, `ferrite:extension/viewers`,
-`ferrite:extension/webviews`, and `ferrite:extension/storage`). The host provides no WASI, so
+`ferrite:extension/webviews`, `ferrite:extension/storage`, `ferrite:extension/workspace`,
+`ferrite:extension/processes`, `ferrite:extension/explorer`, `ferrite:extension/views`, and
+`ferrite:extension/prompts`). The host provides no WASI, so
 a component that imports `wasi:*` interfaces (most toolchains' defaults) fails to start, with a
 message saying so. Rust on `wasm32-unknown-unknown` is the supported path for now.
 
 ## Versioning
 
-The WIT package is versioned: `ferrite:extension@1.5.0`, `api_version = "1"`.
+The WIT package is versioned: `ferrite:extension@1.7.0`, `api_version = "1"`.
 
 - **Additions.** New host functions arrive as minor versions of the package. Version 1.1 added the
   `workbench` interface, 1.2 added previews to it, 1.3 added the `files` interface, 1.4 the
-  `viewers` interface, and 1.5 the `webviews` and `storage` interfaces. Wasmtime
+  `viewers` interface, 1.5 the `webviews` and `storage` interfaces, 1.6 the `workspace`, `processes`, and `explorer`
+  interfaces, and 1.7 the `views` and `prompts` interfaces, with `files::delete`,
+  `workspace::open-file`, and `host::set-configuration`. Wasmtime
   links components built against an older minor version: the host's tests load Tidy builds made
   against 1.0 and 1.2 and a TODOs build made against 1.1.
 - **Breaking changes.** Changes that break existing extensions get a new major version and a new
