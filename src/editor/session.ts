@@ -27,6 +27,7 @@ import { applyUpdate, knownLines, type LineCache } from './lineCache'
 export interface EditorTransport {
   apply(
     id: number,
+    view: number,
     ops: EditorOp[],
     viewport: Viewport,
     known: KnownLines | null,
@@ -34,12 +35,14 @@ export interface EditorTransport {
   ): Promise<WireView>
   view(
     id: number,
+    view: number,
     viewport: Viewport,
     known: KnownLines | null,
     search: SearchQuery | null,
   ): Promise<WireView>
   clipboard(
     id: number,
+    view: number,
     action: ClipboardAction,
     viewport: Viewport,
     known: KnownLines | null,
@@ -80,6 +83,8 @@ export class EditorSession {
 
   constructor(
     private readonly documentId: number,
+    /** The document's view this editor shows (see `ipc/editor.ts`). */
+    private readonly view: number,
     viewport: Viewport,
     /** Receives each view, and the number of the last request it reflects. */
     private readonly onView: (view: EditorView, reflected: number) => void,
@@ -185,10 +190,10 @@ export class EditorSession {
     this.busy = true
     const sent = performance.now()
     const request = !job
-      ? this.transport.view(this.documentId, viewport, known, search)
+      ? this.transport.view(this.documentId, this.view, viewport, known, search)
       : job.kind === 'ops'
-        ? this.transport.apply(this.documentId, job.ops, viewport, known, search)
-        : this.transport.clipboard(this.documentId, job.action, viewport, known, search)
+        ? this.transport.apply(this.documentId, this.view, job.ops, viewport, known, search)
+        : this.transport.clipboard(this.documentId, this.view, job.action, viewport, known, search)
     request
       .then(wire => {
         recordTiming('ipc.roundTrip', performance.now() - sent)

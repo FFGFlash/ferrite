@@ -18,6 +18,7 @@ import { createStore, useStore } from '../state/store'
 import {
   activateTab,
   closeItem,
+  copyItem,
   currentGroup,
   dockStore,
   focusItem,
@@ -125,15 +126,20 @@ function rootEdgeAt(drag: Drag, dock: HTMLElement): Edge | null {
 }
 
 /**
- * Drops on the dock: moves an item there, or opens files from another
- * program there (`null`: where documents open).
+ * Drops on the dock: moves an item there (or, with the copy key held, shows
+ * a document there too), or opens files from another program there
+ * (`null`: where documents open).
  */
 function drop(drag: Drag, target: DropTarget | null): void {
   clearHint()
   const { payload } = drag
   if (payload.kind === 'dock' && target) {
-    moveItem(payload.item, target)
-    focusItem(payload.item)
+    if (drag.copy) {
+      focusItem(copyItem(payload.item, target))
+    } else {
+      moveItem(payload.item, target)
+      focusItem(payload.item)
+    }
   } else if (payload.kind === 'files') {
     void openDroppedFiles(payload.files, payload.folders, target)
   }

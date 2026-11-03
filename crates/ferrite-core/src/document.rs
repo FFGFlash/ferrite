@@ -1,9 +1,10 @@
-use std::collections::VecDeque;
+use std::collections::{BTreeMap, VecDeque};
 use std::fmt;
 use std::path::{Path, PathBuf};
 
 use ferrite_text::{
-  Bias, ChangeSet, Edit, LineEnding, TextBuffer, TextSnapshot, Version, normalize_line_endings,
+  Bias, ChangeSet, Edit, LineEnding, TextBuffer, TextSnapshot, Version, map_offset_through,
+  normalize_line_endings,
 };
 use ferrite_workspace::{FileStamp, TextEncoding};
 
@@ -29,6 +30,55 @@ impl DocumentId {
 impl fmt::Display for DocumentId {
   fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
     write!(f, "#{}", self.0)
+  }
+}
+
+/// One of a document's views. Each editor showing the document has its own
+/// selections, cursor history, and folded regions; the text, undo history,
+/// and everything else are shared. A document starts with view 0, and the
+/// caller numbers any others.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct ViewId(u32);
+
+impl ViewId {
+  pub fn get(self) -> u32 {
+    self.0
+  }
+
+  pub fn from_raw(raw: u32) -> Self {
+    Self(raw)
+  }
+}
+
+/// A view's own state, while another view is in use.
+#[derive(Debug, Clone)]
+struct ViewState {
+  selections: Selections,
+  /// The text version `selections` refer to.
+  version: Version,
+  cursor_history: VecDeque<(Version, Selections)>,
+  folds: Folds,
+}
+
+impl ViewState {
+  /// Follows the edits made in other views since the state was last brought
+  /// up to date. A cursor where text was inserted stays before it.
+  fn catch_up(&mut self, buffer: &TextBuffer) {
+    self.folds.sync(buffer);
+    let since = std::mem::replace(&mut self.version, buffer.version());
+    if since == self.version {
+      return;
+    }
+    self.selections = match buffer.edits_since(since) {
+      Some(edits) => self.selections.map(|s| {
+        Selection::new(
+          map_offset_through(&edits, s.anchor, false),
+          map_offset_through(&edits, s.head, false),
+        )
+      }),
+      // Kept up to date after every change, so never this far behind.
+      None => Selections::cursor(0),
+    };
   }
 }
 
@@ -96,6 +146,7 @@ pub enum LanguageChoice {
 pub struct Document {
   id: DocumentId,
   pub(crate) buffer: TextBuffer,
+  /// The selections of the view in use, as are `cursor_history` and `folds`.
   pub(crate) selections: Selections,
   pub(crate) history: History,
   pub(crate) line_ending: LineEnding,
@@ -108,6 +159,10 @@ pub struct Document {
   cursor_history: VecDeque<(Version, Selections)>,
   /// Folded regions.
   pub(crate) folds: Folds,
+  /// The view in use: operations and viewport updates are its.
+  view: ViewId,
+  /// The other views' state.
+  parked: BTreeMap<ViewId, ViewState>,
   /// The language chosen for the document, if any.
   language: Option<LanguageChoice>,
 }
@@ -144,12 +199,92 @@ impl Document {
       saved_state,
       cursor_history: VecDeque::new(),
       folds,
+      view: ViewId::default(),
+      parked: BTreeMap::new(),
       language: None,
     }
   }
 
   pub fn id(&self) -> DocumentId {
     self.id
+  }
+
+  /// The view in use.
+  pub fn view(&self) -> ViewId {
+    self.view
+  }
+
+  /// Uses `view` from now on: operations move its selections and fold its
+  /// regions, and viewport updates show its folds. A view not seen before
+  /// starts as a copy of the one in use.
+  pub fn use_view(&mut self, view: ViewId) {
+    if view == self.view {
+      return;
+    }
+    let state = self
+      .parked
+      .remove(&view)
+      .unwrap_or_else(|| self.view_state());
+    let previous = std::mem::replace(&mut self.view, view);
+    let parked = self.install(state);
+    self.parked.insert(previous, parked);
+  }
+
+  /// Makes view `to` a copy of view `from` as it is now, as for an editor
+  /// split off another. Does nothing if `from` isn't a view.
+  pub fn copy_view(&mut self, from: ViewId, to: ViewId) {
+    let state = if from == self.view {
+      self.view_state()
+    } else if let Some(state) = self.parked.get(&from) {
+      state.clone()
+    } else {
+      return;
+    };
+    if to == self.view {
+      self.install(state);
+    } else {
+      self.parked.insert(to, state);
+    }
+  }
+
+  /// Forgets a view, once no editor shows it. A document always keeps one,
+  /// so the view in use goes only if another can take its place.
+  pub fn close_view(&mut self, view: ViewId) {
+    if view != self.view {
+      self.parked.remove(&view);
+    } else if let Some((next, state)) = self.parked.pop_first() {
+      self.view = next;
+      self.install(state);
+    }
+  }
+
+  /// The views, in order.
+  pub fn views(&self) -> Vec<ViewId> {
+    let mut views: Vec<ViewId> = self.parked.keys().copied().collect();
+    views.push(self.view);
+    views.sort();
+    views
+  }
+
+  /// A copy of the state of the view in use.
+  fn view_state(&self) -> ViewState {
+    ViewState {
+      selections: self.selections.clone(),
+      version: self.buffer.version(),
+      cursor_history: self.cursor_history.clone(),
+      folds: self.folds.clone(),
+    }
+  }
+
+  /// Puts `state` in use, returning the state it replaces.
+  fn install(&mut self, mut state: ViewState) -> ViewState {
+    state.catch_up(&self.buffer);
+    ViewState {
+      selections: std::mem::replace(&mut self.selections, state.selections),
+      version: self.buffer.version(),
+      cursor_history: std::mem::replace(&mut self.cursor_history, state.cursor_history),
+      folds: std::mem::replace(&mut self.folds, state.folds),
+    }
   }
 
   pub fn buffer(&self) -> &TextBuffer {
@@ -334,10 +469,13 @@ impl Document {
   }
 
   /// Brings the folded regions up to date with the text, unfolding any a
-  /// selection reaches into.
+  /// selection reaches into. The other views follow the text too.
   pub(crate) fn sync_folds(&mut self) {
     self.folds.sync(&self.buffer);
     self.reveal_selections();
+    for state in self.parked.values_mut() {
+      state.catch_up(&self.buffer);
+    }
   }
 
   /// Records selections that were just replaced, for cursor undo.
@@ -551,6 +689,60 @@ tail",
         .expect("reloads")
     );
     assert!(!document.is_dirty());
+  }
+
+  #[test]
+  // Fold regions are naturally single-element arrays here.
+  #[allow(clippy::single_range_in_vec_init)]
+  fn views_have_their_own_selections_and_folds_and_follow_each_others_edits() {
+    use crate::ops::EditorOp;
+    let config = EditorConfig::default();
+    let text: String = (0..10).map(|i| format!("line {i}\n")).collect();
+    let mut document = Document::new(DocumentId(1), &text, None, 0, &config);
+    let cursor = |offset| EditorOp::SetCursor {
+      offset,
+      extend: false,
+      add: false,
+    };
+    let head = |document: &Document| document.selections().primary().head;
+
+    document.apply(cursor(14)).expect("applies");
+    document.set_folded([3..6]);
+    let second = ViewId::from_raw(1);
+    document.use_view(second);
+    assert_eq!(head(&document), 14, "a new view starts as a copy");
+    assert_eq!(document.folded(), [3..6]);
+
+    document.apply(EditorOp::UnfoldAll).expect("applies");
+    document.apply(cursor(0)).expect("applies");
+    document
+      .apply(EditorOp::Insert("new\n".into()))
+      .expect("applies");
+    assert_eq!(head(&document), 4);
+
+    document.use_view(ViewId::default());
+    assert_eq!(
+      head(&document),
+      18,
+      "the cursor moved with the text before it"
+    );
+    assert_eq!(document.folded(), [4..7], "and so did the folds");
+    document.use_view(second);
+    assert_eq!(head(&document), 4);
+    assert!(document.folded().is_empty());
+
+    let third = ViewId::from_raw(2);
+    document.copy_view(ViewId::default(), third);
+    document.use_view(third);
+    assert_eq!(head(&document), 18);
+    assert_eq!(document.views(), [ViewId::default(), second, third]);
+
+    document.close_view(third);
+    assert_ne!(document.view(), third, "another view takes its place");
+    assert_eq!(document.views(), [ViewId::default(), second]);
+    document.close_view(ViewId::default());
+    document.close_view(second);
+    assert_eq!(document.views().len(), 1, "a document keeps one view");
   }
 
   #[test]

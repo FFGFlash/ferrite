@@ -7,19 +7,34 @@
  * document closes) and decides only where things go. Views and pages are
  * added when shown.
  *
+ * A document can show in several groups, once in each: each of its tabs
+ * shows a view of its own (`ipc/editor.ts`), with its own selections,
+ * folds, and scroll position.
+ *
  * The layout is saved with the rest of the workbench layout. Documents are
- * saved by path (`file:<path>`), because document ids change between
- * runs; they hold their place until the documents load. Previews aren't
- * saved: their extensions open them again. Files in viewers (and binary
- * files waiting to be opened as text) are saved as they are.
+ * saved by path (`file:<path>`, and `copy:<n>:<path>` for their other
+ * tabs), because document ids change between runs; they hold their place
+ * until the documents load. Previews aren't saved: their extensions open
+ * them again. Files in viewers (and binary files waiting to be opened as
+ * text) are saved as they are.
  */
 import { setDropFallback } from '../components/drag'
-import { activeEditor, editorFor } from '../editor/activeEditor'
+import {
+  activeEditor,
+  editorsFor,
+  savedScroll,
+  saveScroll,
+  setShownView,
+  shownView,
+} from '../editor/activeEditor'
+import { log } from '../ipc'
+import * as ipc from '../ipc/editor'
 import {
   activate as activateDocument,
   close as closeDocument,
   documentsStore,
   openPath,
+  takeOpenRequest,
 } from '../state/documents'
 import { layoutStore, updateLayout } from '../state/layout'
 import { notify, reportError } from '../state/notifications'
@@ -68,7 +83,9 @@ import {
   type ItemKind,
 } from './model'
 
-export const documentItem = (id: number): ItemId => `document:${id}`
+/** A document's tab showing its view `view` (see `ipc/editor.ts`); its first tab shows view 0. */
+export const documentItem = (id: number, view = 0): ItemId =>
+  view === 0 ? `document:${id}` : `document:${id}:${view}`
 export const viewItem = (id: string): ItemId => `view:${id}`
 export const terminalItem = (id: number): ItemId => `terminal:${id}`
 export const previewItem = (id: string): ItemId => `preview:${id}`
@@ -76,6 +93,8 @@ export const previewItem = (id: string): ItemId => `preview:${id}`
 export const pageItem = (id: string): ItemId => `page:${id}`
 /** A saved document, until the documents load. */
 const fileItem = (path: string): ItemId => `file:${path}`
+/** Another saved tab of a document, the `n`th (from 1). */
+const savedCopyItem = (n: number, path: string): ItemId => `copy:${n}:${path}`
 /**
  * A file in an extension's viewer (its full id), or, for `null`, a binary
  * file waiting for the user to open it as text.
@@ -93,6 +112,34 @@ export function parseViewerItem(item: ItemId): { viewer: string | null; path: st
 /** The id after the kind: a document or terminal number, or a view, preview, or page id. */
 export function itemId(item: ItemId): string {
   return item.slice(item.indexOf(':') + 1)
+}
+
+/** The document of a document's tab, and the view it shows. */
+export function parseDocumentItem(item: ItemId): { document: number; view: number } {
+  const [document, view] = itemId(item).split(':')
+  return { document: Number(document), view: Number(view ?? 0) }
+}
+
+/** The document a tab shows, if it's a document's. */
+function documentOf(item: ItemId): number | null {
+  return itemKind(item) === 'document' ? parseDocumentItem(item).document : null
+}
+
+/** The tabs of a document, in reading order. */
+function documentTabs(layout: DockLayout, id: number): ItemId[] {
+  return allItems(layout).filter(item => documentOf(item) === id)
+}
+
+/** The tab of document `id` in `group`, if it shows there. */
+function documentTabIn(group: DockGroup | undefined, id: number): ItemId | undefined {
+  return group?.items.find(item => documentOf(item) === id)
+}
+
+/** The saved tabs of the file at `path`, in reading order. */
+function savedTabs(layout: DockLayout, path: string): ItemId[] {
+  return allItems(layout).filter(
+    item => item === fileItem(path) || (item.startsWith('copy:') && itemId(itemId(item)) === path),
+  )
 }
 
 const BUILTIN_VIEWS = ['explorer', 'search', 'extensions'].map(viewItem)
@@ -163,6 +210,74 @@ export function hasClosedTab(): boolean {
 
 function setLayout(layout: DockLayout): void {
   dockStore.set(layout)
+  // A document whose tab in use closed goes on in another.
+  for (const { id } of documentsStore.get().documents) {
+    const tabs = documentTabs(layout, id)
+    if (tabs.length > 0 && !tabs.includes(documentItem(id, shownView(id)))) {
+      noteDocumentTab(preferredTab(layout, id, tabs)!)
+    }
+  }
+}
+
+/** Records the tab a document is used in: its editor is the one commands act on. */
+function noteDocumentTab(item: ItemId): void {
+  const { document, view } = parseDocumentItem(item)
+  setShownView(document, view)
+}
+
+/**
+ * The tab to show document `id` in: the one in the group documents open
+ * in, else the one last used.
+ */
+function preferredTab(
+  layout: DockLayout,
+  id: number,
+  tabs = documentTabs(layout, id),
+): ItemId | null {
+  return (
+    documentTabIn(findGroup(layout, documentGroup), id) ??
+    tabs.find(item => item === documentItem(id, shownView(id))) ??
+    tabs[0] ??
+    null
+  )
+}
+
+/** The tab document `id` is used in (as `preferredTab` decides). */
+export function documentTab(id: number): ItemId {
+  return preferredTab(dockStore.get(), id) ?? documentItem(id)
+}
+
+/** The next view number for each document's new tabs. */
+const nextViews = new Map<number, number>()
+
+function newView(id: number): number {
+  const view = nextViews.get(id) ?? 1
+  nextViews.set(id, view + 1)
+  return view
+}
+
+/**
+ * A new tab for document `id` showing a copy of its view `from`: the same
+ * selections, folds, and scroll position, as when splitting an editor.
+ */
+function copyTab(id: number, from: number): ItemId {
+  const view = newView(id)
+  ipc.copyView(id, from, view).catch((error: unknown) => {
+    // Then the new view starts as a copy of another.
+    log('warn', `Copying view ${from} of document ${id}: ${String(error)}`)
+  })
+  const source = editorsFor(id).find(editor => editor.view === from)
+  saveScroll(id, view, source?.scrollPosition() ?? savedScroll(id, from))
+  return documentItem(id, view)
+}
+
+/** Forgets the view of a document's tab that closed while others show the document. */
+function closeView(item: ItemId): void {
+  const { document, view } = parseDocumentItem(item)
+  saveScroll(document, view, null)
+  ipc.closeView(document, view).catch((error: unknown) => {
+    log('warn', `Closing view ${view} of document ${document}: ${String(error)}`)
+  })
 }
 
 function setCurrent(id: string): void {
@@ -227,8 +342,9 @@ function placementFor(layout: DockLayout, item: ItemId): { target: DropTarget; s
 /** The group of a preview's document, else the group documents open in. */
 function previewSourceGroup(layout: DockLayout, item: ItemId): DockGroup {
   const document = previewsStore.get().find(preview => previewItem(preview.id) === item)?.document
+  const tab = document != null ? preferredTab(layout, document) : null
   return (
-    (document != null ? groupOf(layout, documentItem(document)) : undefined) ??
+    (tab ? groupOf(layout, tab) : undefined) ??
     findGroup(layout, documentGroup) ??
     findGroup(layout, layout.main)!
   )
@@ -322,30 +438,54 @@ function syncDocuments(): void {
   const ids = new Set(documents.map(document => document.id))
   for (const id of knownDocuments) {
     if (!ids.has(id)) {
-      layout = removeItem(layout, documentItem(id))
+      layout = documentTabs(layout, id).reduce(removeItem, layout)
+      setShownView(id, null)
+      nextViews.delete(id)
     }
   }
+  /** Documents given their tabs just now. */
+  const placed = new Set<number>()
   for (const document of documents) {
-    const item = documentItem(document.id)
-    if (groupOf(layout, item)) {
+    if (documentTabs(layout, document.id).length > 0) {
       continue
     }
-    const saved = document.path === null ? null : fileItem(document.path)
-    layout =
-      saved && groupOf(layout, saved) ? replaceItem(layout, saved, item) : ensure(layout, item)
+    placed.add(document.id)
+    const saved = document.path === null ? [] : savedTabs(layout, document.path)
+    if (saved.length === 0) {
+      layout = ensure(layout, documentItem(document.id))
+    }
+    // The first saved tab shows view 0, the others views of their own.
+    saved.forEach((item, index) => {
+      const view = index === 0 ? 0 : newView(document.id)
+      layout = documentTabIn(groupOf(layout, item), document.id)
+        ? removeItem(layout, item)
+        : replaceItem(layout, item, documentItem(document.id, view))
+    })
   }
   knownDocuments = ids
-  if (activeId !== null) {
-    layout = activateItem(layout, documentItem(activeId))
+  let tab: ItemId | null = null
+  if (activeId !== null && ids.has(activeId)) {
+    tab = documentTabIn(findGroup(layout, documentGroup), activeId) ?? null
+    if (!tab && takeOpenRequest(activeId) && !placed.has(activeId)) {
+      // Opened while it shows elsewhere: it opens where documents do, too.
+      tab = copyTab(activeId, shownView(activeId))
+      const { target, size } = placementFor(layout, tab)
+      layout = placeItem(layout, tab, target, size)
+    }
+    tab ??= preferredTab(layout, activeId)
+  }
+  if (tab) {
+    layout = activateItem(layout, tab)
   }
   if (layout !== before) {
     setLayout(layout)
   }
-  if (activeId !== null) {
-    const group = groupOf(layout, documentItem(activeId))
+  if (tab) {
+    const group = groupOf(layout, tab)
     if (group) {
       setCurrent(group.id)
     }
+    noteDocumentTab(tab)
   }
 }
 
@@ -403,35 +543,41 @@ previewsStore.subscribe(syncPreviews)
 // Saving and restoring.
 
 /**
- * The layout as saved: documents by path; untitled documents and previews
- * aren't saved.
+ * The layout as saved: documents by path (a document's first tab in
+ * reading order as `file:<path>`, the others as `copy:<n>:<path>`);
+ * untitled documents and previews aren't saved.
  */
 export function serializeDock(layout: DockLayout = dockStore.get()): DockLayout {
   const paths = new Map(
-    documentsStore.get().documents.map(document => [documentItem(document.id), document.path]),
+    documentsStore.get().documents.map(document => [document.id, document.path]),
   )
-  const saved = (item: ItemId): ItemId | null => {
-    if (itemKind(item) === 'preview') {
-      return null
+  /** Each item as saved; `null` if it isn't. */
+  const saved = new Map<ItemId, ItemId | null>()
+  const tabsOfPath = new Map<string, number>()
+  for (const item of allItems(layout)) {
+    const document = documentOf(item)
+    const path = document === null ? null : paths.get(document)
+    if (path) {
+      const n = tabsOfPath.get(path) ?? 0
+      tabsOfPath.set(path, n + 1)
+      saved.set(item, n === 0 ? fileItem(path) : savedCopyItem(n, path))
+    } else {
+      saved.set(item, document !== null || itemKind(item) === 'preview' ? null : item)
     }
-    if (itemKind(item) !== 'document') {
-      return item
-    }
-    const path = paths.get(item)
-    return path ? fileItem(path) : null
   }
+  const save = (item: ItemId) => saved.get(item) ?? null
   let result = layout
   for (const group of groups(layout)) {
     result = updateGroup(result, group.id, g => {
-      const items = g.items.map(saved).filter((item): item is ItemId => item !== null)
-      const active = g.active === null ? null : saved(g.active)
+      const items = g.items.map(save).filter((item): item is ItemId => item !== null)
+      const active = g.active === null ? null : save(g.active)
       return { ...g, items, active: active ?? items[0] ?? null }
     })
   }
   return result
 }
 
-const SAVED_ITEM = /^(file:.+|view:.+|terminal:\d+|page:.+|viewer:[^:]*:.+)$/s
+const SAVED_ITEM = /^(file:.+|copy:\d+:.+|view:.+|terminal:\d+|page:.+|viewer:[^:]*:.+)$/s
 
 /**
  * Restores the saved layout (or the default, honouring the side bar
@@ -450,6 +596,7 @@ export function restoreDock(): void {
       activeView: typeof legacy.activeView === 'string' ? legacy.activeView : undefined,
     })
   knownDocuments = new Set()
+  nextViews.clear()
   knownTerminals = new Set()
   knownPreviews = new Set()
   closedTabs.length = 0
@@ -464,7 +611,9 @@ export function restoreDock(): void {
 /** Drops saved documents that didn't open again. */
 export function documentsRestored(): void {
   const layout = dockStore.get()
-  const stale = allItems(layout).filter(item => item.startsWith('file:'))
+  const stale = allItems(layout).filter(
+    item => item.startsWith('file:') || item.startsWith('copy:'),
+  )
   if (stale.length > 0) {
     setLayout(stale.reduce(removeItem, layout))
   }
@@ -517,9 +666,13 @@ export function focusItem(item: ItemId): void {
     case 'terminal':
       focusTerminal(Number(id))
       return
-    case 'document':
-      requestAnimationFrame(() => (editorFor(Number(id)) ?? activeEditor.get())?.focus())
+    case 'document': {
+      const { document, view } = parseDocumentItem(item)
+      requestAnimationFrame(() =>
+        (editorsFor(document).find(editor => editor.view === view) ?? activeEditor.get())?.focus(),
+      )
       return
+    }
     default:
       requestAnimationFrame(() => {
         const group = groupOf(dockStore.get(), item)
@@ -617,7 +770,9 @@ setFileTabHandler((path, tab) => {
 /**
  * Shows the file of a document's tab or a viewer's tab another way, in the
  * same place: in an extension's viewer (`viewer`), or as text (`null`),
- * even if it's binary. A document with unsaved changes asks first.
+ * even if it's binary. Only that tab changes: a document showing in other
+ * groups stays open there. Closing the last tab of a document with unsaved
+ * changes asks first.
  */
 export async function reopenWith(item: ItemId, viewer: string | null): Promise<void> {
   const layout = dockStore.get()
@@ -626,13 +781,20 @@ export async function reopenWith(item: ItemId, viewer: string | null): Promise<v
     return
   }
   if (itemKind(item) === 'document') {
-    const id = Number(itemId(item))
+    const id = parseDocumentItem(item).document
     const path = documentsStore.get().documents.find(document => document.id === id)?.path
     if (viewer === null || !path) {
       return
     }
-    // The viewer waits beside the document while it closes, which may ask.
     const tab = viewerItem(viewer, path)
+    if (documentTabs(layout, id).length > 1) {
+      // It shows elsewhere too: the viewer takes only this tab's place.
+      closeView(item)
+      setLayout(replaceItem(groupOf(layout, tab) ? removeItem(layout, tab) : layout, item, tab))
+      showItem(tab)
+      return
+    }
+    // The viewer waits beside the document while it closes, which may ask.
     const index = group.items.indexOf(item) + 1
     setLayout(placeItem(layout, tab, { kind: 'tabs', group: group.id, index }, 0.5))
     await closeDocument(id)
@@ -649,6 +811,16 @@ export async function reopenWith(item: ItemId, viewer: string | null): Promise<v
   const { path } = parseViewerItem(item)
   if (viewer !== null) {
     showFileTab({ viewer, path })
+    return
+  }
+  const open = documentsStore.get().documents.find(document => document.path === path)
+  if (open) {
+    // Open as text elsewhere: it shows here too, in the viewer's place.
+    const there = documentTabIn(group, open.id)
+    const tab = there ?? copyTab(open.id, shownView(open.id))
+    viewerClosed(item)
+    setLayout(there ? removeItem(layout, item) : replaceItem(layout, item, tab))
+    showItem(tab)
     return
   }
   // The document takes the place when it opens (`syncDocuments`).
@@ -670,11 +842,14 @@ setDropFallback(drag => {
 
 /** Records the item as the one in use, for the stores that care. */
 function noteActive(item: ItemId): void {
-  const id = itemId(item)
-  if (itemKind(item) === 'document' && documentsStore.get().activeId !== Number(id)) {
-    activateDocument(Number(id))
+  const document = documentOf(item)
+  if (document !== null) {
+    noteDocumentTab(item)
+    if (documentsStore.get().activeId !== document) {
+      activateDocument(document)
+    }
   } else if (itemKind(item) === 'terminal') {
-    setActiveTerminal(Number(id))
+    setActiveTerminal(Number(itemId(item)))
   }
 }
 
@@ -845,11 +1020,20 @@ async function closeTab(item: ItemId): Promise<boolean> {
   const id = itemId(item)
   switch (itemKind(item)) {
     case 'document': {
-      const path = documentsStore.get().documents.find(d => d.id === Number(id))?.path
-      await closeDocument(Number(id))
-      const closed = !isOpen(Number(id))
-      if (closed && path && place) {
-        rememberClosed({ item: fileItem(path), ...place })
+      const { document } = parseDocumentItem(item)
+      const path = documentsStore.get().documents.find(d => d.id === document)?.path
+      const remember = () => path && place && rememberClosed({ item: fileItem(path), ...place })
+      if (documentTabs(dockStore.get(), document).length > 1) {
+        // It shows elsewhere too: only this tab closes.
+        closeView(item)
+        setLayout(removeItem(dockStore.get(), item))
+        remember()
+        break
+      }
+      await closeDocument(document)
+      const closed = !isOpen(document)
+      if (closed) {
+        remember()
       }
       return closed
     }
@@ -932,8 +1116,7 @@ const isEditorTab = (item: ItemId) => {
 }
 
 const isDirty = (item: ItemId) =>
-  itemKind(item) === 'document' &&
-  documentsStore.get().documents.some(d => documentItem(d.id) === item && d.dirty)
+  documentsStore.get().documents.some(d => d.id === documentOf(item) && d.dirty)
 
 /** Closes the current group's tabs, or those `keep` doesn't keep. */
 export function closeGroupTabs(keep: (item: ItemId) => boolean = () => false): Promise<void> {
@@ -959,10 +1142,13 @@ export async function reopenClosedTab(): Promise<void> {
   for (let entry = closedTabs.pop(); entry; entry = closedTabs.pop()) {
     const { item, group, index } = entry
     const path = item.startsWith('file:') ? itemId(item) : null
+    // A document still showing counts as closed where its group lacks it.
+    const document = documentsStore.get().documents.find(document => document.path === path)
+    const there = findGroup(dockStore.get(), group)
     const open =
       path === null
         ? groupOf(dockStore.get(), item) !== undefined
-        : documentsStore.get().documents.some(document => document.path === path)
+        : document !== undefined && (!there || documentTabIn(there, document.id) !== undefined)
     if (open) {
       continue
     }
@@ -986,17 +1172,14 @@ export async function reopenClosedTab(): Promise<void> {
 
 /**
  * Opens the file at `path` at `target`, or where documents open for `null`,
- * and resolves to its tab (`null` if it didn't open). An open document moves
- * there. A new one's saved item (`file:<path>`) holds the place until it
- * opens and takes it (`syncDocuments`).
+ * and resolves to its tab (`null` if it didn't open). An open document gets
+ * a tab there (`placeDocument`). A new one's saved item (`file:<path>`)
+ * holds the place until it opens and takes it (`syncDocuments`).
  */
 async function openPathAt(path: string, target: DropTarget | null): Promise<ItemId | null> {
   const open = documentsStore.get().documents.find(document => document.path === path)
-  if (open) {
-    if (target) {
-      moveItem(documentItem(open.id), target)
-    }
-    return documentItem(open.id)
+  if (open && target) {
+    return placeDocument(open.id, target)
   }
   const saved = fileItem(path)
   if (target) {
@@ -1010,12 +1193,26 @@ async function openPathAt(path: string, target: DropTarget | null): Promise<Item
     // spelling of its path, or showed in a tab it already had; then that
     // moves to the place.
     setLayout(removeItem(dockStore.get(), saved))
-    const opened = summary ? documentItem(summary.id) : tab
-    if (opened && target) {
-      moveItem(opened, target)
+    if (summary && target) {
+      return placeDocument(summary.id, target)
+    }
+    if (tab && target) {
+      moveItem(tab, target)
     }
   }
-  return summary ? documentItem(summary.id) : (tab ?? null)
+  return summary ? documentTab(summary.id) : (tab ?? null)
+}
+
+/**
+ * Shows an open document at `target`: its tab in that group moves there,
+ * or, if it has none there, a new tab of it does.
+ */
+function placeDocument(id: number, target: DropTarget): ItemId {
+  const there =
+    target.kind === 'tabs' ? documentTabIn(findGroup(dockStore.get(), target.group), id) : undefined
+  const tab = there ?? copyTab(id, shownView(id))
+  moveItem(tab, target)
+  return tab
 }
 
 /**
@@ -1072,10 +1269,25 @@ export function cycleTab(step: number): void {
   showItem(next)
 }
 
-/** Moves an item (dragged, or from a command) and makes it current. */
+/**
+ * Moves an item (dragged, or from a command) and makes it current. A
+ * document's tab moved into a group that shows the document already joins
+ * the tab there, as a group shows a document once.
+ */
 export function moveItem(item: ItemId, target: DropTarget): void {
   const layout = dockStore.get()
   const kind = itemKind(item)
+  const document = documentOf(item)
+  const twin =
+    document !== null && target.kind === 'tabs'
+      ? documentTabIn(findGroup(layout, target.group), document)
+      : undefined
+  if (twin && twin !== item) {
+    closeView(item)
+    setLayout(removeItem(layout, item))
+    moveItem(twin, target)
+    return
+  }
   const next = placeItem(layout, item, target, kind === 'terminal' ? 0.3 : 0.2)
   if (next === layout) {
     return
@@ -1086,6 +1298,27 @@ export function moveItem(item: ItemId, target: DropTarget): void {
     setCurrent(group.id)
   }
   noteActive(item)
+}
+
+/**
+ * Copies a tab to `target` (dragged with the copy key held, or split off):
+ * a document shows there too, in a view of its own. Anything else can be
+ * in one place only, so it moves. Returns the tab at the target.
+ */
+export function copyItem(item: ItemId, target: DropTarget): ItemId {
+  const document = documentOf(item)
+  const from = groupOf(dockStore.get(), item)
+  if (document === null || (target.kind === 'tabs' && target.group === from?.id)) {
+    moveItem(item, target)
+    return item
+  }
+  const there =
+    target.kind === 'tabs'
+      ? documentTabIn(findGroup(dockStore.get(), target.group), document)
+      : undefined
+  const tab = there ?? copyTab(document, parseDocumentItem(item).view)
+  moveItem(tab, target)
+  return tab
 }
 
 /** The groups on screen, with their rectangles. */
@@ -1124,12 +1357,14 @@ export function moveCurrentTab(edge: Edge): void {
   focusItem(item)
 }
 
-/** Moves the current tab into a new group beside its group. */
+/**
+ * Splits the current tab off into a new group beside its group: a document
+ * shows there too, as in VS Code; anything else moves there.
+ */
 export function splitCurrentTab(edge: Edge): void {
   const group = current()
   if (group?.active) {
-    moveItem(group.active, { kind: 'split', group: group.id, edge })
-    focusItem(group.active)
+    focusItem(copyItem(group.active, { kind: 'split', group: group.id, edge }))
   }
 }
 
@@ -1175,7 +1410,15 @@ export function resize(splitId: string, sizes: number[]): void {
  */
 export function resetLayout(): void {
   const old = dockStore.get()
-  const items = allItems(old)
+  // Documents all go to the main group, so each keeps one tab there: the one in use.
+  const items = allItems(old).filter(item => {
+    const document = documentOf(item)
+    if (document === null || item === preferredTab(old, document)) {
+      return true
+    }
+    closeView(item)
+    return false
+  })
   let layout = defaultDock()
   const placeAll = (kind: ItemKind) => {
     for (const item of items.filter(other => itemKind(other) === kind)) {
@@ -1197,6 +1440,6 @@ export function resetLayout(): void {
   setLayout(normalize(layout))
   const { activeId } = documentsStore.get()
   if (activeId !== null) {
-    showItem(documentItem(activeId), false)
+    showItem(documentTab(activeId), false)
   }
 }

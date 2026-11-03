@@ -157,6 +157,8 @@ pub fn run() {
       editor::editor_peek_lines,
       editor::editor_apply,
       editor::editor_clipboard,
+      editor::editor_copy_view,
+      editor::editor_close_view,
       events::events_subscribe,
       settings::settings_get,
       settings::settings_file,

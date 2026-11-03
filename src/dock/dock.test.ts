@@ -14,6 +14,8 @@ vi.mock('../ipc/terminal', () => ({
 vi.mock('../ipc/editor', () => ({
   closeDocument: vi.fn(async () => true),
   openDocument: vi.fn(),
+  copyView: vi.fn(async () => {}),
+  closeView: vi.fn(async () => {}),
 }))
 vi.mock('../ipc/workspace', async importOriginal => ({
   ...(await importOriginal<typeof import('../ipc/workspace')>()),
@@ -322,6 +324,82 @@ describe('dock', () => {
     expect(dock.currentGroup.get()).toBe(group.id)
   })
 
+  it('splits a document off into a new group, showing it in both', () => {
+    documentsStore.set({ documents: [doc(1)], activeId: 1 })
+    dock.groupFocused('main')
+    dock.splitCurrentTab('right')
+    expect(groupItems('main')).toEqual(['document:1'])
+    const side = groupHolding('document:1:1')!
+    expect(side.id).not.toBe('main')
+    expect(dock.currentGroup.get()).toBe(side.id)
+    expect(dock.documentTab(1)).toBe('document:1:1')
+    expect(editorIpc.copyView).toHaveBeenCalledWith(1, 0, 1)
+
+    // Copying again within a group that shows it, or moving it there, keeps one tab.
+    dock.copyItem('document:1', { kind: 'tabs', group: side.id, index: 0 })
+    expect(groupItems(side.id)).toEqual(['document:1:1'])
+    dock.moveItem('document:1', { kind: 'tabs', group: side.id, index: 0 })
+    expect(groupItems(side.id)).toEqual(['document:1:1'])
+    expect(editorIpc.closeView).toHaveBeenCalledWith(1, 0)
+    expect(groupItems('main')).toEqual([])
+  })
+
+  it('closes only the tab of a document showing elsewhere, then the document', async () => {
+    documentsStore.set({ documents: [doc(1)], activeId: 1 })
+    const tab = dock.copyItem('document:1', { kind: 'split', group: 'main', edge: 'right' })
+    dock.closeItem(tab)
+    await vi.waitFor(() => expect(groupHolding(tab)).toBeUndefined())
+    expect(editorIpc.closeView).toHaveBeenCalledWith(1, 1)
+    expect(editorIpc.closeDocument).not.toHaveBeenCalled()
+    expect(dock.documentTab(1)).toBe('document:1')
+
+    dock.closeItem('document:1')
+    await vi.waitFor(() => expect(editorIpc.closeDocument).toHaveBeenCalledWith(1))
+  })
+
+  it('opens a document showing elsewhere where documents open, as VS Code does', async () => {
+    const { activate, openPath } = await import('../state/documents')
+    documentsStore.set({ documents: [doc(1), doc(2)], activeId: 2 })
+    dock.moveItem('document:2', { kind: 'split', group: 'main', edge: 'right' })
+    const side = groupHolding('document:2')!.id
+
+    // Switching to it shows it where it is.
+    activate(1)
+    expect(groupItems(side)).toEqual(['document:2'])
+    expect(dock.currentGroup.get()).toBe('main')
+
+    // Opening it opens it in the group last used for documents too.
+    dock.groupFocused(side)
+    vi.mocked(editorIpc.openDocument).mockResolvedValueOnce(doc(1))
+    await openPath('/w/file1.rs')
+    expect(groupItems(side)).toEqual(['document:2', 'document:1:1'])
+    expect(groupItems('main')).toEqual(['document:1'])
+    expect(dock.documentTab(1)).toBe('document:1:1')
+
+    // Opened again, it shows in that tab.
+    vi.mocked(editorIpc.openDocument).mockResolvedValueOnce(doc(1))
+    await openPath('/w/file1.rs')
+    expect(groupItems(side)).toEqual(['document:2', 'document:1:1'])
+  })
+
+  it('saves and restores every tab of a document', () => {
+    documentsStore.set({ documents: [doc(1)], activeId: 1 })
+    dock.copyItem('document:1', { kind: 'split', group: 'main', edge: 'right' })
+    const saved = dock.serializeDock()
+    const savedItems = groups(saved).flatMap(group => group.items)
+    expect(savedItems).toContain('file:/w/file1.rs')
+    expect(savedItems).toContain('copy:1:/w/file1.rs')
+
+    documentsStore.set({ documents: [], activeId: null })
+    layoutStore.set({ ...DEFAULT_LAYOUT, dock: JSON.parse(JSON.stringify(saved)) })
+    dock.restoreDock()
+    documentsStore.set({ documents: [doc(7, '/w/file1.rs')], activeId: 7 })
+    dock.documentsRestored()
+    expect(groupItems('main')).toEqual(['document:7'])
+    const side = groups(layout()).find(group => group.id !== 'main' && group.id !== 'g1')!
+    expect(side.items).toEqual(['document:7:1'])
+  })
+
   it('saves documents by path and puts them back in place', () => {
     documentsStore.set({ documents: [doc(1), doc(2, null)], activeId: 1 })
     dock.moveItem('document:1', { kind: 'tabs', group: 'g1', index: 0 })
@@ -516,7 +594,7 @@ describe('dock', () => {
     expect(findGroup(layout(), 'g1')!.active).toBe('view:extensions')
   })
 
-  it('opens dropped files in order where they were dropped, moving open ones there', async () => {
+  it('opens dropped files in order where they were dropped, open ones there too', async () => {
     documentsStore.set({ documents: [doc(1), doc(2)], activeId: 1 })
     await dock.openDroppedFiles(['/elsewhere/a.txt', '/w/file2.rs', '/elsewhere/b.txt'], [], {
       kind: 'split',
@@ -525,9 +603,10 @@ describe('dock', () => {
     })
     const group = groupHolding('document:100')!
     expect(group.id).not.toBe('main')
-    expect(group.items).toEqual(['document:100', 'document:2', 'document:101'])
+    expect(group.items).toEqual(['document:100', 'document:2:1', 'document:101'])
     expect(group.active).toBe('document:101')
-    expect(groupItems('main')).toEqual(['document:1'])
+    expect(groupItems('main')).toEqual(['document:1', 'document:2'])
+    expect(editorIpc.copyView).toHaveBeenCalledWith(2, 0, 1)
   })
 
   it('opens dropped files where documents open, and the first dropped folder', async () => {
@@ -575,5 +654,26 @@ describe('dock', () => {
     vi.mocked(editorIpc.closeDocument).mockResolvedValueOnce(false)
     await dock.reopenWith('document:100', 'example.images.image')
     expect(groupItems('main')).toEqual(['document:1', 'document:100'])
+  })
+
+  it('reopens only the one tab of a document showing in several groups', async () => {
+    documentsStore.set({ documents: [doc(1), doc(2, '/w/cat.png')], activeId: 2 })
+    const copy = dock.copyItem('document:2', { kind: 'split', group: 'main', edge: 'right' })
+    const side = groupHolding(copy)!.id
+    const viewer = dock.viewerItem('example.images.image', '/w/cat.png')
+
+    await dock.reopenWith(copy, 'example.images.image')
+    expect(groupItems(side)).toEqual([viewer])
+    expect(groupItems('main')).toEqual(['document:1', 'document:2'])
+    expect(editorIpc.closeDocument).not.toHaveBeenCalled()
+    expect(editorIpc.closeView).toHaveBeenCalledWith(2, 1)
+
+    // And back: the document, open in the main group, shows here again.
+    await dock.reopenWith(viewer, null)
+    expect(editorIpc.openDocument).not.toHaveBeenCalled()
+    expect(groupItems(side)).toEqual(['document:2:2'])
+    expect(groupItems('main')).toEqual(['document:1', 'document:2'])
+    // No place is left waiting for a file to open.
+    expect(groups(layout()).flatMap(group => group.items)).not.toContain('file:/w/cat.png')
   })
 })

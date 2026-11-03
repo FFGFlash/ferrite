@@ -12,7 +12,7 @@ import type { Reference } from '../ipc/lsp'
 import { openPath } from '../state/documents'
 import { createStore } from '../state/store'
 import { isWithin } from '../state/workspace'
-import { editorFor } from './activeEditor'
+import { editorsFor, shownView } from './activeEditor'
 import { isWordChar } from './completion'
 
 /** A file's references, in order. */
@@ -28,8 +28,9 @@ export interface ReferenceIndex {
 }
 
 export interface PeekState {
-  /** The document whose editor shows the peek. */
+  /** The document whose editor shows the peek, and that editor's view of it. */
   documentId: number
+  view: number
   /** Where the peek opens: below this line, its arrow pointing here. */
   anchor: Position
   /** The kind of results, for the header, e.g. "References". */
@@ -138,9 +139,18 @@ export function referenceCount(groups: readonly ReferenceGroup[]): number {
   return groups.reduce((sum, group) => sum + group.references.length, 0)
 }
 
-/** Opens a peek in `documentId`'s editor below `anchor`, starting on the reference nearest it. */
+/** Whether the peek shows in the editor of `documentId` showing its view `view`. */
+export function peekIsIn(state: PeekState | null, documentId: number, view: number): boolean {
+  return state?.documentId === documentId && state.view === view
+}
+
+/**
+ * Opens a peek in the editor of `documentId` showing its view `view`,
+ * below `anchor`, starting on the reference nearest it.
+ */
 export function openPeek(
   documentId: number,
+  view: number,
   path: string | null,
   anchor: Position,
   title: string,
@@ -150,6 +160,7 @@ export function openPeek(
   const selected = nearestReference(groups, path ?? '', anchor)
   peekStore.set({
     documentId,
+    view,
     anchor,
     title,
     groups,
@@ -171,16 +182,18 @@ export function closePeek(focusEditor = true): void {
   }
   peekStore.set(null)
   if (focusEditor) {
-    editorFor(state.documentId)?.focus()
+    editorsFor(state.documentId)
+      .find(editor => editor.view === state.view)
+      ?.focus()
   }
 }
 
 /** The document whose editor the peek is leaving for another file's. */
 let movingFrom: number | null = null
 
-/** Closes the peek in `documentId`'s editor, which is going away. */
-export function closePeekIn(documentId: number): void {
-  if (peekStore.get()?.documentId === documentId && movingFrom !== documentId) {
+/** Closes the peek in the editor of a document's view, which is going away. */
+export function closePeekIn(documentId: number, view: number): void {
+  if (peekIsIn(peekStore.get(), documentId, view) && movingFrom !== documentId) {
     peekStore.set(null)
   }
 }
@@ -263,6 +276,8 @@ export async function goToNextReference(forward: boolean): Promise<void> {
   peekStore.set({
     ...current,
     documentId: opened.id,
+    // The view the dock shows the file in, as it opened.
+    view: shownView(opened.id),
     anchor: reference.start,
     selected,
     collapsed,

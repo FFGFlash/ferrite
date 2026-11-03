@@ -39,8 +39,8 @@ function makeView(lines: string[], overrides: Partial<View> = {}): View {
 function fakeTransport(initial: View) {
   const applied: EditorOp[][] = []
   const transport: EditorTransport = {
-    view: vi.fn((_id: number, _viewport: Viewport) => Promise.resolve(initial)),
-    apply: vi.fn((_id: number, ops: EditorOp[]) => {
+    view: vi.fn((_id: number, _view: number, _viewport: Viewport) => Promise.resolve(initial)),
+    apply: vi.fn((_id: number, _view: number, ops: EditorOp[]) => {
       applied.push(ops)
       return Promise.resolve(
         makeView(['changed'], {
@@ -73,6 +73,7 @@ describe('EditorView', () => {
     expect(screen.getByText('2')).toBeInTheDocument()
     expect(transport.view).toHaveBeenCalledWith(
       7,
+      0,
       expect.objectContaining({ startRow: 0 }),
       null,
       null,

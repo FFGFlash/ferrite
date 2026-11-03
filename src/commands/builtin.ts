@@ -55,7 +55,7 @@ import {
   closeSavedTabs,
   currentTab,
   cycleTab,
-  documentItem,
+  documentTab,
   focusActiveTerminal,
   focusGroupNumber,
   focusGroupRelative,
@@ -63,6 +63,7 @@ import {
   hasCurrentTab,
   moveCurrentTab,
   openTerminal,
+  parseDocumentItem,
   parseViewerItem,
   reopenClosedTab,
   reopenWith,
@@ -184,7 +185,7 @@ function currentFile(): string | null {
     return parseViewerItem(item).path
   }
   if (itemKind(item) === 'document') {
-    const id = Number(item.slice(item.indexOf(':') + 1))
+    const id = parseDocumentItem(item).document
     return documentsStore.get().documents.find(document => document.id === id)?.path ?? null
   }
   return null
@@ -329,7 +330,7 @@ export const builtinCommands: Command[] = [
     category: 'View',
     title: 'Close Editor',
     enabled: hasDocument,
-    run: () => closeItem(documentItem(documentsStore.get().activeId!)),
+    run: () => closeItem(documentTab(documentsStore.get().activeId!)),
   },
   {
     id: 'workbench.commandPalette',

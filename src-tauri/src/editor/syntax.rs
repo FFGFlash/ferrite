@@ -11,7 +11,8 @@
 //! Views carry highlights only for lines whose spans the client does not
 //! already have: the last spans sent are remembered (as hashes) for the lines
 //! the client holds and replayed through line splices like the lines
-//! themselves.
+//! themselves. Each of a document's views (one per editor showing it) has
+//! its own.
 //!
 //! The tree also gives the document's foldable regions, when its language
 //! has a fold query.
@@ -22,7 +23,7 @@ use std::ops::Range;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::{Duration, Instant};
 
-use ferrite_core::{Document, DocumentId, MAX_DISPLAY_LINE_BYTES};
+use ferrite_core::{Document, DocumentId, MAX_DISPLAY_LINE_BYTES, ViewId};
 use ferrite_syntax::{
   Language, Registry, Span, SyntaxTree, apply_edits, deadline, fold_ranges, highlight_lines, parse,
 };
@@ -77,7 +78,8 @@ struct DocumentSyntax {
   edited: Version,
   /// The version a background parse is running for.
   pending: Option<Version>,
-  mirror: Option<Mirror>,
+  /// What each view's client holds.
+  mirrors: HashMap<ViewId, Mirror>,
 }
 
 impl DocumentSyntax {
@@ -89,7 +91,7 @@ impl DocumentSyntax {
       parsed: Version::INITIAL,
       edited: Version::INITIAL,
       pending: None,
-      mirror: None,
+      mirrors: HashMap::new(),
     }
   }
 
@@ -157,17 +159,18 @@ impl DocumentSyntax {
     true
   }
 
-  /// Highlights for the lines in `ranges` that a client holding `known`
-  /// lacks, given that the view replaces `chunks` (whose spans the client
-  /// resets).
+  /// Highlights for the lines in `ranges` that the client of `view`
+  /// holding `known` lacks, given that the view replaces `chunks` (whose
+  /// spans the client resets).
   fn highlights(
     &mut self,
     buffer: &TextBuffer,
+    view: ViewId,
     ranges: &[Range<usize>],
     known: Option<&KnownDto>,
     chunks: &[Range<usize>],
   ) -> Vec<LineHighlightsDto> {
-    let carried = self.carried(buffer, known, chunks);
+    let carried = self.carried(buffer, view, known, chunks);
     let mut changed = Vec::new();
     let mut hashes = Vec::new();
     for lines in ranges {
@@ -184,11 +187,14 @@ impl DocumentSyntax {
         hashes.push(hash);
       }
     }
-    self.mirror = Some(Mirror {
-      version: buffer.version(),
-      ranges: ranges.to_vec(),
-      hashes,
-    });
+    self.mirrors.insert(
+      view,
+      Mirror {
+        version: buffer.version(),
+        ranges: ranges.to_vec(),
+        hashes,
+      },
+    );
     changed
   }
 
@@ -197,11 +203,12 @@ impl DocumentSyntax {
   fn carried(
     &self,
     buffer: &TextBuffer,
+    view: ViewId,
     known: Option<&KnownDto>,
     chunks: &[Range<usize>],
   ) -> HashMap<usize, u64> {
     let mut carried = HashMap::new();
-    if let (Some(mirror), Some(known)) = (&self.mirror, known)
+    if let (Some(mirror), Some(known)) = (self.mirrors.get(&view), known)
       && mirror.version.get() == known.version
       && mirror.ranges == known.ranges()
       && let Some(splices) = buffer.line_changes_since(mirror.version)
@@ -322,9 +329,9 @@ pub struct SyntaxStates(Mutex<States>);
 #[derive(Default)]
 struct States {
   documents: HashMap<DocumentId, DocumentSyntax>,
-  /// Documents that lost their language (set to plain text, say) since
-  /// their view was last sent colors, which it still shows.
-  uncolored: HashSet<DocumentId>,
+  /// Views of documents that lost their language (set to plain text, say)
+  /// since they were last sent colors, which they still show.
+  uncolored: HashSet<(DocumentId, ViewId)>,
 }
 
 impl SyntaxStates {
@@ -346,7 +353,7 @@ impl SyntaxStates {
     let mut states = self.lock();
     let Some(syntax) = Self::entry(app, &mut states, document) else {
       // Clears the colors of a document that lost its language.
-      if !states.uncolored.remove(&document.id()) {
+      if !states.uncolored.remove(&(document.id(), document.view())) {
         return Vec::new();
       }
       return ranges
@@ -360,7 +367,7 @@ impl SyntaxStates {
     };
     let started = Instant::now();
     let job = syntax.update(document.buffer());
-    let highlights = syntax.highlights(document.buffer(), ranges, known, chunks);
+    let highlights = syntax.highlights(document.buffer(), document.view(), ranges, known, chunks);
     drop(states);
     let perf = app.state::<Perf>();
     perf.record("syntax.highlight", started.elapsed());
@@ -451,17 +458,15 @@ impl SyntaxStates {
       .filter(|_| document.buffer().len() <= MAX_SYNTAX_BYTES)
       .cloned();
     let Some(language) = language else {
-      if states
-        .documents
-        .remove(&id)
-        .is_some_and(|syntax| syntax.mirror.is_some())
-      {
-        states.uncolored.insert(id);
+      if let Some(syntax) = states.documents.remove(&id) {
+        states
+          .uncolored
+          .extend(syntax.mirrors.into_keys().map(|view| (id, view)));
       }
       return None;
     };
     // A new state sends every line's colors again.
-    states.uncolored.remove(&id);
+    states.uncolored.retain(|&(document, _)| document != id);
     Some(
       states
         .documents
@@ -479,7 +484,16 @@ impl SyntaxStates {
   pub fn forget(&self, id: DocumentId) {
     let mut states = self.lock();
     states.documents.remove(&id);
-    states.uncolored.remove(&id);
+    states.uncolored.retain(|&(document, _)| document != id);
+  }
+
+  /// Drops what a closed view of a document was sent.
+  pub fn forget_view(&self, id: DocumentId, view: ViewId) {
+    let mut states = self.lock();
+    if let Some(syntax) = states.documents.get_mut(&id) {
+      syntax.mirrors.remove(&view);
+    }
+    states.uncolored.remove(&(id, view));
   }
 }
 
@@ -573,14 +587,20 @@ mod tests {
   #[test]
   fn sends_only_highlights_the_client_lacks() {
     let (mut buffer, mut syntax) = parsed("fn a() {}\nfn b() {}\nfn c() {}\n");
-    let first = syntax.highlights(&buffer, &[0..4], None, &[0..4]);
+    let first = syntax.highlights(&buffer, ViewId::default(), &[0..4], None, &[0..4]);
     assert_eq!(first.len(), 3, "the empty last line needs nothing");
     let v1 = buffer.version();
 
     // Unchanged: nothing to send.
     assert!(
       syntax
-        .highlights(&buffer, &[0..4], known(v1, 0..4).as_ref(), &[])
+        .highlights(
+          &buffer,
+          ViewId::default(),
+          &[0..4],
+          known(v1, 0..4).as_ref(),
+          &[]
+        )
         .is_empty()
     );
 
@@ -592,27 +612,70 @@ mod tests {
       syntax.update(&buffer).is_none(),
       "small reparse runs inline"
     );
-    let after = syntax.highlights(&buffer, &[0..4], known(v1, 0..4).as_ref(), &[1..2]);
+    let after = syntax.highlights(
+      &buffer,
+      ViewId::default(),
+      &[0..4],
+      known(v1, 0..4).as_ref(),
+      &[1..2],
+    );
     assert_eq!(after.iter().map(|h| h.line).collect::<Vec<_>>(), [1]);
 
     // A view from a client that does not match resends everything.
-    let mismatch = syntax.highlights(&buffer, &[0..4], known(v1, 0..4).as_ref(), &[]);
+    let mismatch = syntax.highlights(
+      &buffer,
+      ViewId::default(),
+      &[0..4],
+      known(v1, 0..4).as_ref(),
+      &[],
+    );
     assert_eq!(mismatch.len(), 4);
   }
 
   #[test]
   fn edits_that_change_later_lines_resend_them() {
     let (mut buffer, mut syntax) = parsed("a();\nb();\n");
-    syntax.highlights(&buffer, &[0..3], None, &[0..3]);
+    syntax.highlights(&buffer, ViewId::default(), &[0..3], None, &[0..3]);
     let v1 = buffer.version();
     buffer
       .apply(&ChangeSet::single(Edit::insert(0, "/*")).expect("valid"))
       .expect("applies");
     syntax.update(&buffer);
-    let after = syntax.highlights(&buffer, &[0..3], known(v1, 0..3).as_ref(), &[0..1]);
+    let after = syntax.highlights(
+      &buffer,
+      ViewId::default(),
+      &[0..3],
+      known(v1, 0..3).as_ref(),
+      &[0..1],
+    );
     let lines: Vec<usize> = after.iter().map(|h| h.line).collect();
     assert_eq!(lines, [0, 1], "line 1 is inside the new comment");
     assert_eq!(after[1].spans, [0, 4, TokenKind::Comment as u32]);
+  }
+
+  #[test]
+  fn each_view_has_its_own_mirror() {
+    let (buffer, mut syntax) = parsed(
+      "fn a() {}
+",
+    );
+    let (first, second) = (ViewId::default(), ViewId::from_raw(1));
+    let v1 = buffer.version();
+    assert_eq!(
+      syntax
+        .highlights(&buffer, first, &[0..2], None, &[0..2])
+        .len(),
+      1
+    );
+    // The second view holds the same lines, but hasn't been sent their colors.
+    let sent = syntax.highlights(&buffer, second, &[0..2], known(v1, 0..2).as_ref(), &[]);
+    assert_eq!(sent.iter().map(|h| h.line).collect::<Vec<_>>(), [0, 1]);
+    assert!(
+      syntax
+        .highlights(&buffer, first, &[0..2], known(v1, 0..2).as_ref(), &[])
+        .is_empty(),
+      "the first view's mirror is still its own"
+    );
   }
 
   #[test]

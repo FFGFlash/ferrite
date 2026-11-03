@@ -142,7 +142,8 @@ item kinds. A malformed tree gives the default layout.
 
 - **One document, one place.** A document shows in one group at a time. Showing the same
   document in two groups would need two views of it, and the backend keeps per-view state (the
-  highlight mirror) per document.
+  highlight mirror) per document. (Superseded: [ADR 0024](0024-a-document-in-several-groups.md)
+  gives each tab of a document a view of its own.)
 - **No floating or separate windows** yet. The tree has room for them as additional roots.
 - **Sizes are shares.** Groups grow and shrink with the window in proportion, rather than keeping
   their width in pixels as VS Code's side bar does.

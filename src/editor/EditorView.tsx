@@ -35,7 +35,11 @@ import { notify, reportError } from '../state/notifications'
 import { notifyPainted, recordTiming } from '../state/perf'
 import { useStore } from '../state/store'
 import {
+  activeEditor,
+  editorsFor,
   registerEditor,
+  savedScroll,
+  saveScroll,
   type EditorController,
   type LinePreview,
   type Reveal,
@@ -47,6 +51,7 @@ import {
   closePeekIn,
   openPeek,
   peekHeightInLines,
+  peekIsIn,
   peekLayout,
   peekStore,
 } from './references'
@@ -162,11 +167,10 @@ function definitionModifier(event: {
   return (isMac() ? event.metaKey : event.ctrlKey) && !event.shiftKey && !event.altKey
 }
 
-/** Scroll positions of documents whose editor was unmounted (tab switches). */
-const scrollPositions = new Map<number, { top: number; left: number }>()
-
 interface EditorViewProps {
   documentId: number
+  /** The document's view to show: each editor of a document has its own. */
+  view?: number
   title: string
   transport?: EditorTransport
 }
@@ -176,7 +180,12 @@ interface EditorViewProps {
  * the backend owns the text, so every edit and cursor move is an operation
  * sent through an `EditorSession`.
  */
-export function EditorView({ documentId, title, transport = ipcTransport }: EditorViewProps) {
+export function EditorView({
+  documentId,
+  view: documentView = 0,
+  title,
+  transport = ipcTransport,
+}: EditorViewProps) {
   const frameRef = useRef<HTMLDivElement>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
   const gutterRef = useRef<HTMLDivElement>(null)
@@ -190,7 +199,10 @@ export function EditorView({ documentId, title, transport = ipcTransport }: Edit
   const revealRef = useRef<{ mode: Reveal; after: number } | null>(null)
   /** The last request the latest view reflects. */
   const reflectedRef = useRef(0)
-  const restoreScrollRef = useRef(scrollPositions.get(documentId) ?? null)
+  const restoreScrollRef = useRef(savedScroll(documentId, documentView))
+  /** This editor's handle, once registered. */
+  const controllerRef = useRef<EditorController | null>(null)
+  const isActive = useStore(activeEditor) === controllerRef.current
 
   const { lineHeight } = useStore(appearance)
   const { minimapVisible } = useStore(layoutStore)
@@ -242,7 +254,7 @@ export function EditorView({ documentId, title, transport = ipcTransport }: Edit
 
   // A references peek shown in this editor, and the room it takes.
   const peekState = useStore(peekStore)
-  const peek = peekState?.documentId === documentId ? peekState : null
+  const peek = peekState && peekIsIn(peekState, documentId, documentView) ? peekState : null
   useStore(peekLayout)
   const zone: Zone | null =
     peek && view
@@ -283,9 +295,19 @@ export function EditorView({ documentId, title, transport = ipcTransport }: Edit
     const pending = pendingSelection(documentId)
     const session = new EditorSession(
       documentId,
+      documentView,
       viewportFor(scrollRef.current, lineHeightRef.current, zoneRef.current),
       (next, reflected) => {
         receivedAtRef.current = performance.now()
+        const previous = viewRef.current
+        if (reflected > reflectedRef.current && previous && previous.version !== next.version) {
+          // This editor changed the text: the document's other editors show it too.
+          for (const other of editorsFor(documentId)) {
+            if (other !== controllerRef.current) {
+              other.refresh()
+            }
+          }
+        }
         reflectedRef.current = reflected
         setView(next)
         if (pending) {
@@ -314,20 +336,26 @@ export function EditorView({ documentId, title, transport = ipcTransport }: Edit
     return () => {
       const scroller = scrollRef.current
       if (scroller) {
-        scrollPositions.set(documentId, { top: scroller.scrollTop, left: scroller.scrollLeft })
+        saveScroll(documentId, documentView, {
+          top: scroller.scrollTop,
+          left: scroller.scrollLeft,
+        })
       }
       unregister()
-      closePeekIn(documentId)
+      closePeekIn(documentId, documentView)
       session.dispose()
       sessionRef.current = null
-      editorStatus.set(null)
+      if (activeEditor.get() === controllerRef.current) {
+        editorStatus.set(null)
+      }
     }
-  }, [documentId, transport])
+  }, [documentId, documentView, transport])
 
   // Commands reach this editor through the active-editor handle.
   useEffect(() => {
     const controller: EditorController = {
       documentId,
+      view: documentView,
       dispatch,
       openFind: replace => openFind(replace),
       findNext: backward => findNext(backward),
@@ -380,10 +408,15 @@ export function EditorView({ documentId, title, transport = ipcTransport }: Edit
         }
       },
     }
-    return registerEditor(controller)
+    controllerRef.current = controller
+    const unregister = registerEditor(controller)
+    return () => {
+      unregister()
+      controllerRef.current = null
+    }
     // The controller reads current state through refs, so it only needs to
     // change with the document.
-  }, [documentId])
+  }, [documentId, documentView])
 
   // A different font size changes which lines are visible.
   useEffect(() => {
@@ -400,18 +433,22 @@ export function EditorView({ documentId, title, transport = ipcTransport }: Edit
       return
     }
     setDirty(documentId, view.dirty)
-    editorStatus.set({
-      line: view.primary.position.line + 1,
-      column: view.primary.visualColumn + 1,
-      selectionCount: view.selectionCount,
-      language: view.language,
-    })
+    // Another editor of the document refreshes as that one is edited; the
+    // status bar is the active editor's.
+    if (isActive) {
+      editorStatus.set({
+        line: view.primary.position.line + 1,
+        column: view.primary.visualColumn + 1,
+        selectionCount: view.selectionCount,
+        language: view.language,
+      })
+    }
     const pending = completionPendingRef.current
     if (pending) {
       completionPendingRef.current = null
       void fetchCompletion(view.primary.position, pending.trigger)
     }
-  }, [view, documentId])
+  }, [view, documentId, isActive])
 
   useEffect(() => () => window.clearTimeout(hoverTimerRef.current), [])
 
@@ -594,7 +631,7 @@ export function EditorView({ documentId, title, transport = ipcTransport }: Edit
       !event.ctrlKey &&
       !event.altKey &&
       !event.metaKey &&
-      peekStore.get()?.documentId === documentId
+      peekIsIn(peekStore.get(), documentId, documentView)
     ) {
       event.preventDefault()
       closePeek()
@@ -1013,7 +1050,7 @@ export function EditorView({ documentId, title, transport = ipcTransport }: Edit
     } else if (found.length === 1 && !peekAlways) {
       await openPath(found[0]!.path, { start: found[0]!.start })
     } else {
-      openPeek(documentId, documentPath(), at, 'References', found)
+      openPeek(documentId, documentView, documentPath(), at, 'References', found)
     }
   }
 
@@ -1525,6 +1562,7 @@ export function EditorView({ documentId, title, transport = ipcTransport }: Edit
       {minimapVisible && view && (
         <Minimap
           documentId={documentId}
+          view={documentView}
           version={view.version}
           rowCount={view.rowCount}
           refreshTick={refreshTick}

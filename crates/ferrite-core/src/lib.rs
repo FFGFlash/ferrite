@@ -24,7 +24,7 @@ mod testing;
 mod view;
 
 pub use document::{
-  Document, DocumentId, EXACT_COLUMN_BYTES, EditorConfig, LanguageChoice, SavePoint,
+  Document, DocumentId, EXACT_COLUMN_BYTES, EditorConfig, LanguageChoice, SavePoint, ViewId,
 };
 pub use editor::Editor;
 pub use error::CoreError;

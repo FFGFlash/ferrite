@@ -353,28 +353,40 @@ export const reopenWithEncoding = (id: number, encoding: string) =>
 export const saveWithEncoding = (id: number, encoding: string) =>
   call<DocumentSummary | null>('document_save_with_encoding', { id, encoding })
 
+/*
+ * Each editor showing a document has a view of it (`view`, numbered by the
+ * dock; the first is 0) with its own selections and folds.
+ */
 export const getView = (
   id: number,
+  view: number,
   viewport: Viewport,
   known: KnownLines | null,
   search: SearchQuery | null,
-) => call<WireView>('editor_view', { id, viewport, known, search })
-export const getMinimap = (id: number, startRow: number, endRow: number) =>
-  call<MinimapView>('editor_minimap', { id, startRow, endRow })
+) => call<WireView>('editor_view', { id, view, viewport, known, search })
+export const getMinimap = (id: number, view: number, startRow: number, endRow: number) =>
+  call<MinimapView>('editor_minimap', { id, view, startRow, endRow })
 export const applyOps = (
   id: number,
+  view: number,
   ops: EditorOp[],
   viewport: Viewport,
   known: KnownLines | null,
   search: SearchQuery | null,
-) => call<WireView>('editor_apply', { id, ops, viewport, known, search })
+) => call<WireView>('editor_apply', { id, view, ops, viewport, known, search })
 export const clipboard = (
   id: number,
+  view: number,
   action: ClipboardAction,
   viewport: Viewport,
   known: KnownLines | null,
   search: SearchQuery | null,
-) => call<WireView>('editor_clipboard', { id, action, viewport, known, search })
+) => call<WireView>('editor_clipboard', { id, view, action, viewport, known, search })
+/** Makes view `to` of a document a copy of its view `from`: the same selections and folds. */
+export const copyView = (id: number, from: number, to: number) =>
+  call<void>('editor_copy_view', { id, from, to })
+/** Forgets a view of a document that no editor shows any more. */
+export const closeView = (id: number, view: number) => call<void>('editor_close_view', { id, view })
 /**
  * Lines `start..end` of the file at `path` with their highlights: the open
  * document's if it's open, otherwise the file on disk.

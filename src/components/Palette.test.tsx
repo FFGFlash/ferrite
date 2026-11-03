@@ -28,6 +28,7 @@ vi.mock('../state/documents', async importOriginal => ({
 function mockEditor(): EditorController {
   return {
     documentId: 1,
+    view: 0,
     dispatch: vi.fn(),
     openFind: vi.fn(),
     findNext: vi.fn(),

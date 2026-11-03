@@ -31,6 +31,8 @@ const HEADER_FONT_SIZE = 9
 
 interface MinimapProps {
   documentId: number
+  /** The document's view the editor shows, whose folds the minimap follows. */
+  view?: number
   /** The document version and row count of the editor's latest view. */
   version: number
   rowCount: number
@@ -39,7 +41,7 @@ interface MinimapProps {
   /** The editor's scroll container. */
   scroller: RefObject<HTMLDivElement | null>
   lineHeight: number
-  fetchLines?: (id: number, startRow: number, endRow: number) => Promise<MinimapView>
+  fetchLines?: (id: number, view: number, startRow: number, endRow: number) => Promise<MinimapView>
 }
 
 interface Measured extends EditorScroll {
@@ -59,6 +61,7 @@ interface Fetched {
  */
 export function Minimap({
   documentId,
+  view: documentView = 0,
   version,
   rowCount,
   refreshTick,
@@ -79,7 +82,15 @@ export function Minimap({
   const wantEnd = Math.min(rowCount, wantStart + (layout?.lineCount ?? 0))
 
   useLineRequests(
-    { documentId, version, refreshTick, wantStart, wantEnd, enabled: layout !== null },
+    {
+      documentId,
+      view: documentView,
+      version,
+      refreshTick,
+      wantStart,
+      wantEnd,
+      enabled: layout !== null,
+    },
     fetched,
     setFetched,
     fetchLines,
@@ -293,6 +304,7 @@ function useMeasured(scroller: RefObject<HTMLDivElement | null>): Measured | nul
 
 interface Wanted {
   documentId: number
+  view: number
   version: number
   refreshTick: number
   /** The lines the minimap shows. */
@@ -318,7 +330,15 @@ function useLineRequests(
   /** The request that last failed, not repeated until something changes. */
   const failed = useRef('')
   const [retry, setRetry] = useState(0)
-  const { documentId, version, refreshTick, wantStart, wantEnd, enabled } = wanted
+  const {
+    documentId,
+    view: documentView,
+    version,
+    refreshTick,
+    wantStart,
+    wantEnd,
+    enabled,
+  } = wanted
 
   useEffect(() => {
     const key = `${documentId}:${version}:${refreshTick}:${wantStart}:${wantEnd}`
@@ -344,7 +364,7 @@ function useLineRequests(
     inFlight.current = true
     lastRequest.current = performance.now()
     const tick = refreshTick
-    fetchLines(documentId, Math.max(0, wantStart - OVERSCAN), wantEnd + OVERSCAN)
+    fetchLines(documentId, documentView, Math.max(0, wantStart - OVERSCAN), wantEnd + OVERSCAN)
       .then(view => setFetched({ view, refreshTick: tick }))
       .catch(() => {
         failed.current = key
@@ -354,7 +374,18 @@ function useLineRequests(
         // Check again: things may have changed while this request ran.
         setRetry(count => count + 1)
       })
-  }, [documentId, version, refreshTick, wantStart, wantEnd, enabled, fetched, retry, fetchLines])
+  }, [
+    documentId,
+    documentView,
+    version,
+    refreshTick,
+    wantStart,
+    wantEnd,
+    enabled,
+    fetched,
+    retry,
+    fetchLines,
+  ])
 }
 
 /** Colors by run kind: plain text first, then each token kind's theme color. */

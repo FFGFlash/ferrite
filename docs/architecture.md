@@ -859,7 +859,10 @@ viewers through the `viewers` interface (API 1.4).
   Ctrl+PageUp/PageDown within their group, and closed with Delete or Ctrl+W (the current group's
   tab). The dock keeps recently closed files, views, and pages with their places, for Reopen
   Closed Tab (`closedTabs`, [ADR 0021](adr/0021-tab-keybindings.md)). Editor tabs remember their
-  scroll position while the app runs. Clicking a tab focuses its content.
+  scroll position while the app runs. Clicking a tab focuses its content. A document can show in
+  several groups, once in each, each tab with its own selections, folds, and scroll position
+  (split off with Split Tab, or dragged with Ctrl held; [ADR
+  0024](adr/0024-a-document-in-several-groups.md)).
 - **Theming**: `styles/tokens.css` defines semantic tokens for dark and light themes (including
   find matches, widgets, inputs, lists, and buttons), selected by `data-theme` on `<html>`.
   Components use tokens only. The `workbench.theme` setting picks dark, light, the OS scheme, or

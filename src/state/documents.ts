@@ -2,7 +2,7 @@
  * Open documents as the workbench sees them: summaries for tabs (the text
  * itself stays in the backend) and which document is active.
  */
-import { editorFor, selectRange, setActiveDocument } from '../editor/activeEditor'
+import { editorFor, editorsFor, selectRange, setActiveDocument } from '../editor/activeEditor'
 import { CommandError } from '../ipc'
 import * as ipc from '../ipc/editor'
 import type { DocumentSummary, Position } from '../ipc/editor'
@@ -22,17 +22,36 @@ documentsStore.subscribe(() => setActiveDocument(documentsStore.get().activeId))
 
 /**
  * Hooks for work that must finish before a document is saved, such as edits
- * still in flight from the editor view. Registered by editor sessions.
+ * still in flight from its editor views. Registered by editor sessions.
  */
-const beforeSave = new Map<number, () => Promise<void>>()
+const beforeSave = new Map<number, Set<() => Promise<void>>>()
 
 export function registerBeforeSave(id: number, flush: () => Promise<void>): () => void {
-  beforeSave.set(id, flush)
+  const flushes = beforeSave.get(id) ?? new Set()
+  beforeSave.set(id, flushes.add(flush))
   return () => {
-    if (beforeSave.get(id) === flush) {
+    flushes.delete(flush)
+    if (flushes.size === 0 && beforeSave.get(id) === flushes) {
       beforeSave.delete(id)
     }
   }
+}
+
+/** Waits for the edits in flight from every editor of a document. */
+async function flush(id: number): Promise<void> {
+  await Promise.all([...(beforeSave.get(id) ?? [])].map(flush => flush()))
+}
+
+/**
+ * Documents just opened (rather than switched to): the dock shows each in
+ * the group documents open in, in a tab of its own there if it's showing
+ * elsewhere, as VS Code does.
+ */
+const openRequests = new Set<number>()
+
+/** Whether `id` was just opened; the request is taken. */
+export function takeOpenRequest(id: number): boolean {
+  return openRequests.delete(id)
 }
 
 /**
@@ -122,16 +141,19 @@ export async function openPath(
   }
   try {
     const summary = await ipc.openDocument(path, asText)
+    // The dock picks (or adds) the tab first, so the selection goes to its editor.
+    openRequests.add(summary.id)
+    upsert(summary, true)
+    openRequests.delete(summary.id)
     const editor = editorFor(summary.id)
     if (selection) {
       const range = { start: selection.start, end: selection.end ?? selection.start }
-      if (editor?.documentId === summary.id) {
+      if (editor) {
         selectRange(editor, range.start, range.end)
       } else {
         pendingSelections.set(summary.id, range)
       }
     }
-    upsert(summary, true)
     return summary
   } catch (error) {
     if (error instanceof CommandError && error.code === 'binary') {
@@ -180,10 +202,12 @@ export async function openFile(): Promise<void> {
 /** Reads a document's file again in another encoding (it must have no unsaved changes). */
 export async function reopenWithEncoding(id: number, encoding: string): Promise<void> {
   try {
-    await beforeSave.get(id)?.()
+    await flush(id)
     const summary = await ipc.reopenWithEncoding(id, encoding)
     upsert(summary, false)
-    editorFor(id)?.refresh()
+    for (const editor of editorsFor(id)) {
+      editor.refresh()
+    }
   } catch (error) {
     reportError('Reopening the file', error)
   }
@@ -192,7 +216,7 @@ export async function reopenWithEncoding(id: number, encoding: string): Promise<
 /** Saves a document in another encoding, which it keeps from then on. */
 export async function saveWithEncoding(id: number, encoding: string): Promise<void> {
   try {
-    await beforeSave.get(id)?.()
+    await flush(id)
     const summary = await ipc.saveWithEncoding(id, encoding)
     if (summary) {
       upsert(summary, false)
@@ -207,7 +231,7 @@ export async function save(id = activeId(), as = false): Promise<void> {
     return
   }
   try {
-    await beforeSave.get(id)?.()
+    await flush(id)
     const summary = await (as ? ipc.saveDocumentAs(id) : ipc.saveDocument(id))
     if (summary) {
       upsert(summary, false)
@@ -234,7 +258,7 @@ export async function close(id = activeId()): Promise<void> {
     return
   }
   try {
-    await beforeSave.get(id)?.()
+    await flush(id)
     if (!(await ipc.closeDocument(id))) {
       return
     }

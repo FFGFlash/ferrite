@@ -26,11 +26,12 @@ import { useStore } from '../state/store'
 import { openNewTerminalMenu } from '../terminal/profileMenu'
 import { closeTerminal, getSession, terminalsStore, type TerminalTab } from '../terminal/terminals'
 import { themeKind } from '../themes/theme'
-import { documentItem, itemId, parseViewerItem, showItem } from './dock'
+import { documentTab, itemId, parseDocumentItem, parseViewerItem, showItem } from './dock'
 import { itemKind, type ItemId } from './model'
 
 export type ResolvedItem =
-  | { kind: 'document'; item: ItemId; document: DocumentSummary }
+  /** A document's tab, showing its view `view`. */
+  | { kind: 'document'; item: ItemId; document: DocumentSummary; view: number }
   | { kind: 'view'; item: ItemId; view: ViewDescriptor }
   | { kind: 'terminal'; item: ItemId; terminal: TerminalTab }
   | { kind: 'preview'; item: ItemId; preview: PreviewInfo }
@@ -51,8 +52,9 @@ export function useResolver(): (item: ItemId) => ResolvedItem | null {
     const id = itemId(item)
     switch (itemKind(item)) {
       case 'document': {
-        const document = documents.find(candidate => candidate.id === Number(id))
-        return document ? { kind: 'document', item, document } : null
+        const { document: documentId, view } = parseDocumentItem(item)
+        const document = documents.find(candidate => candidate.id === documentId)
+        return document ? { kind: 'document', item, document, view } : null
       }
       case 'view': {
         const view = views.find(candidate => candidate.id === id)
@@ -186,10 +188,11 @@ export function ItemContent({ resolved }: { resolved: ResolvedItem }): ReactNode
       return (
         <>
           <Breadcrumbs document={resolved.document} />
-          <ErrorBoundary name="The editor" resetKey={resolved.document.id}>
+          <ErrorBoundary name="The editor" resetKey={resolved.item}>
             <EditorView
-              key={resolved.document.id}
+              key={resolved.item}
               documentId={resolved.document.id}
+              view={resolved.view}
               title={resolved.document.title}
             />
           </ErrorBoundary>
@@ -255,7 +258,7 @@ export function ItemActions({ resolved }: { resolved: ResolvedItem }): ReactNode
         className="dock-action"
         title="Show Source"
         aria-label="Show Source"
-        onClick={() => showItem(documentItem(document))}
+        onClick={() => showItem(documentTab(document))}
       >
         <FileText size={16} strokeWidth={1.5} aria-hidden="true" />
       </button>

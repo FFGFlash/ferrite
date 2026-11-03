@@ -1,8 +1,10 @@
 /**
  * Handles on the editor views on screen, so commands (find, go to line, add
  * next match) and events can act on them without knowing about React.
- * Several editors can be visible at once (one per dock group); the active
- * editor is the one showing the active document.
+ * Several editors can be visible at once (one per dock group), and several
+ * can show the same document, each with a view of its own (see
+ * `ipc/editor.ts`). The active editor is the one showing the active
+ * document in the view the dock last used for it.
  */
 import type { EditorOp, Position } from '../ipc/editor'
 import { createStore } from '../state/store'
@@ -29,6 +31,8 @@ export interface ScrollPosition {
 
 export interface EditorController {
   documentId: number
+  /** The document's view it shows. */
+  view: number
   /** Applies `op`, then reveals the cursor (`nearest` by default). */
   dispatch(op: EditorOp, reveal?: Reveal): void
   /** Opens the find widget, prefilled from a single-line selection. */
@@ -64,26 +68,34 @@ export interface EditorController {
 
 export const activeEditor = createStore<EditorController | null>(null)
 
-/** Mounted editors by document; the last one mounted or focused wins. */
-const mounted = new Map<number, EditorController>()
+const key = (documentId: number, view: number) => `${documentId}:${view}`
+
+/** Mounted editors by document and view; the last one mounted wins. */
+const mounted = new Map<string, EditorController>()
+/** The view of each document the dock last used, where it isn't view 0. */
+const shownViews = new Map<number, number>()
 let activeDocument: number | null = null
 let lastUsed: EditorController | null = null
 
 function update(): void {
-  const active = activeDocument === null ? undefined : mounted.get(activeDocument)
+  const active = activeDocument === null ? null : editorFor(activeDocument)
   activeEditor.set(
-    active ?? (lastUsed && mounted.get(lastUsed.documentId) === lastUsed ? lastUsed : null),
+    active ??
+      (lastUsed && mounted.get(key(lastUsed.documentId, lastUsed.view)) === lastUsed
+        ? lastUsed
+        : null),
   )
 }
 
 /** Registers a mounted editor view; returns the function that unregisters it. */
 export function registerEditor(controller: EditorController): () => void {
-  mounted.set(controller.documentId, controller)
+  const at = key(controller.documentId, controller.view)
+  mounted.set(at, controller)
   lastUsed = controller
   update()
   return () => {
-    if (mounted.get(controller.documentId) === controller) {
-      mounted.delete(controller.documentId)
+    if (mounted.get(at) === controller) {
+      mounted.delete(at)
     }
     if (lastUsed === controller) {
       lastUsed = null
@@ -92,13 +104,59 @@ export function registerEditor(controller: EditorController): () => void {
   }
 }
 
-/** The editor showing a document, if one is mounted. */
+/**
+ * The editor showing a document in the view the dock last used for it, if
+ * it's mounted: the one to select in or focus. `null` while that view's
+ * tab is about to mount, so a selection waits for it (`pendingSelection`).
+ */
 export function editorFor(documentId: number): EditorController | null {
-  return mounted.get(documentId) ?? null
+  return mounted.get(key(documentId, shownView(documentId))) ?? null
+}
+
+/** The view of a document the dock last used. */
+export function shownView(documentId: number): number {
+  return shownViews.get(documentId) ?? 0
+}
+
+/** Every mounted editor showing a document, in any view. */
+export function editorsFor(documentId: number): EditorController[] {
+  return mountedEditors().filter(editor => editor.documentId === documentId)
 }
 
 export function mountedEditors(): EditorController[] {
   return [...mounted.values()]
+}
+
+/** Called by the dock when it uses another view of a document (`null` when it has none). */
+export function setShownView(documentId: number, view: number | null): void {
+  if ((shownViews.get(documentId) ?? 0) === (view ?? 0)) {
+    return
+  }
+  if (view) {
+    shownViews.set(documentId, view)
+  } else {
+    shownViews.delete(documentId)
+  }
+  update()
+}
+
+/** Scroll positions of editors that were unmounted (tab switches), by document and view. */
+const scrollPositions = new Map<string, ScrollPosition>()
+
+export function savedScroll(documentId: number, view: number): ScrollPosition | null {
+  return scrollPositions.get(key(documentId, view)) ?? null
+}
+
+export function saveScroll(
+  documentId: number,
+  view: number,
+  position: ScrollPosition | null,
+): void {
+  if (position) {
+    scrollPositions.set(key(documentId, view), position)
+  } else {
+    scrollPositions.delete(key(documentId, view))
+  }
 }
 
 /** Called when the active document changes. */

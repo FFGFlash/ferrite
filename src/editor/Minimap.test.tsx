@@ -28,7 +28,7 @@ function lines(version: number, startRow: number, endRow: number): MinimapView {
 function renderMinimap() {
   // The backend answers with the document's current version.
   let current = 1
-  const fetchLines = vi.fn((_id: number, start: number, end: number) =>
+  const fetchLines = vi.fn((_id: number, _view: number, start: number, end: number) =>
     Promise.resolve(lines(current, start, end)),
   )
   let editor: HTMLDivElement | null = null
@@ -81,7 +81,7 @@ describe('Minimap', () => {
     expect(minimap.style.right).toBe('10px')
     expect(minimap.style.height).toBe('400px')
     // 400 px shows 201 lines; the document has 100, plus 100 to spare.
-    await waitFor(() => expect(fetchLines).toHaveBeenCalledWith(7, 0, 200))
+    await waitFor(() => expect(fetchLines).toHaveBeenCalledWith(7, 0, 0, 200))
   })
 
   it('fetches again after an edit, at most once per throttle period', async () => {

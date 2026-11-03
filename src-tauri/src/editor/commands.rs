@@ -8,7 +8,7 @@
 
 use std::path::Path;
 
-use ferrite_core::{CoreError, Document, DocumentId, EditorOp, LanguageChoice};
+use ferrite_core::{CoreError, Document, DocumentId, EditorOp, LanguageChoice, ViewId};
 use ferrite_text::SearchQuery;
 use ferrite_workspace::{
   DecodeOptions, ENCODING_CHOICES, FileError, TextEncoding, load_text_file_with, save_text_file,
@@ -326,23 +326,68 @@ fn build_view(
   view
 }
 
+/// The document `id` in its view `view` (view 0 if not given): each editor
+/// showing a document has its own view, with its own selections and folds.
+fn document_in_view(
+  editor: &mut ferrite_core::Editor,
+  id: u64,
+  view: Option<u32>,
+) -> Result<&mut Document, CoreError> {
+  let document = editor.document_mut(DocumentId::from_raw(id))?;
+  document.use_view(ViewId::from_raw(view.unwrap_or(0)));
+  Ok(document)
+}
+
 /// The view for `viewport`. `known` describes the lines the client already
 /// holds, so only missing lines are sent. With `search`, the view includes
 /// find matches.
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 pub fn editor_view(
   app: AppHandle,
   state: State<'_, EditorState>,
   perf: State<'_, Perf>,
   id: u64,
+  view: Option<u32>,
   viewport: Viewport,
   known: Option<KnownDto>,
   search: Option<SearchQueryDto>,
 ) -> Result<EditorView, CommandError> {
   let _timer = perf.metrics.time("editor.view");
   let mut editor = state.lock();
-  let document = editor.document_mut(DocumentId::from_raw(id))?;
+  let document = document_in_view(&mut editor, id, view)?;
   Ok(build_view(&app, document, viewport, known, search))
+}
+
+/// Makes view `to` of a document a copy of its view `from`, for an editor
+/// split off another: the same selections and folds.
+#[tauri::command]
+pub fn editor_copy_view(
+  state: State<'_, EditorState>,
+  id: u64,
+  from: u32,
+  to: u32,
+) -> Result<(), CommandError> {
+  let mut editor = state.lock();
+  let document = editor.document_mut(DocumentId::from_raw(id))?;
+  document.copy_view(ViewId::from_raw(from), ViewId::from_raw(to));
+  Ok(())
+}
+
+/// Forgets a view of a document that no editor shows any more, while
+/// others still show the document.
+#[tauri::command]
+pub fn editor_close_view(
+  state: State<'_, EditorState>,
+  id: u64,
+  view: u32,
+) -> Result<(), CommandError> {
+  let mut editor = state.lock();
+  let document = editor.document_mut(DocumentId::from_raw(id))?;
+  let view = ViewId::from_raw(view);
+  document.close_view(view);
+  state.syntax.forget_view(document.id(), view);
+  Ok(())
 }
 
 /// The minimap for display rows `start_row..end_row`, clamped to the
@@ -353,6 +398,7 @@ pub fn editor_view(
 pub async fn editor_minimap(
   app: AppHandle,
   id: u64,
+  view: Option<u32>,
   start_row: usize,
   end_row: usize,
 ) -> Result<MinimapDto, CommandError> {
@@ -360,8 +406,8 @@ pub async fn editor_minimap(
     let started = std::time::Instant::now();
     let state = app.state::<EditorState>();
     let snapshot = {
-      let editor = state.lock();
-      let document = editor.document(DocumentId::from_raw(id))?;
+      let mut editor = state.lock();
+      let document = &*document_in_view(&mut editor, id, view)?;
       Snapshot::of(
         document,
         state.syntax.tree(&app, document),
@@ -389,6 +435,7 @@ pub fn editor_apply(
   state: State<'_, EditorState>,
   perf: State<'_, Perf>,
   id: u64,
+  view: Option<u32>,
   ops: Vec<OpDto>,
   viewport: Viewport,
   known: Option<KnownDto>,
@@ -402,7 +449,7 @@ pub fn editor_apply(
     ));
   }
   let mut editor = state.lock();
-  let document = editor.document_mut(DocumentId::from_raw(id))?;
+  let document = document_in_view(&mut editor, id, view)?;
   let mut context = op_context(&app, &state, document, &ops);
   let changes_folds = ops.iter().any(OpDto::changes_folds);
   for op in ops {
@@ -454,10 +501,12 @@ pub enum ClipboardAction {
 /// the backend and the clipboard without crossing IPC. (Keyboard paste
 /// arrives as a `paste` operation instead.)
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 pub fn editor_clipboard(
   app: AppHandle,
   state: State<'_, EditorState>,
   id: u64,
+  view: Option<u32>,
   action: ClipboardAction,
   viewport: Viewport,
   known: Option<KnownDto>,
@@ -473,14 +522,14 @@ pub fn editor_clipboard(
       .copied_lines()
       .is_some_and(|copied| same_text(&copied, &text));
     let mut editor = state.lock();
-    let document = editor.document_mut(DocumentId::from_raw(id))?;
+    let document = document_in_view(&mut editor, id, view)?;
     if !text.is_empty() {
       document.apply(EditorOp::Paste { text, whole_lines })?;
     }
     return Ok(build_view(&app, document, viewport, known, search));
   }
   let mut editor = state.lock();
-  let document = editor.document_mut(DocumentId::from_raw(id))?;
+  let document = document_in_view(&mut editor, id, view)?;
   let (text, whole_lines) = match document.selected_text() {
     Some(text) => (text, false),
     None => (document.cursor_lines_text(), true),

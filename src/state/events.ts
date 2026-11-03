@@ -1,5 +1,5 @@
 /** Applies backend notifications to frontend state. */
-import { editorFor, mountedEditors } from '../editor/activeEditor'
+import { editorsFor, mountedEditors } from '../editor/activeEditor'
 import { fileDrag } from '../components/drag'
 import { subscribeToEvents, type AppEvent } from '../ipc/workspace'
 import { applySettings } from './appearance'
@@ -33,7 +33,7 @@ export function handleEvent(event: AppEvent): void {
     case 'documentMoved':
     case 'documentSaved':
       updateSummary(event.document)
-      editorFor(event.document.id)?.refresh()
+      refreshEditors(event.document.id)
       break
     case 'documentChangedOnDisk':
       notify(
@@ -56,7 +56,7 @@ export function handleEvent(event: AppEvent): void {
       }
       break
     case 'diagnosticsChanged':
-      editorFor(event.documentId)?.refresh()
+      refreshEditors(event.documentId)
       fileProblemsChanged()
       break
     case 'problemsChanged':
@@ -65,7 +65,7 @@ export function handleEvent(event: AppEvent): void {
     case 'searchCounted':
     case 'syntaxUpdated':
     case 'decorationsChanged':
-      editorFor(event.documentId)?.refresh()
+      refreshEditors(event.documentId)
       break
     case 'documentOpened':
       documentsStore.update(({ documents, activeId }) => ({
@@ -121,8 +121,15 @@ export function handleEvent(event: AppEvent): void {
       break
     case 'documentEdited':
       setDirty(event.documentId, true)
-      editorFor(event.documentId)?.refresh()
+      refreshEditors(event.documentId)
       break
+  }
+}
+
+/** Refreshes every editor showing a document. */
+function refreshEditors(documentId: number): void {
+  for (const editor of editorsFor(documentId)) {
+    editor.refresh()
   }
 }
 
