@@ -56,6 +56,7 @@ const preview = (id: string, document: number | null) => ({
   title: `Preview ${id}`,
   icon: 'book',
   document,
+  webview: false,
 })
 
 const layout = () => dock.dockStore.get()

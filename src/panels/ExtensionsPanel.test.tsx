@@ -61,6 +61,7 @@ const tidy: ExtensionStatus = {
     languages: [],
     languageServers: [],
   },
+  storedBytes: 0,
   usage: {
     busyMs: 3.42,
     calls: 12,

@@ -28,6 +28,7 @@ const info: PreviewInfo = {
   title: 'Preview README.md',
   icon: 'book',
   document: 1,
+  webview: false,
 }
 
 /** Nodes from `[parent, element]` pairs. */

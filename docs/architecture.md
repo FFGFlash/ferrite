@@ -764,6 +764,18 @@ viewers through the `viewers` interface (API 1.4).
   on disk (`filesChanged`) or the extension becomes usable again, and the host does when a
   stopped extension starts: its viewers' content went when it stopped, but their records stay
   until their tabs close. **Reopen Editor With** swaps a tab between text and viewers in place.
+- **Webviews** ([ADR 0025](adr/0025-webviews.md)) are viewers and previews that show a page of
+  the extension's own. `WebviewFrame` loads it in a frame sandboxed with `allow-scripts` from the
+  `ferrite-webview:` protocol, which `extensions::serve_webview` answers from the host
+  (`ferrite-extension-host/src/webview.rs`): the extension's files and the viewed file, under a
+  random token per tab, with a content security policy, the theme as `--ferrite-*` variables,
+  and the bridge script (`webview.js`) that gives pages the `ferrite` object. Messages, storage
+  requests, tab state, action states, and passed-on shortcuts arrive as `postMessage` from the
+  frame, which `WebviewFrame` checks and turns into commands (`extension_webview_message`, …);
+  posts to pages wait in `state/webviews.ts` until a page loads. Extension storage and saved tab
+  states are JSON files under `extension-storage` (`storage.rs`). Tab actions are drawn beside
+  the tab (`ExtensionTabActions` in `dock/items.tsx`), and webviews that ask to stay loaded keep
+  their frame, hidden, in their group (`useKeptItems`).
 - **`reveal`** asks the frontend to activate a document and select a range; **`show-view`** opens
   a view.
 

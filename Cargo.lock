@@ -1273,6 +1273,7 @@ dependencies = [
  "ferrite-core",
  "ferrite-text",
  "ferrite-workspace",
+ "getrandom 0.4.3",
  "pulldown-cmark",
  "semver",
  "serde",

@@ -14,6 +14,7 @@ import { startDrag, useDropTarget, type Drag } from '../components/drag'
 import { Sash } from '../components/Sash'
 import { WelcomePage } from '../editor/WelcomePage'
 import type { AppInfo } from '../ipc'
+import { extensionsStore } from '../state/extensions'
 import { createStore, useStore } from '../state/store'
 import {
   activateTab,
@@ -34,6 +35,7 @@ import {
   itemLabel,
   itemTitle,
   itemTooltip,
+  keepsLoaded,
   useResolver,
   type ResolvedItem,
 } from './items'
@@ -313,6 +315,7 @@ function GroupView({ group, main, current, resolve, appInfo }: GroupViewProps) {
     .map(item => resolve(item))
     .filter((resolved): resolved is ResolvedItem => resolved !== null)
   const active = items.find(resolved => resolved.item === group.active) ?? items[0] ?? null
+  const kept = useKeptItems(items, active)
   const hintHere = useStore(dropHint)
   const zone = hintHere?.kind === 'split' && hintHere.group === group.id ? hintHere.zone : null
   const label = active ? itemTitle(active) : main ? 'Welcome' : 'Empty group'
@@ -422,8 +425,17 @@ function GroupView({ group, main, current, resolve, appInfo }: GroupViewProps) {
         ref={contentRef}
         tabIndex={-1}
       >
+        {kept.map(resolved => (
+          <div
+            key={resolved.item}
+            className="dock-group__kept"
+            hidden={resolved.item !== active?.item}
+          >
+            <ItemContent resolved={resolved} />
+          </div>
+        ))}
         {active ? (
-          <ItemContent key={active.item} resolved={active} />
+          !kept.includes(active) && <ItemContent key={active.item} resolved={active} />
         ) : (
           <div className="dock-group__welcome">
             <WelcomePage appInfo={appInfo} />
@@ -433,6 +445,32 @@ function GroupView({ group, main, current, resolve, appInfo }: GroupViewProps) {
       </div>
     </section>
   )
+}
+
+/**
+ * The items of a group that stay loaded while hidden (`keepsLoaded`), once
+ * they've been shown, in the order they were first shown: an item moved in
+ * the page would load again.
+ */
+function useKeptItems(items: ResolvedItem[], active: ResolvedItem | null): ResolvedItem[] {
+  const extensions = useStore(extensionsStore)
+  const [shown, setShown] = useState<readonly ItemId[]>([])
+  const keeps = (resolved: ResolvedItem) => keepsLoaded(resolved, extensions)
+  const kept = shown
+    .map(item => items.find(resolved => resolved.item === item))
+    .filter((resolved): resolved is ResolvedItem => resolved !== undefined && keeps(resolved))
+  if (active && keeps(active) && !shown.includes(active.item)) {
+    kept.push(active)
+  }
+  const ids = kept.map(resolved => resolved.item)
+  useEffect(() => {
+    setShown(previous =>
+      previous.length === ids.length && previous.every((item, index) => item === ids[index])
+        ? previous
+        : ids,
+    )
+  })
+  return kept
 }
 
 const tabId = (group: string, item: ItemId) => `dock-tab-${group}-${item.replace(/[^\w-]/g, '_')}`

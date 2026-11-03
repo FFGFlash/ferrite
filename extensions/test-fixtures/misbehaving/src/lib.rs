@@ -4,9 +4,10 @@
 
 use ferrite_extension_api::types::{
   Activation, CommandContext, ConfigValue, Diagnostic, DocumentChange, DocumentId, DocumentInfo,
-  LogLevel, MessageLevel, Position, Range, Severity, StatusItem, TextEdit, ViewItem,
+  LogLevel, MessageLevel, Position, PreviewElement, PreviewNode, Range, Severity, StatusItem,
+  TextEdit, ViewItem,
 };
-use ferrite_extension_api::{Guest, export_extension, host, workbench};
+use ferrite_extension_api::{Guest, export_extension, host, viewers, workbench};
 
 fn text_setting(key: &str) -> String {
   match host::configuration(key) {
@@ -173,6 +174,22 @@ impl Guest for Misbehaving {
         ));
       }
       "argument" => report(format!("argument: {:?}", workbench::command_argument())),
+      // Fills the `bytes` viewer in with the file's size, as preview content.
+      "view" => {
+        let path = workbench::command_argument().ok_or("no file to show")?;
+        let read = viewers::read_viewed_file("bytes", &path, 0, 0).map_err(|e| format!("{e:?}"))?;
+        let nodes = [
+          PreviewNode {
+            parent: None,
+            element: PreviewElement::Paragraph,
+          },
+          PreviewNode {
+            parent: Some(0),
+            element: PreviewElement::Text(format!("{} bytes", read.size)),
+          },
+        ];
+        viewers::set_viewer_content("bytes", &path, &nodes).map_err(|e| format!("{e:?}"))?;
+      }
       "uiErrors" => {
         let status = workbench::set_status_item("nope", None);
         let foreign = workbench::set_status_item(

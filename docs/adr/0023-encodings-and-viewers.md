@@ -1,7 +1,10 @@
 # ADR 0023: Any file size, text encodings, binary files, and viewers
 
-- **Status:** Accepted
+- **Status:** Accepted; amended 2026-11-02
 - **Date:** 2026-11-02
+
+Since [ADR 0025](0025-webviews.md), a viewer can be a webview, whose page loads its file itself,
+and the Images example is one: its page draws the picture with a choice of background and size.
 
 ## Context
 

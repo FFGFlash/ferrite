@@ -1,22 +1,25 @@
-//! Images: an example Ferrite extension with viewers.
+//! Images: an example Ferrite extension with webview viewers.
 //!
 //! The manifest declares two viewers: `image` for PNG, JPEG, GIF, WebP,
 //! BMP, ICO, and AVIF files, which opens them instead of their bytes, and
 //! `svg`, which SVG files open in only when the user chooses it (they're
-//! text people edit). Each runs a command with the file's path as its
-//! argument, when the file opens in it and when the file changes.
+//! text people edit). Both show the same page, `media/viewer.html`, which
+//! draws the picture from the file itself, with a toolbar to change its
+//! background and size (`media/viewer.js`).
 //!
-//! The command reads the file's header (`info`), and fills the viewer in
-//! with the picture, which the workbench draws from the file, and a line
-//! saying what it is: `PNG · 1920 × 1080 pixels · 8-bit RGBA · 245.3 KiB`.
+//! The page asks for the picture's details with a message, which runs the
+//! viewers' `on_message` command. It reads the file's header (`info`) and
+//! answers with a line saying what the picture is, such as
+//! `PNG · 1920 × 1080 pixels · 8-bit RGBA · 245.3 KiB`, and its size in
+//! pixels: what "actual size" means for an SVG file, which browsers don't
+//! give a size when it only has a `viewBox`.
 
 mod info;
 
 use ferrite_extension_api::types::{
-  Activation, ApiError, CommandContext, DocumentChange, DocumentId, DocumentInfo, PreviewElement,
-  PreviewImage, PreviewNode,
+  Activation, ApiError, CommandContext, DocumentChange, DocumentId, DocumentInfo, Webview,
 };
-use ferrite_extension_api::{Guest, export_extension, viewers, workbench};
+use ferrite_extension_api::{Guest, export_extension, viewers, webviews};
 
 use info::{ImageInfo, Source};
 
@@ -54,25 +57,7 @@ impl Source for Viewed<'_> {
   }
 }
 
-/// A file name as a relative link to the file, which the host resolves
-/// from the file's folder: escaped where it would otherwise end the path
-/// (`#`, `?`), be decoded (`%`), or be trimmed (spaces), and after `./`, so
-/// a name like `a:b.png` isn't taken for a web address.
-fn link_to(name: &str) -> String {
-  let mut link = String::from("./");
-  for c in name.chars() {
-    match c {
-      '%' => link.push_str("%25"),
-      '#' => link.push_str("%23"),
-      '?' => link.push_str("%3F"),
-      ' ' => link.push_str("%20"),
-      c => link.push(c),
-    }
-  }
-  link
-}
-
-/// What the line under the picture says.
+/// What the page shows at the end of its toolbar.
 fn summary(info: Option<&ImageInfo>, size: u64) -> String {
   let mut parts = Vec::new();
   if let Some(info) = info {
@@ -86,35 +71,53 @@ fn summary(info: Option<&ImageInfo>, size: u64) -> String {
   parts.join(" · ")
 }
 
-fn show(viewer: &str, path: &str) -> Result<(), String> {
+/// `text` as a JSON string.
+fn json_string(text: &str) -> String {
+  let mut json = String::from("\"");
+  for c in text.chars() {
+    match c {
+      '"' => json.push_str("\\\""),
+      '\\' => json.push_str("\\\\"),
+      c if c < ' ' => json.push_str(&format!("\\u{:04x}", u32::from(c))),
+      c => json.push(c),
+    }
+  }
+  json.push('"');
+  json
+}
+
+/// The answer to the page: `{"details": "...", "width": 1920, "height": 1080}`,
+/// with `null` sizes when the header doesn't say.
+fn details_message(info: Option<&ImageInfo>, size: u64) -> String {
+  let (width, height) = info
+    .and_then(|info| info.size)
+    .map_or(("null".into(), "null".into()), |(width, height)| {
+      (width.to_string(), height.to_string())
+    });
+  format!(
+    "{{\"details\":{},\"width\":{width},\"height\":{height}}}",
+    json_string(&summary(info, size))
+  )
+}
+
+/// Answers a viewer page's request for its picture's details.
+fn answer() -> Result<(), String> {
+  let message = webviews::message().ok_or("no message to answer")?;
+  let Webview::Viewer(viewed) = &message.source else {
+    return Err("only the viewers' pages ask for details".into());
+  };
   let mut file = Viewed {
-    viewer,
-    path,
+    viewer: &viewed.viewer,
+    path: &viewed.path,
     size: 0,
   };
-  let head = viewers::read_viewed_file(viewer, path, 0, HEAD_BYTES).map_err(describe)?;
+  let head =
+    viewers::read_viewed_file(&viewed.viewer, &viewed.path, 0, HEAD_BYTES).map_err(describe)?;
   file.size = head.size;
   let info = info::identify(&head.bytes, &mut file);
-  let name = path.rsplit(['/', '\\']).next().unwrap_or(path);
-  let node = |parent, element| PreviewNode { parent, element };
-  let nodes = vec![
-    node(None, PreviewElement::Paragraph),
-    node(
-      Some(0),
-      PreviewElement::Image(PreviewImage {
-        source: link_to(name),
-        description: name.to_owned(),
-        title: None,
-      }),
-    ),
-    node(None, PreviewElement::Paragraph),
-    node(
-      Some(2),
-      PreviewElement::Text(summary(info.as_ref(), file.size)),
-    ),
-  ];
   // False when the tab was closed meanwhile: nothing to do.
-  viewers::set_viewer_content(viewer, path, &nodes).map_err(describe)?;
+  webviews::post_message(&message.source, &details_message(info.as_ref(), file.size))
+    .map_err(describe)?;
   Ok(())
 }
 
@@ -128,13 +131,10 @@ impl Guest for Images {
   fn deactivate() {}
 
   fn run_command(command: String, _context: CommandContext) -> Result<(), String> {
-    let viewer = match command.as_str() {
-      "example.images.show" => "image",
-      "example.images.showSvg" => "svg",
-      other => return Err(format!("unknown command {other}")),
-    };
-    let path = workbench::command_argument().ok_or("no file to show")?;
-    show(viewer, &path)
+    match command.as_str() {
+      "example.images.details" => answer(),
+      other => Err(format!("unknown command {other}")),
+    }
   }
 
   fn document_opened(_document: DocumentInfo) {}
@@ -149,13 +149,6 @@ mod tests {
   use super::*;
 
   #[test]
-  fn links_to_awkward_file_names() {
-    assert_eq!(link_to("cat.png"), "./cat.png");
-    assert_eq!(link_to("100% #1 a?.png"), "./100%25%20%231%20a%3F.png");
-    assert_eq!(link_to("a:b.png"), "./a:b.png");
-  }
-
-  #[test]
   fn summarizes_what_is_known() {
     let png = ImageInfo {
       format: "PNG",
@@ -167,5 +160,23 @@ mod tests {
       "PNG · 1920 × 1080 pixels · 8-bit RGBA · 245.3 KiB"
     );
     assert_eq!(summary(None, 12), "12 bytes");
+  }
+
+  #[test]
+  fn answers_with_the_details_and_size_as_json() {
+    let svg = ImageInfo {
+      format: "SVG",
+      size: Some((64, 64)),
+      details: Vec::new(),
+    };
+    assert_eq!(
+      details_message(Some(&svg), 512),
+      r#"{"details":"SVG · 64 × 64 pixels · 512 bytes","width":64,"height":64}"#
+    );
+    assert_eq!(
+      details_message(None, 3),
+      r#"{"details":"3 bytes","width":null,"height":null}"#
+    );
+    assert_eq!(json_string("a\"b\\c\nd"), r#""a\"b\\c\u000ad""#);
   }
 }

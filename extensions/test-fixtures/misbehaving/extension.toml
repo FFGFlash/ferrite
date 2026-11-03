@@ -95,6 +95,18 @@ title = "Report the Argument"
 id = "test.misbehaving.uiErrors"
 title = "Misuse the Workbench"
 
+[[commands]]
+id = "test.misbehaving.view"
+title = "Fill a Viewer"
+hidden = true
+
+# A viewer filled with preview content by a command.
+[[viewers]]
+id = "bytes"
+title = "Byte Counter"
+patterns = ["*.bytes"]
+command = "test.misbehaving.view"
+
 [[keybindings]]
 command = "test.misbehaving.argument"
 key = "ctrl+alt+a"

@@ -22,6 +22,9 @@ pub enum Permission {
   /// Start the language servers the manifest declares. Not checked by the
   /// extension API: the editor starts the servers, not the extension.
   LanguageServers,
+  /// Let its webview pages load content and code from the web (API 1.5).
+  /// Enforced by the pages' content security policy.
+  Network,
 }
 
 impl Permission {
@@ -32,6 +35,7 @@ impl Permission {
       Self::FilesRead => "Read the files in the open folder",
       Self::FilesWrite => "Change and create files in the open folder",
       Self::LanguageServers => "Run language servers, which are programs on this computer",
+      Self::Network => "Let its pages load content and code from the web",
     }
   }
 }

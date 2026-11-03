@@ -15,12 +15,14 @@ use ferrite_core::{Document, DocumentId, Editor, LanguageChoice};
 use ferrite_text::{Edit, TextBuffer};
 
 use crate::bindings::ferrite::extension::host::Host;
+use crate::bindings::ferrite::extension::storage::{Host as StorageHost, StorageScope};
 use crate::bindings::ferrite::extension::types::{
   self, ApiError, ConfigValue as WitConfigValue, Diagnostic, DocumentInfo, LineSlice, LogLevel,
   MessageLevel, Permission as WitPermission, Position, PreviewNode, PreviewOptions, Range,
-  StatusItem, TextEdit, TextSlice, ViewItem,
+  StatusItem, TextEdit, TextSlice, ViewItem, Webview, WebviewMessage,
 };
 use crate::bindings::ferrite::extension::viewers::{FileBytes, Host as ViewersHost};
+use crate::bindings::ferrite::extension::webviews::Host as WebviewsHost;
 use crate::bindings::ferrite::extension::workbench::Host as WorkbenchHost;
 use crate::config::ConfigValue;
 use crate::host::{Shared, StoredDiagnostic};
@@ -28,6 +30,7 @@ use crate::manifest::Manifest;
 use crate::permissions::Permission;
 use crate::preview::{self, MAX_KEY_BYTES, MAX_TITLE_CHARS, PreviewInfo};
 use crate::runtime::StoreState;
+use crate::storage::StorageError;
 use crate::worker::Setup;
 use crate::{Embedder, Notification, Severity, StatusContent, ViewEntry};
 
@@ -97,6 +100,8 @@ pub struct ApiContext {
   messages: RateLimit,
   /// The argument of the command being run.
   pub argument: Option<String>,
+  /// The webview message the running command was run for.
+  pub message: Option<WebviewMessage>,
 }
 
 impl ApiContext {
@@ -117,6 +122,7 @@ impl ApiContext {
       logs: RateLimit::new(200.0, 50.0),
       messages: RateLimit::new(10.0, 1.0),
       argument: None,
+      message: None,
     }
   }
 
@@ -538,6 +544,52 @@ impl ApiContext {
     Ok((id, file))
   }
 
+  fn is_webview_preview(&self, preview: &str) -> bool {
+    self
+      .manifest
+      .contributions
+      .preview(preview)
+      .is_some_and(|declared| declared.webview.is_some())
+  }
+
+  /// The preview id of a webview tab of the extension's; `None` if it
+  /// isn't open, and an error if it isn't a webview.
+  fn webview(&self, webview: &Webview) -> Result<Option<String>, ApiError> {
+    match webview {
+      Webview::Viewer(viewed) => {
+        let declared = self
+          .manifest
+          .contributions
+          .viewer(&viewed.viewer)
+          .ok_or_else(|| {
+            ApiError::InvalidArgument(format!("no viewer {:?} is declared", viewed.viewer))
+          })?;
+        if declared.webview.is_none() {
+          return Err(ApiError::InvalidArgument(format!(
+            "the viewer {:?} isn't a webview",
+            viewed.viewer
+          )));
+        }
+        match self.viewed(&viewed.viewer, &viewed.path) {
+          Ok((id, _)) => Ok(Some(id)),
+          // Closed since the command started.
+          Err(ApiError::InvalidArgument(_)) => Ok(None),
+          Err(error) => Err(error),
+        }
+      }
+      Webview::Preview(instance) => {
+        let (id, _) = self.preview(&instance.preview, &instance.key)?;
+        if !self.is_webview_preview(&instance.preview) {
+          return Err(ApiError::InvalidArgument(format!(
+            "the preview {:?} isn't a webview",
+            instance.preview
+          )));
+        }
+        Ok(self.shared()?.preview_document(&id).map(|_| id))
+      }
+    }
+  }
+
   fn view(&self, view: &str) -> Result<String, ApiError> {
     self
       .manifest
@@ -708,6 +760,14 @@ impl WorkbenchHost for StoreState {
     options: PreviewOptions,
   ) -> Result<(), ApiError> {
     let (id, icon) = self.api.preview(&preview, &key)?;
+    // A webview's page: the manifest's, or none until the extension sets it.
+    let page = self
+      .api
+      .manifest
+      .contributions
+      .preview(&preview)
+      .and_then(|declared| declared.webview.as_ref())
+      .map(|webview| webview.page.clone());
     let title = options.title.trim();
     if title.is_empty() {
       return Err(ApiError::InvalidArgument("a preview needs a title".into()));
@@ -727,8 +787,9 @@ impl WorkbenchHost for StoreState {
       title: cut(title, MAX_TITLE_CHARS),
       icon,
       document: options.document,
+      webview: page.is_some(),
     };
-    shared.show_preview(&self.api.id, info, options.beside);
+    shared.show_preview(&self.api.id, info, page, options.beside);
     Ok(())
   }
 
@@ -739,6 +800,11 @@ impl WorkbenchHost for StoreState {
     nodes: Vec<PreviewNode>,
   ) -> Result<bool, ApiError> {
     let (id, _) = self.api.preview(&preview, &key)?;
+    if self.api.is_webview_preview(&preview) {
+      return Err(ApiError::InvalidArgument(format!(
+        "the preview {preview:?} is a webview: use set-webview-html or post-message"
+      )));
+    }
     let shared = self.api.shared()?;
     let Some(document) = shared.preview_document(&id) else {
       return Ok(false);
@@ -817,6 +883,101 @@ impl ViewersHost for StoreState {
       .read_to_end(&mut bytes)
       .map_err(failed)?;
     Ok(FileBytes { size, bytes })
+  }
+}
+
+impl WebviewsHost for StoreState {
+  fn set_webview_html(&mut self, webview: Webview, html: String) -> Result<bool, ApiError> {
+    if html.len() > crate::webview::MAX_HTML_BYTES {
+      return Err(ApiError::TooLarge(format!(
+        "a page must be at most {} MiB",
+        crate::webview::MAX_HTML_BYTES / 1024 / 1024
+      )));
+    }
+    let Some(id) = self.api.webview(&webview)? else {
+      return Ok(false);
+    };
+    Ok(self.api.shared()?.set_webview_html(&id, html))
+  }
+
+  fn post_message(&mut self, webview: Webview, message: String) -> Result<bool, ApiError> {
+    if message.len() > crate::webview::MAX_MESSAGE_BYTES {
+      return Err(ApiError::TooLarge(format!(
+        "a message must be at most {} KiB",
+        crate::webview::MAX_MESSAGE_BYTES / 1024
+      )));
+    }
+    serde_json::from_str::<serde::de::IgnoredAny>(&message)
+      .map_err(|error| ApiError::InvalidArgument(format!("the message isn't JSON: {error}")))?;
+    let Some(id) = self.api.webview(&webview)? else {
+      return Ok(false);
+    };
+    Ok(self.api.shared()?.post_webview_message(&id, message))
+  }
+
+  fn message(&mut self) -> Option<WebviewMessage> {
+    self.api.message.clone()
+  }
+}
+
+impl ApiContext {
+  /// A storage scope: `None` for the workspace while no folder is open.
+  fn scope(&self, scope: StorageScope) -> Result<Option<crate::storage::Scope>, ApiError> {
+    Ok(match scope {
+      StorageScope::Global => Some(crate::storage::Scope::Global),
+      StorageScope::Workspace => self
+        .shared()?
+        .embedder
+        .open_folder()
+        .map(|folder| crate::storage::Scope::Workspace(folder.root)),
+    })
+  }
+}
+
+impl StorageHost for StoreState {
+  fn get(&mut self, scope: StorageScope, key: String) -> Option<String> {
+    let scope = self.api.scope(scope).ok().flatten()?;
+    self
+      .api
+      .shared()
+      .ok()?
+      .storage
+      .get(&self.api.id, &scope, &key)
+  }
+
+  fn set(
+    &mut self,
+    scope: StorageScope,
+    key: String,
+    value: Option<String>,
+  ) -> Result<(), ApiError> {
+    let scope = self
+      .api
+      .scope(scope)?
+      .ok_or_else(|| ApiError::InvalidArgument("no folder is open".into()))?;
+    let shared = self.api.shared()?;
+    shared
+      .storage
+      .set(&self.api.id, &scope, &key, value.clone())
+      .map_err(|error| match error {
+        StorageError::TooLarge(message) => ApiError::TooLarge(message),
+        StorageError::Invalid(message) | StorageError::Unsaved(message) => {
+          ApiError::InvalidArgument(message)
+        }
+      })?;
+    shared.storage_changed(&self.api.id, &scope, &key, value, None);
+    Ok(())
+  }
+
+  fn keys(&mut self, scope: StorageScope) -> Vec<String> {
+    let Ok(Some(scope)) = self.api.scope(scope) else {
+      return Vec::new();
+    };
+    self
+      .api
+      .shared()
+      .map(|shared| shared.storage.keys(&self.api.id, &scope))
+      .unwrap_or_default()
   }
 }
 

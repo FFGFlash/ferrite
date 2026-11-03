@@ -217,6 +217,13 @@ fn install(
       std::fs::copy(source.join(file), target.join(file)).expect("copy");
     }
   }
+  // Webview pages.
+  if let Ok(entries) = std::fs::read_dir(source.join("media")) {
+    std::fs::create_dir_all(target.join("media")).expect("mkdir");
+    for entry in entries.flatten() {
+      std::fs::copy(entry.path(), target.join("media").join(entry.file_name())).expect("copy");
+    }
+  }
   let manifest = std::fs::read_to_string(source.join("extension.toml")).expect("manifest");
   let manifest = manifest
     .lines()
@@ -273,6 +280,7 @@ fn setup(
       permissions_file: Some(permissions_file),
       settings,
       limits: limits(),
+      storage_dir: None,
     },
   );
   if let Some(granted) = grant {
@@ -1080,6 +1088,7 @@ fn theme_only_extensions_need_no_code() {
     permissions_file: None,
     settings: BTreeMap::new(),
     limits: limits(),
+    storage_dir: None,
   };
   let host = ExtensionHost::new(fake, options);
   host.load();
@@ -1112,6 +1121,7 @@ fn the_icons_example_contributes_an_icon_theme() {
     permissions_file: None,
     settings: BTreeMap::new(),
     limits: limits(),
+    storage_dir: None,
   };
   let host = ExtensionHost::new(fake, options);
   host.load();
@@ -1156,6 +1166,7 @@ fn the_language_examples_load_and_declare_their_languages_and_servers() {
     permissions_file: None,
     settings: BTreeMap::new(),
     limits: limits(),
+    storage_dir: None,
   };
   let host = ExtensionHost::new(Arc::new(Fake::default()), options);
   host.load();
@@ -1227,6 +1238,7 @@ fn the_html_css_example_contributes_languages_and_servers_once_allowed() {
     permissions_file: Some(dir.path().join("permissions.json")),
     settings: BTreeMap::new(),
     limits: limits(),
+    storage_dir: None,
   };
   let host = ExtensionHost::new(fake.clone(), options);
   host.load();
@@ -1384,6 +1396,7 @@ fn markdown_example_previews_documents_as_they_change() {
       title: "Preview README.md".into(),
       icon: "book".into(),
       document: Some(id.get()),
+      webview: false,
     }]
   );
   let content = s.host.preview_content(&preview).expect("open");
@@ -1477,15 +1490,27 @@ fn markdown_previews_only_markdown_documents() {
 const PNG_HEADER: &[u8] =
   b"\x89PNG\r\n\x1a\n\0\0\0\rIHDR\0\0\0\x03\0\0\0\x02\x08\x06\0\0\0\0\0\0\0\0\0\0\0IEND";
 
+/// The page's address, split into the token and the path after it.
+fn webview_address(url: &str) -> (String, String) {
+  let after = url
+    .strip_prefix(&ferrite_extension_host::webview::origin())
+    .expect("Ferrite's origin")
+    .trim_start_matches('/');
+  let (token, path) = after.split_once('/').expect("token/path");
+  (token.to_owned(), path.to_owned())
+}
+
 #[test]
-fn the_images_example_shows_files_in_its_viewer() {
+fn the_images_example_shows_files_in_a_webview_and_answers_its_page() {
   let s = setup("images", "images", None, "", |m| m);
   s.host.load();
   let status = &s.host.statuses()[0];
+  assert_eq!(status.error, None);
   let viewers = &status.contributions.viewers;
   assert_eq!(viewers.len(), 2);
   assert_eq!(viewers[0].full_id, "example.images.image");
   assert!(viewers[0].patterns.contains(&"*.png".to_owned()));
+  assert_eq!(viewers[0].command, None, "the page loads the picture");
 
   let pictures = s._dir.path().join("my pictures");
   std::fs::create_dir_all(&pictures).expect("mkdir");
@@ -1494,43 +1519,59 @@ fn the_images_example_shows_files_in_its_viewer() {
 
   s.host
     .open_viewer("example.images.image", &path)
-    .expect("runs")
+    .expect("opens")
     .wait()
-    .expect("fills the viewer in");
+    .expect("nothing to run");
   let id = ferrite_extension_host::viewer_id("example.images.image", &path);
   assert!(s.host.previews().is_empty(), "viewers aren't previews");
-  let content = s.host.preview_content(&id).expect("open");
-  let texts: Vec<_> = content
-    .nodes
-    .iter()
-    .filter_map(|node| match &node.element {
-      PreviewElement::Text { text } => Some(text.as_str()),
-      _ => None,
-    })
-    .collect();
+
+  // The page, with the bridge, and the picture it shows.
+  let info = s.host.webview(&id).expect("a webview");
+  let (token, page) = webview_address(&info.url);
+  assert_eq!(page, "media/viewer.html");
+  let html = s.host.webview_resource(&token, &page).expect("page");
+  let html = String::from_utf8(html.body).expect("utf-8");
+  assert!(html.contains("__ferrite/webview.js"), "{html}");
+  assert!(html.contains("viewer.js"));
+  let picture = s
+    .host
+    .webview_resource(&token, "__ferrite/file")
+    .expect("the file");
   assert_eq!(
-    texts,
-    [format!(
-      "PNG · 3 × 2 pixels · 8-bit RGBA · {} bytes",
-      PNG_HEADER.len()
-    )]
+    (picture.body.as_slice(), picture.mime),
+    (PNG_HEADER, "image/png")
   );
-  // The picture is the file itself, whatever its name, and loads.
-  assert!(content.nodes.iter().any(|node| matches!(
-    &node.element,
-    PreviewElement::Image { source: ImageSource::File { path: shown }, .. }
-      if Path::new(shown) == path
-  )));
   assert!(
     s.host
-      .preview_image(&id, &path)
-      .expect("loads")
-      .starts_with("data:image/png;base64,")
+      .webview_resource(&token, "../extension.toml")
+      .is_err()
   );
 
-  // Closed: the extension can't read it or fill it in any more.
+  // The page asks for the details; the extension answers it.
+  s.host
+    .webview_message(&id, r#"{"type":"details"}"#.into())
+    .expect("sent");
+  let answer = format!(
+    r#"{{"details":"PNG · 3 × 2 pixels · 8-bit RGBA · {} bytes","width":3,"height":2}}"#,
+    PNG_HEADER.len()
+  );
+  s.fake.wait_for("the answer", |n| {
+    *n == Notification::WebviewMessage {
+      id: id.clone(),
+      message: answer.clone(),
+    }
+  });
+
+  // Closed: its page is gone, and messages can't reach the extension.
   s.host.preview_closed(&id);
-  assert!(s.host.preview_content(&id).is_none());
+  assert!(s.host.webview(&id).is_none());
+  assert!(s.host.webview_resource(&token, &page).is_err());
+  assert!(
+    s.host
+      .webview_message(&id, "{}".into())
+      .expect_err("closed")
+      .contains("isn't open")
+  );
   let other = pictures.join("other.png");
   std::fs::write(&other, b"not really a PNG").expect("write");
   let error = s
@@ -1543,19 +1584,23 @@ fn the_images_example_shows_files_in_its_viewer() {
 
 #[test]
 fn a_viewer_keeps_its_tab_but_not_its_content_when_its_extension_stops() {
-  let s = setup("images", "images", None, "", |m| m);
+  let s = misbehaving("");
   s.host.load();
-  let path = s._dir.path().join("a.png");
+  let path = s._dir.path().join("a.bytes");
   std::fs::write(&path, PNG_HEADER).expect("write");
   s.host
-    .open_viewer("example.images.image", &path)
+    .open_viewer("test.misbehaving.bytes", &path)
     .expect("runs")
     .wait()
     .expect("fills it in");
-  let id = ferrite_extension_host::viewer_id("example.images.image", &path);
-  assert!(!s.host.preview_content(&id).expect("open").nodes.is_empty());
+  let id = ferrite_extension_host::viewer_id("test.misbehaving.bytes", &path);
+  let content = s.host.preview_content(&id).expect("open");
+  assert!(content.nodes.iter().any(|node| matches!(
+    &node.element,
+    PreviewElement::Text { text } if *text == format!("{} bytes", PNG_HEADER.len())
+  )));
 
-  s.host.set_enabled("example.images", false);
+  s.host.set_enabled("test.misbehaving", false);
   assert!(
     s.host
       .preview_content(&id)
@@ -1565,21 +1610,21 @@ fn a_viewer_keeps_its_tab_but_not_its_content_when_its_extension_stops() {
   );
   let error = s
     .host
-    .open_viewer("example.images.image", &path)
+    .open_viewer("test.misbehaving.bytes", &path)
     .err()
     .expect("disabled");
   assert!(error.contains("disabled"), "{error}");
 
-  s.host.set_enabled("example.images", true);
+  s.host.set_enabled("test.misbehaving", true);
   s.host
-    .open_viewer("example.images.image", &path)
+    .open_viewer("test.misbehaving.bytes", &path)
     .expect("runs")
     .wait()
     .expect("fills it in again");
   assert!(!s.host.preview_content(&id).expect("open").nodes.is_empty());
 
   // Restarted, it fills in the viewers it showed without being asked.
-  s.host.restart("example.images");
+  s.host.restart("test.misbehaving");
   let deadline = Instant::now() + Duration::from_secs(30);
   while s.host.preview_content(&id).expect("open").nodes.is_empty() {
     assert!(

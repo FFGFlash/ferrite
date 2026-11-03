@@ -7,12 +7,14 @@
 //! nodes) through the `workbench` interface. Every value is validated here, so nothing an
 //! extension declares reaches the frontend as markup or arbitrary CSS:
 //! colors must be hex colors and theme keys must be known tokens, and icons
-//! are images (see [`crate::icons`]).
+//! are images (see [`crate::icons`]). The exception is webview pages, which
+//! run sandboxed in frames of their own (see [`crate::webview`]).
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Component, Path, PathBuf};
 use std::sync::{Arc, LazyLock};
 
+use base64::Engine;
 use serde::{Deserialize, Serialize};
 
 use crate::icons::{self, IconTheme};
@@ -28,6 +30,15 @@ pub static THEME_TOKENS: LazyLock<BTreeSet<String>> = LazyLock::new(|| {
 pub const VIEW_ICONS: &[&str] = &[
   "list", "check", "bolt", "book", "bug", "tag", "star", "flag", "bell",
 ];
+/// Named icons for tab actions and webview pages, as SVG path data, shared
+/// with the frontend (`scripts/action-icons.mjs` generates them).
+pub static ACTION_ICONS: LazyLock<BTreeMap<String, String>> = LazyLock::new(|| {
+  serde_json::from_str(include_str!("../../../src/components/actionIcons.json")).unwrap_or_default()
+});
+/// Most actions on one viewer's or preview's tabs.
+const MAX_ACTIONS: usize = 10;
+/// Largest icon file an action can use.
+const MAX_ACTION_ICON_BYTES: u64 = 32 * 1024;
 const MAX_THEME_FILE_BYTES: u64 = 256 * 1024;
 
 fn invalid(message: impl Into<String>) -> ManifestError {
@@ -182,6 +193,55 @@ pub struct PreviewContribution {
   pub full_id: String,
   /// Shown on its tabs.
   pub icon: String,
+  /// Set when it shows a page instead of preview content. (1.5)
+  pub webview: Option<WebviewContribution>,
+  /// Buttons beside its tabs. (1.5)
+  pub actions: Vec<TabAction>,
+}
+
+/// A button beside a viewer's or preview's tabs. (1.5)
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TabAction {
+  /// Unique among the tab's actions; what the page's `ferrite.onAction`
+  /// gets.
+  pub id: String,
+  /// Its tooltip and accessible name.
+  pub title: String,
+  pub icon: ActionIcon,
+  /// Run with the tab as its argument (a viewer's file, or a preview's
+  /// key); without one, the click goes to the webview's page.
+  pub command: Option<String>,
+}
+
+/// A tab action's icon.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum ActionIcon {
+  /// One of [`ACTION_ICONS`], drawn in the theme's colors.
+  Named { name: String },
+  /// An SVG or PNG file of the extension's, shown as an image.
+  Image {
+    /// Relative to the extension's folder.
+    #[serde(skip)]
+    path: String,
+    /// The file as a `data:` URL, once loaded ([`load_action_icons`]).
+    url: String,
+  },
+}
+
+/// The page a viewer or preview shows instead of preview content. (1.5)
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WebviewContribution {
+  /// The HTML file it shows, relative to the extension's folder; `None`
+  /// when the extension sets the page with `set-webview-html`.
+  pub page: Option<String>,
+  /// Run when the page sends a message.
+  pub on_message: Option<String>,
+  /// Keeps the page loaded while its tab is hidden, instead of loading it
+  /// again (with its saved state) when the tab is shown.
+  pub retain_when_hidden: bool,
 }
 
 /// When a viewer opens the files it's for.
@@ -208,8 +268,13 @@ pub struct ViewerContribution {
   /// File name patterns, as for menu items.
   pub patterns: Vec<String>,
   /// Run with the file's path as its argument to fill the viewer in.
-  pub command: String,
+  /// Optional for a webview, whose page can load the file itself.
+  pub command: Option<String>,
   pub priority: ViewerPriority,
+  /// Set when it shows a page instead of preview content. (1.5)
+  pub webview: Option<WebviewContribution>,
+  /// Buttons beside its tabs. (1.5)
+  pub actions: Vec<TabAction>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -332,7 +397,14 @@ impl Contributions {
       && self.views.is_empty()
       && self.decorations.is_empty()
       && self.previews.is_empty()
-      && self.viewers.is_empty())
+      && self.viewers.iter().all(|viewer| {
+        viewer.command.is_none()
+          && viewer
+            .webview
+            .as_ref()
+            .is_none_or(|webview| webview.on_message.is_none())
+          && viewer.actions.iter().all(|action| action.command.is_none())
+      }))
   }
 
   pub fn preview(&self, id: &str) -> Option<&PreviewContribution> {
@@ -419,6 +491,11 @@ pub struct RawView {
 pub struct RawPreview {
   id: String,
   icon: Option<String>,
+  webview: Option<RawWebview>,
+  on_message: Option<String>,
+  retain_when_hidden: Option<bool>,
+  #[serde(default)]
+  actions: Vec<RawAction>,
 }
 
 #[derive(Deserialize)]
@@ -427,8 +504,31 @@ pub struct RawViewer {
   id: String,
   title: String,
   patterns: Vec<String>,
-  command: String,
+  command: Option<String>,
   priority: Option<String>,
+  webview: Option<RawWebview>,
+  on_message: Option<String>,
+  retain_when_hidden: Option<bool>,
+  #[serde(default)]
+  actions: Vec<RawAction>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RawAction {
+  id: String,
+  title: String,
+  icon: String,
+  command: Option<String>,
+}
+
+/// `webview = "page.html"`, or `webview = true` for a page the extension
+/// sets.
+#[derive(Deserialize)]
+#[serde(untagged)]
+pub enum RawWebview {
+  Page(String),
+  Set(bool),
 }
 
 #[derive(Deserialize, Default)]
@@ -780,10 +880,25 @@ pub fn parse(
         VIEW_ICONS.join(", ")
       )));
     }
+    let webview = webview(
+      &format!("previews: {}", preview.id),
+      preview.webview,
+      preview.on_message,
+      preview.retain_when_hidden,
+      &declared,
+    )?;
+    let actions = actions(
+      &format!("previews: {}", preview.id),
+      preview.actions,
+      webview.is_some(),
+      &declared,
+    )?;
     contributions.previews.push(PreviewContribution {
       full_id: format!("{extension}.{}", preview.id),
       id: preview.id,
       icon,
+      webview,
+      actions,
     });
   }
 
@@ -813,13 +928,31 @@ pub fn parse(
         )));
       }
     };
+    let webview = webview(
+      &section,
+      viewer.webview,
+      viewer.on_message,
+      viewer.retain_when_hidden,
+      &declared,
+    )?;
+    let actions = actions(&section, viewer.actions, webview.is_some(), &declared)?;
+    if viewer.command.is_none() && webview.is_none() {
+      return Err(invalid(format!(
+        "{section}: a viewer needs a command, a webview, or both"
+      )));
+    }
     contributions.viewers.push(ViewerContribution {
       full_id: format!("{extension}.{}", viewer.id),
       title: text("viewers", "title", &viewer.title, 40)?,
-      command: declared("viewers", &viewer.command)?,
+      command: viewer
+        .command
+        .map(|command| declared("viewers", &command))
+        .transpose()?,
       id: viewer.id,
       patterns: viewer.patterns,
       priority,
+      webview,
+      actions,
     });
   }
 
@@ -1153,6 +1286,181 @@ fn comment_token(section: &str, field: &str, token: &str) -> Result<String, Mani
       "{section}: {field} delimiters must be 1 to 8 characters without spaces"
     )))
   }
+}
+
+/// A viewer's or preview's `webview`, `on_message`, and
+/// `retain_when_hidden`.
+fn webview(
+  section: &str,
+  raw: Option<RawWebview>,
+  on_message: Option<String>,
+  retain_when_hidden: Option<bool>,
+  declared: &dyn Fn(&str, &str) -> Result<String, ManifestError>,
+) -> Result<Option<WebviewContribution>, ManifestError> {
+  let page = match raw {
+    None | Some(RawWebview::Set(false)) => {
+      return if on_message.is_some() || retain_when_hidden.is_some() {
+        Err(invalid(format!(
+          "{section}: on_message and retain_when_hidden need a webview"
+        )))
+      } else {
+        Ok(None)
+      };
+    }
+    Some(RawWebview::Set(true)) => None,
+    Some(RawWebview::Page(page)) => {
+      let path = inside(section, &page)?;
+      let html = path
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .is_some_and(|extension| matches!(extension.to_ascii_lowercase().as_str(), "html" | "htm"));
+      if !html {
+        return Err(invalid(format!(
+          "{section}: webview {page:?} must be an HTML file"
+        )));
+      }
+      Some(page.replace('\\', "/"))
+    }
+  };
+  Ok(Some(WebviewContribution {
+    page,
+    on_message: on_message
+      .map(|command| declared(section, &command))
+      .transpose()?,
+    retain_when_hidden: retain_when_hidden.unwrap_or(false),
+  }))
+}
+
+/// A viewer's or preview's `actions`.
+fn actions(
+  section: &str,
+  raw: Vec<RawAction>,
+  webview: bool,
+  declared: &dyn Fn(&str, &str) -> Result<String, ManifestError>,
+) -> Result<Vec<TabAction>, ManifestError> {
+  if raw.len() > MAX_ACTIONS {
+    return Err(invalid(format!(
+      "{section}: at most {MAX_ACTIONS} actions can be declared"
+    )));
+  }
+  let mut actions: Vec<TabAction> = Vec::new();
+  for action in raw {
+    let section = format!("{section}: actions");
+    local_id(&section, &action.id)?;
+    unique(&section, actions.iter().map(|a| &a.id), &action.id)?;
+    let icon = if ACTION_ICONS.contains_key(&action.icon) {
+      ActionIcon::Named { name: action.icon }
+    } else {
+      let path = inside(&section, &action.icon).map_err(|_| {
+        invalid(format!(
+          "{section}: icon {:?} must be one of the named icons or an SVG or PNG file in the extension's folder",
+          action.icon
+        ))
+      })?;
+      let image = path
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .is_some_and(|extension| matches!(extension.to_ascii_lowercase().as_str(), "svg" | "png"));
+      if !image {
+        return Err(invalid(format!(
+          "{section}: icon {:?} must be one of the named icons or an SVG or PNG file",
+          action.icon
+        )));
+      }
+      ActionIcon::Image {
+        path: action.icon.replace('\\', "/"),
+        url: String::new(),
+      }
+    };
+    let command = action
+      .command
+      .map(|command| declared(&section, &command))
+      .transpose()?;
+    if command.is_none() && !webview {
+      return Err(invalid(format!(
+        "{section}: action {:?} needs a command, since only a webview's page can handle a click",
+        action.id
+      )));
+    }
+    actions.push(TabAction {
+      title: text(&section, "title", &action.title, 40)?,
+      id: action.id,
+      icon,
+      command,
+    });
+  }
+  Ok(actions)
+}
+
+/// Reads the icon files tab actions use, as `data:` URLs.
+pub fn load_action_icons(
+  dir: &Path,
+  contributions: &mut Contributions,
+) -> Result<(), ManifestError> {
+  let actions = contributions
+    .previews
+    .iter_mut()
+    .flat_map(|preview| preview.actions.iter_mut())
+    .chain(
+      contributions
+        .viewers
+        .iter_mut()
+        .flat_map(|viewer| viewer.actions.iter_mut()),
+    );
+  for action in actions {
+    let ActionIcon::Image { path, url } = &mut action.icon else {
+      continue;
+    };
+    let full = dir.join(&*path);
+    let read = |source| ManifestError::Read {
+      path: full.clone(),
+      source,
+    };
+    let size = std::fs::metadata(&full).map_err(read)?.len();
+    if size > MAX_ACTION_ICON_BYTES {
+      return Err(invalid(format!(
+        "action icon {path} must be at most {} KiB",
+        MAX_ACTION_ICON_BYTES / 1024
+      )));
+    }
+    let bytes = std::fs::read(&full).map_err(read)?;
+    let media = if path.to_ascii_lowercase().ends_with(".svg") {
+      "image/svg+xml"
+    } else {
+      "image/png"
+    };
+    *url = format!(
+      "data:{media};base64,{}",
+      base64::engine::general_purpose::STANDARD.encode(bytes)
+    );
+  }
+  Ok(())
+}
+
+/// Checks that the webview pages viewers and previews name are files.
+pub fn check_webview_pages(dir: &Path, contributions: &Contributions) -> Result<(), ManifestError> {
+  let pages = contributions
+    .previews
+    .iter()
+    .filter_map(|preview| preview.webview.as_ref())
+    .chain(
+      contributions
+        .viewers
+        .iter()
+        .filter_map(|viewer| viewer.webview.as_ref()),
+    )
+    .filter_map(|webview| webview.page.as_deref());
+  for page in pages {
+    let full = dir.join(page);
+    let metadata = std::fs::metadata(&full).map_err(|source| ManifestError::Read {
+      path: full.clone(),
+      source,
+    })?;
+    if !metadata.is_file() {
+      return Err(invalid(format!("webview {page} is not a file")));
+    }
+  }
+  Ok(())
 }
 
 /// A relative path that stays inside the extension's folder.

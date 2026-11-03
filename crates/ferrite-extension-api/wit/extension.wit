@@ -1,11 +1,11 @@
 /// The Ferrite extension API, version 1 (1.1: workbench contributions;
-/// 1.2: previews; 1.3: files; 1.4: viewers).
+/// 1.2: previews; 1.3: files; 1.4: viewers; 1.5: webviews and storage).
 ///
 /// An extension is a WebAssembly component targeting the `extension` world.
 /// It can call only the functions it imports here; there is no other
 /// filesystem, network, environment, or clock access. See
 /// `docs/extensions.md`.
-package ferrite:extension@1.4.0;
+package ferrite:extension@1.5.0;
 
 /// Types shared by the host functions and the extension's exports.
 interface types {
@@ -266,6 +266,34 @@ interface types {
     /// the same group.
     beside: bool,
   }
+
+  /// A file open in one of the extension's viewers. (1.5)
+  record viewed-file {
+    /// The viewer's id, as declared in the manifest.
+    viewer: string,
+    path: string,
+  }
+
+  /// An open preview of the extension: its id as declared in the
+  /// manifest, and the key it was shown with. (1.5)
+  record preview-instance {
+    preview: string,
+    key: string,
+  }
+
+  /// A tab of the extension's that shows a webview page. (1.5)
+  variant webview {
+    viewer(viewed-file),
+    preview(preview-instance),
+  }
+
+  /// A message a webview page sent with `ferrite.postMessage`. (1.5)
+  record webview-message {
+    /// The tab whose page sent it.
+    source: webview,
+    /// The message, as JSON text.
+    data: string,
+  }
 }
 
 /// Functions the editor provides.
@@ -420,8 +448,9 @@ interface files {
 /// A viewer is declared in the manifest with the file names it opens and
 /// the command that fills it in, which runs with the file's path as its
 /// argument (see `command-argument`) whenever the file is opened in the
-/// viewer or changes on disk. Viewers need no permission: a viewer can
-/// read only the files open in it. (1.4)
+/// viewer or changes on disk. A webview viewer (1.5) shows a page instead,
+/// and needs no command. Viewers need no permission: a viewer can read
+/// only the files open in it. (1.4)
 interface viewers {
   use types.{api-error, preview-node};
 
@@ -446,6 +475,57 @@ interface viewers {
   read-viewed-file: func(viewer: string, path: string, offset: u64, length: u32) -> result<file-bytes, api-error>;
 }
 
+/// Pages that viewers and previews show instead of preview content: HTML,
+/// styles, and scripts from the extension's folder, or HTML the extension
+/// sets. A viewer or preview is a webview when its manifest entry has
+/// `webview`. Its page runs sandboxed: it can load only the extension's
+/// files and, in a viewer, the file open in it, and can't reach the editor
+/// except by messages. The page sends them with `ferrite.postMessage`,
+/// which runs the command named by the entry's `on_message` (see
+/// `message`), and receives them with `ferrite.onMessage`. (1.5)
+interface webviews {
+  use types.{api-error, webview, webview-message};
+
+  /// Replaces the page a webview shows with `html` (at most 4 MiB), and
+  /// loads it. Relative addresses in it are found in the extension's
+  /// folder. Returns false, changing nothing, if the tab isn't open.
+  set-webview-html: func(webview: webview, html: string) -> result<bool, api-error>;
+
+  /// Sends a message, as JSON text (at most 1 MiB), to a webview's page,
+  /// which receives it parsed. Messages sent before the page has loaded
+  /// wait for it. Returns false if the tab isn't open.
+  post-message: func(webview: webview, message: string) -> result<bool, api-error>;
+
+  /// The message the running command was run for, when it's a webview's
+  /// `on_message` command; `none` otherwise.
+  message: func() -> option<webview-message>;
+}
+
+/// Small values the extension keeps across sessions, as JSON text: global
+/// ones, and the open folder's. Its webview pages share them
+/// (`ferrite.storage`, `ferrite.workspaceStorage`). Each scope holds at most
+/// 1 MiB, and keys are at most 200 bytes. Users can clear what an extension
+/// stores. Needs no permission. (1.5)
+interface storage {
+  use types.{api-error};
+
+  enum storage-scope {
+    /// Shared by every folder.
+    global,
+    /// The folder open in the editor; nothing is kept while none is.
+    workspace,
+  }
+
+  /// A value, as JSON text; `none` if there is none.
+  get: func(scope: storage-scope, key: string) -> option<string>;
+
+  /// Sets a value (JSON text), or removes it (`none`).
+  set: func(scope: storage-scope, key: string, value: option<string>) -> result<_, api-error>;
+
+  /// The keys that have values, sorted.
+  keys: func(scope: storage-scope) -> list<string>;
+}
+
 world extension {
   use types.{activation, command-context, document-change, document-id, document-info};
 
@@ -453,6 +533,8 @@ world extension {
   import workbench;
   import files;
   import viewers;
+  import webviews;
+  import storage;
 
   /// Called once before any other export. An error fails the extension.
   export activate: func(context: activation) -> result<_, string>;

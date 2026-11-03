@@ -48,6 +48,7 @@ const themes = {
     languages: [],
     languageServers: [],
   },
+  storedBytes: 0,
   usage: {
     busyMs: 0,
     calls: 0,

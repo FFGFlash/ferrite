@@ -28,6 +28,8 @@ criterion = { version = "0.8.2", default-features = false, features = [
   "plotters",
 ] }
 encoding_rs = "0.8.42"
+# Webview page tokens. The version the tree already has.
+getrandom = "0.4.3"
 globset = "0.4.20"
 lsp-types = "0.97.0"
 ignore = "0.4.33"

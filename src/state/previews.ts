@@ -9,6 +9,7 @@
 import { listPreviews, previewClosed, type PreviewInfo } from '../ipc/extensions'
 import { reportError } from './notifications'
 import { createStore } from './store'
+import { webviewClosed } from './webviews'
 
 export const previewsStore = createStore<readonly PreviewInfo[]>([])
 /** Bumped per preview when its content changes. */
@@ -56,5 +57,6 @@ export async function showPreviewRequested(id: string, beside: boolean): Promise
 /** The user closed a preview's tab. */
 export function closePreview(id: string): void {
   previewsStore.update(previews => previews.filter(preview => preview.id !== id))
+  webviewClosed(id)
   previewClosed(id).catch((error: unknown) => reportError('Closing the preview', error))
 }

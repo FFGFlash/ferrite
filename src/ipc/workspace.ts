@@ -174,6 +174,16 @@ export type AppEvent =
   | { type: 'extensionPreviewsChanged' }
   | { type: 'extensionPreviewChanged'; preview: string }
   | { type: 'extensionShowPreview'; preview: string; beside: boolean }
+  | { type: 'extensionWebviewChanged'; preview: string }
+  | { type: 'extensionWebviewMessage'; preview: string; message: string }
+  | {
+      type: 'extensionStorageChanged'
+      extension: string
+      scope: string | null
+      key: string | null
+      value: string | null
+      source: string | null
+    }
   | { type: 'notice'; level: 'warning'; message: string }
   /** Files dragged in from another program; positions in physical pixels. */
   | ({ type: 'fileDrag' } & FileDragEvent)

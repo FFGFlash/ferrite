@@ -183,6 +183,8 @@ struct RawPermissions {
   files_write: bool,
   #[serde(default)]
   language_servers: bool,
+  #[serde(default)]
+  network: bool,
 }
 
 #[derive(Deserialize)]
@@ -253,6 +255,8 @@ pub fn load(
   for language in &manifest.contributions.languages {
     contributions::check_language_files(dir, language)?;
   }
+  contributions::check_webview_pages(dir, &manifest.contributions)?;
+  contributions::load_action_icons(dir, &mut manifest.contributions)?;
   Ok(manifest)
 }
 
@@ -407,6 +411,9 @@ pub fn parse(
   if raw.permissions.language_servers {
     permissions.push(Permission::LanguageServers);
   }
+  if raw.permissions.network {
+    permissions.push(Permission::Network);
+  }
   if raw.permissions.language_servers == raw.language_servers.is_empty() {
     return Err(invalid(
       "permissions.language_servers must be requested exactly when language_servers are declared",
@@ -446,10 +453,14 @@ pub fn parse(
     &raw.id,
     &commands,
   )?;
-  // The editor starts language servers itself.
-  let code_permissions = permissions
-    .iter()
-    .any(|&permission| permission != Permission::LanguageServers);
+  // The editor starts language servers itself, and pages' policies carry
+  // the network permission.
+  let code_permissions = permissions.iter().any(|&permission| {
+    !matches!(
+      permission,
+      Permission::LanguageServers | Permission::Network
+    )
+  });
   if entrypoint.is_none()
     && (!commands.is_empty()
       || !activation.is_empty()
@@ -707,8 +718,85 @@ minimum = 0
   fn rejects_unknown_fields_and_permissions() {
     let field = format!("{VALID}\nunknown = 1\n");
     assert!(error_of(&field).contains("unknown"));
-    let permission = VALID.replace("documents_read = true", "network = true");
-    assert!(error_of(&permission).contains("network"));
+    let permission = VALID.replace("documents_read = true", "clipboard = true");
+    assert!(error_of(&permission).contains("clipboard"));
+  }
+
+  #[test]
+  fn parses_tab_actions_and_loads_their_icons() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    std::fs::create_dir(dir.path().join("media")).expect("mkdir");
+    std::fs::write(dir.path().join("media/view.html"), "").expect("write");
+    std::fs::write(dir.path().join("media/grid.svg"), "<svg/>").expect("write");
+    let text = format!(
+      r#"{VALID}
+[[viewers]]
+id = "image"
+title = "Image Viewer"
+patterns = ["*.png"]
+webview = "media/view.html"
+
+[[viewers.actions]]
+id = "fit"
+title = "Fit"
+icon = "fit"
+
+[[viewers.actions]]
+id = "grid"
+title = "Show Grid"
+icon = "media/grid.svg"
+command = "example.tidy.trim"
+"#
+    );
+    std::fs::write(dir.path().join(MANIFEST_FILE), &text).expect("write");
+    std::fs::write(dir.path().join("tidy.wasm"), "").expect("write");
+    let manifest = load(dir.path(), &editor(), false).expect("valid");
+    let actions = &manifest.contributions.viewers[0].actions;
+    assert_eq!(actions[0].id, "fit");
+    assert_eq!(
+      actions[0].icon,
+      crate::contributions::ActionIcon::Named { name: "fit".into() }
+    );
+    assert_eq!(actions[0].command, None);
+    let crate::contributions::ActionIcon::Image { url, .. } = &actions[1].icon else {
+      panic!("an image icon");
+    };
+    assert!(url.starts_with("data:image/svg+xml;base64,"), "{url}");
+    assert_eq!(actions[1].command.as_deref(), Some("example.tidy.trim"));
+
+    let with = |old: &str, new: &str| error_of(&text.replacen(old, new, 1));
+    assert!(with("icon = \"fit\"", "icon = \"skull\"").contains("named icons"));
+    assert!(with("icon = \"fit\"", "icon = \"../fit.svg\"").contains("named icons"));
+    assert!(with("icon = \"fit\"", "icon = \"fit.gif\"").contains("SVG or PNG"));
+    assert!(with("id = \"grid\"", "id = \"fit\"").contains("declared twice"));
+    assert!(
+      with(
+        "webview = \"media/view.html\"",
+        "command = \"example.tidy.trim\""
+      )
+      .contains("needs a command")
+    );
+  }
+
+  #[test]
+  fn the_network_permission_is_for_pages_and_needs_no_code() {
+    let pages = r#"
+id = "example.pages"
+name = "Pages"
+version = "1.0.0"
+api_version = "1"
+
+[permissions]
+network = true
+
+[[viewers]]
+id = "page"
+title = "Page"
+patterns = ["*.txt"]
+webview = "page.html"
+"#;
+    let manifest = parse_text(pages).expect("valid");
+    assert_eq!(manifest.permissions, vec![Permission::Network]);
   }
 
   #[test]
@@ -861,6 +949,67 @@ priority"
     );
     let view = VALID.replace("\"on-startup\"", "\"on-view:missing\"");
     assert!(error_of(&view).contains("view that is not declared"));
+  }
+
+  #[test]
+  fn parses_webviews() {
+    let webviews = format!(
+      r#"{VALID}
+[[viewers]]
+id = "image"
+title = "Image Viewer"
+patterns = ["*.png"]
+webview = "media\\viewer.html"
+on_message = "example.tidy.trim"
+
+[[previews]]
+id = "graph"
+webview = true
+"#
+    );
+    let manifest = parse_text(&webviews).expect("valid");
+    let viewer = &manifest.contributions.viewers[0];
+    assert_eq!(viewer.command, None);
+    let webview = viewer.webview.as_ref().expect("a webview");
+    assert_eq!(webview.page.as_deref(), Some("media/viewer.html"));
+    assert_eq!(webview.on_message.as_deref(), Some("example.tidy.trim"));
+    let preview = manifest.contributions.previews[0].webview.as_ref();
+    assert_eq!(preview.and_then(|webview| webview.page.clone()), None);
+
+    let with = |old: &str, new: &str| error_of(&webviews.replacen(old, new, 1));
+    assert!(with("media\\\\viewer.html", "../viewer.html").contains("inside the extension"));
+    assert!(with("media\\\\viewer.html", "viewer.js").contains("must be an HTML file"));
+    assert!(with("\"example.tidy.trim\"\n\n", "\"other.x\"\n\n").contains("not one of"));
+    assert!(
+      with(
+        "webview = true",
+        "webview = false\non_message = \"example.tidy.trim\""
+      )
+      .contains("on_message and retain_when_hidden need a webview")
+    );
+    let neither = webviews.replacen(
+      "webview = \"media\\\\viewer.html\"\non_message = \"example.tidy.trim\"\n",
+      "",
+      1,
+    );
+    assert!(error_of(&neither).contains("needs a command, a webview, or both"));
+
+    // A webview that needs no code needs no entrypoint.
+    let page_only = r#"
+id = "example.pages"
+name = "Pages"
+version = "1.0.0"
+api_version = "1"
+
+[[viewers]]
+id = "page"
+title = "Page"
+patterns = ["*.txt"]
+webview = "page.html"
+"#;
+    assert!(parse_text(page_only).is_ok());
+    let messaging = page_only.replace("page.html\"", "page.html\"\non_message = \"x.y\"");
+    assert!(parse_text(&messaging).is_err());
   }
 
   #[test]

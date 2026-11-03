@@ -1,0 +1,35 @@
+/*
+ * Ferrite's defaults for webview pages, injected before the page's own
+ * styles. Every selector is inside :where(), so it has no specificity and
+ * any rule of the page's wins. The colors are the theme's (--ferrite-*).
+ */
+:where(html) {
+  color-scheme: var(--ferrite-color-scheme);
+  background: var(--ferrite-editor-background);
+  scrollbar-color: var(--ferrite-minimap-slider-hover-background) transparent;
+}
+
+:where(body) {
+  margin: 0;
+  color: var(--ferrite-editor-foreground);
+  font-family: var(--ferrite-font-ui);
+  font-size: var(--ferrite-font-size-ui);
+  line-height: 1.5;
+}
+
+:where(a) {
+  color: var(--ferrite-link);
+}
+
+:where(code, kbd, pre, samp) {
+  font-family: var(--ferrite-font-mono);
+}
+
+:where(:focus-visible) {
+  outline: 1px solid var(--ferrite-focus-ring);
+  outline-offset: -1px;
+}
+
+:where(::selection) {
+  background: var(--ferrite-editor-selection);
+}

@@ -21,7 +21,8 @@ use ferrite_text::{TextBuffer, TextSnapshot, Version, map_offset_through};
 
 use crate::api::{self, document_info, to_position};
 use crate::bindings::ferrite::extension::types::{
-  ApiError, CommandContext, DocumentInfo, Range as WitRange, TextChange,
+  ApiError, CommandContext, DocumentInfo, PreviewInstance, Range as WitRange, TextChange,
+  ViewedFile, Webview as WitWebview, WebviewMessage,
 };
 use crate::config::{self, ConfigValue};
 use crate::contributions::{LanguageContribution, LanguageServerContribution};
@@ -30,7 +31,9 @@ use crate::manifest::{self, MANIFEST_FILE, Manifest};
 use crate::permissions::{Decision, Decisions, Permission};
 use crate::preview::{self, PreviewContent, PreviewInfo};
 use crate::runtime::{MemoryPool, Runtime};
+use crate::storage::{Scope, Storage};
 use crate::usage::{ResourceUsage, Usage};
+use crate::webview::{self, Resource, WebviewInfo, WebviewRecord, WebviewTheme};
 use crate::worker::{
   self, Budgets, Event, Failure, MAX_PENDING_CHANGE_BYTES, Queue, Setup, Worker,
 };
@@ -174,13 +177,15 @@ struct PreviewRecord {
   /// so they stay open when their extension stops (only their content
   /// goes) and aren't listed with the previews.
   file: Option<Viewed>,
+  /// For a webview, its page.
+  webview: Option<WebviewRecord>,
 }
 
 /// A file open in a viewer.
 struct Viewed {
   path: PathBuf,
   /// The viewer's command, which fills it in.
-  command: String,
+  command: Option<String>,
   /// Its content went when its extension stopped: the command runs again
   /// when the extension starts.
   stale: bool,
@@ -209,6 +214,10 @@ pub struct Shared {
   runtime: OnceLock<Result<Arc<Runtime>, String>>,
   /// Linear memory of all running extensions.
   memory: Arc<MemoryPool>,
+  /// Extensions' stored values and webview tabs' states.
+  pub storage: Storage,
+  /// The workbench's theme, for webview pages.
+  webview_theme: RwLock<WebviewTheme>,
   state: Mutex<State>,
 }
 
@@ -311,16 +320,20 @@ impl Shared {
           continue;
         }
         viewed.stale = false;
+        let Some(command) = viewed.command.clone() else {
+          continue;
+        };
         // Nobody waits for the outcome: a failure leaves the tab without
         // content, and the extension's log says why.
         let (reply, _) = mpsc::channel();
         let _ = worker.queue.push_command(Event::Command {
-          command: viewed.command.clone(),
+          command,
           context: CommandContext {
             document: None,
             selections: Vec::new(),
           },
           argument: Some(viewed.path.display().to_string()),
+          message: None,
           reply,
         });
       }
@@ -426,8 +439,15 @@ impl Shared {
     }
   }
 
-  /// Opens a preview, or updates its title, and asks to show it.
-  pub fn show_preview(&self, extension: &str, info: PreviewInfo, beside: bool) {
+  /// Opens a preview, or updates its title, and asks to show it. A webview
+  /// preview has `page`: the manifest's page, if any.
+  pub fn show_preview(
+    &self,
+    extension: &str,
+    info: PreviewInfo,
+    page: Option<Option<String>>,
+    beside: bool,
+  ) {
     let id = info.id.clone();
     let changed = {
       let mut state = self.lock();
@@ -438,6 +458,7 @@ impl Shared {
           true
         }
         None => {
+          let webview = page.map(WebviewRecord::new);
           state.previews.insert(
             id.clone(),
             PreviewRecord {
@@ -446,6 +467,7 @@ impl Shared {
               content: Arc::default(),
               images: BTreeSet::new(),
               file: None,
+              webview,
             },
           );
           true
@@ -500,6 +522,69 @@ impl Shared {
         .notify(Notification::PreviewChanged(id.to_owned()));
     }
     true
+  }
+
+  /// Tells pages that a stored value changed, and the workbench that the
+  /// extension's stored size did.
+  pub fn storage_changed(
+    &self,
+    extension: &str,
+    scope: &Scope,
+    key: &str,
+    value: Option<String>,
+    source: Option<&str>,
+  ) {
+    self.embedder.notify(Notification::StorageChanged {
+      extension: extension.to_owned(),
+      scope: Some(
+        match scope {
+          Scope::Global => "global",
+          Scope::Workspace(_) => "workspace",
+        }
+        .to_owned(),
+      ),
+      key: Some(key.to_owned()),
+      value,
+      source: source.map(str::to_owned),
+    });
+    self.embedder.notify(Notification::ExtensionsChanged);
+  }
+
+  /// Replaces the page an open webview shows; false if it isn't open.
+  pub fn set_webview_html(&self, id: &str, html: String) -> bool {
+    {
+      let mut state = self.lock();
+      let Some(webview) = state
+        .previews
+        .get_mut(id)
+        .and_then(|record| record.webview.as_mut())
+      else {
+        return false;
+      };
+      webview.html = Some(html.into());
+      webview.version += 1;
+    }
+    self
+      .embedder
+      .notify(Notification::WebviewChanged(id.to_owned()));
+    true
+  }
+
+  /// Sends a message (JSON text) to an open webview's page; false if it
+  /// isn't open.
+  pub fn post_webview_message(&self, id: &str, message: String) -> bool {
+    let open = self
+      .lock()
+      .previews
+      .get(id)
+      .is_some_and(|record| record.webview.is_some());
+    if open {
+      self.embedder.notify(Notification::WebviewMessage {
+        id: id.to_owned(),
+        message,
+      });
+    }
+    open
   }
 
   /// Closes a preview, if it's open.
@@ -795,6 +880,16 @@ pub struct CommandTicket {
 }
 
 impl CommandTicket {
+  /// A ticket for nothing to run.
+  fn done() -> Self {
+    let (reply, receiver) = mpsc::channel();
+    let _ = reply.send(Ok(()));
+    Self {
+      receiver,
+      timeout: Duration::ZERO,
+    }
+  }
+
   /// Waits for the command to finish. Fails with the extension's error, or
   /// if the extension stops.
   ///
@@ -842,6 +937,8 @@ impl ExtensionHost {
       embedder,
       runtime: OnceLock::new(),
       memory,
+      storage: Storage::new(options.storage_dir.clone()),
+      webview_theme: RwLock::new(WebviewTheme::default()),
       state: Mutex::new(State {
         options,
         decisions,
@@ -1053,6 +1150,7 @@ impl ExtensionHost {
             }
             usage
           },
+          stored_bytes: self.shared.storage.usage(&manifest.id),
         }
       })
       .collect();
@@ -1079,6 +1177,7 @@ impl ExtensionHost {
         has_settings: false,
         contributions: crate::Contributions::default(),
         usage: ResourceUsage::default(),
+        stored_bytes: 0,
       }
     }));
     statuses
@@ -1252,6 +1351,18 @@ impl ExtensionHost {
     document: Option<DocumentId>,
     argument: Option<String>,
   ) -> Result<CommandTicket, String> {
+    self.run(command, document, argument, None)
+  }
+
+  /// Runs an extension command, with a webview's message if it's run for
+  /// one.
+  fn run(
+    &self,
+    command: &str,
+    document: Option<DocumentId>,
+    argument: Option<String>,
+    message: Option<WebviewMessage>,
+  ) -> Result<CommandTicket, String> {
     let selections = document
       .and_then(|id| {
         api::with_editor(&self.shared, |editor| {
@@ -1313,6 +1424,7 @@ impl ExtensionHost {
               command: command.to_owned(),
               context,
               argument,
+              message,
               reply,
             })
             .map(|()| CommandTicket {
@@ -1439,7 +1551,7 @@ impl ExtensionHost {
   /// pictures are then read like a preview's, by the viewer's preview id,
   /// `<viewer>/<path>` ([`viewer_id`]).
   pub fn open_viewer(&self, viewer: &str, path: &Path) -> Result<CommandTicket, String> {
-    let (extension, name, command) = {
+    let (extension, name, command, page) = {
       let state = self.shared.lock();
       let entry = state
         .extensions
@@ -1453,21 +1565,21 @@ impl ExtensionHost {
             .any(|v| v.full_id == viewer)
         })
         .ok_or_else(|| format!("No extension provides the viewer {viewer}."))?;
-      let command = entry
+      let declared = entry
         .manifest
         .contributions
         .viewers
         .iter()
-        .find(|v| v.full_id == viewer)
-        .map(|v| v.command.clone())
-        .unwrap_or_default();
+        .find(|v| v.full_id == viewer);
       (
         entry.manifest.id.clone(),
         entry.manifest.name.clone(),
-        command,
+        declared.and_then(|v| v.command.clone()),
+        declared.and_then(|v| v.webview.as_ref().map(|webview| webview.page.clone())),
       )
     };
     let id = viewer_id(viewer, path);
+    let id_for_state = id.clone();
     {
       let mut state = self.shared.lock();
       let record = state
@@ -1484,6 +1596,7 @@ impl ExtensionHost {
             ),
             icon: "book".into(),
             document: None,
+            webview: page.is_some(),
           },
           content: Arc::default(),
           images: BTreeSet::new(),
@@ -1492,13 +1605,259 @@ impl ExtensionHost {
             command: command.clone(),
             stale: false,
           }),
+          webview: page.map(|page| {
+            let mut webview = WebviewRecord::new(page);
+            webview.state = self.shared.storage.tab_state(&id_for_state);
+            webview
+          }),
         });
       // It's about to be filled in.
       if let Some(viewed) = &mut record.file {
         viewed.stale = false;
       }
     }
-    self.run_command(&command, None, Some(path.display().to_string()))
+    match command {
+      Some(command) => self.run_command(&command, None, Some(path.display().to_string())),
+      // A webview without a command: its page shows the file by itself.
+      None => Ok(CommandTicket::done()),
+    }
+  }
+
+  /// How the workbench shows an open webview; `None` if it isn't open or
+  /// isn't a webview.
+  pub fn webview(&self, id: &str) -> Option<WebviewInfo> {
+    let state = self.shared.lock();
+    Some(state.previews.get(id)?.webview.as_ref()?.info())
+  }
+
+  /// Answers a webview page's request for `path` (percent-encoded) under
+  /// its address `token`. Reads the disk.
+  pub fn webview_resource(&self, token: &str, path: &str) -> Result<Resource, String> {
+    let (dir, record, file, network) = {
+      let state = self.shared.lock();
+      let (record, webview) = state
+        .previews
+        .values()
+        .find_map(|record| {
+          let webview = record.webview.as_ref()?;
+          (webview.token == token).then_some((record, webview))
+        })
+        .ok_or("no webview has this address")?;
+      let manifest = &state
+        .extensions
+        .iter()
+        .find(|entry| entry.manifest.id == record.extension)
+        .ok_or("the webview's extension isn't loaded")?
+        .manifest;
+      let network = state
+        .decisions
+        .get(&manifest.id)
+        .effective(&manifest.permissions)
+        .contains(&Permission::Network);
+      (
+        manifest.dir.clone(),
+        webview.clone(),
+        record.file.as_ref().map(|viewed| viewed.path.clone()),
+        network,
+      )
+    };
+    let theme = self
+      .shared
+      .webview_theme
+      .read()
+      .unwrap_or_else(PoisonError::into_inner)
+      .clone();
+    webview::serve(
+      &webview::Site {
+        dir: &dir,
+        record: &record,
+        file: file.as_deref(),
+        network,
+        theme: &theme,
+      },
+      path,
+    )
+  }
+
+  /// The workbench's theme changed: pages loaded from now on get it. (Pages
+  /// already loaded get it from the workbench.)
+  pub fn set_webview_theme(
+    &self,
+    kind: &str,
+    variables: BTreeMap<String, String>,
+  ) -> Result<(), String> {
+    let theme = WebviewTheme::new(kind, variables)?;
+    *self
+      .shared
+      .webview_theme
+      .write()
+      .unwrap_or_else(PoisonError::into_inner) = theme;
+    Ok(())
+  }
+
+  /// A webview's page saved its state (JSON text), which it gets back when
+  /// it loads again: after its tab was hidden, and for a viewer, in the
+  /// next session.
+  pub fn set_webview_state(&self, id: &str, state: String) -> Result<(), String> {
+    if state.len() > crate::storage::MAX_TAB_STATE_BYTES {
+      return Err(format!(
+        "a page's state must be at most {} KiB",
+        crate::storage::MAX_TAB_STATE_BYTES / 1024
+      ));
+    }
+    crate::storage::check_json(&state)?;
+    let viewer = {
+      let mut shared = self.shared.lock();
+      let record = shared
+        .previews
+        .get_mut(id)
+        .filter(|record| record.webview.is_some())
+        .ok_or("the webview isn't open")?;
+      if let Some(webview) = record.webview.as_mut() {
+        webview.state = Some(state.clone());
+      }
+      record.file.is_some()
+    };
+    if viewer {
+      self.shared.storage.set_tab_state(id, Some(state));
+    }
+    Ok(())
+  }
+
+  /// The extension that owns an open webview, and the storage scope a page
+  /// names (`global` or `workspace`).
+  fn webview_scope(&self, id: &str, scope: &str) -> Result<(String, Option<Scope>), String> {
+    let extension = self
+      .shared
+      .lock()
+      .previews
+      .get(id)
+      .filter(|record| record.webview.is_some())
+      .map(|record| record.extension.clone())
+      .ok_or("the webview isn't open")?;
+    let scope = match scope {
+      "global" => Some(Scope::Global),
+      "workspace" => self
+        .shared
+        .embedder
+        .open_folder()
+        .map(|folder| Scope::Workspace(folder.root)),
+      other => return Err(format!("no storage scope {other:?}")),
+    };
+    Ok((extension, scope))
+  }
+
+  /// A stored value (JSON text) of a webview's extension.
+  pub fn webview_storage_get(
+    &self,
+    id: &str,
+    scope: &str,
+    key: &str,
+  ) -> Result<Option<String>, String> {
+    let (extension, scope) = self.webview_scope(id, scope)?;
+    Ok(scope.and_then(|scope| self.shared.storage.get(&extension, &scope, key)))
+  }
+
+  /// Sets (or removes, with `None`) a stored value of a webview's extension.
+  pub fn webview_storage_set(
+    &self,
+    id: &str,
+    scope: &str,
+    key: &str,
+    value: Option<String>,
+  ) -> Result<(), String> {
+    let (extension, scope) = self.webview_scope(id, scope)?;
+    let scope = scope.ok_or("no folder is open")?;
+    self
+      .shared
+      .storage
+      .set(&extension, &scope, key, value.clone())
+      .map_err(|error| error.to_string())?;
+    self
+      .shared
+      .storage_changed(&extension, &scope, key, value, Some(id));
+    Ok(())
+  }
+
+  /// The keys of a webview's extension's stored values.
+  pub fn webview_storage_keys(&self, id: &str, scope: &str) -> Result<Vec<String>, String> {
+    let (extension, scope) = self.webview_scope(id, scope)?;
+    Ok(scope.map_or_else(Vec::new, |scope| {
+      self.shared.storage.keys(&extension, &scope)
+    }))
+  }
+
+  /// Removes everything an extension stores.
+  pub fn clear_storage(&self, id: &str) -> Result<(), String> {
+    self.shared.storage.clear(id)?;
+    self.shared.embedder.notify(Notification::StorageChanged {
+      extension: id.to_owned(),
+      scope: None,
+      key: None,
+      value: None,
+      source: None,
+    });
+    self.shared.embedder.notify(Notification::ExtensionsChanged);
+    Ok(())
+  }
+
+  /// A webview's page sent a message (JSON text): runs the command its
+  /// manifest entry names as `on_message`, starting the extension if
+  /// needed. Messages to a webview without one are dropped.
+  pub fn webview_message(&self, id: &str, data: String) -> Result<(), String> {
+    if data.len() > webview::MAX_MESSAGE_BYTES {
+      return Err(format!(
+        "messages must be at most {} KiB",
+        webview::MAX_MESSAGE_BYTES / 1024
+      ));
+    }
+    serde_json::from_str::<serde::de::IgnoredAny>(&data)
+      .map_err(|error| format!("the message isn't JSON: {error}"))?;
+    let (command, source) = {
+      let state = self.shared.lock();
+      let record = state
+        .previews
+        .get(id)
+        .filter(|record| record.webview.is_some())
+        .ok_or("the webview isn't open")?;
+      let manifest = &state
+        .extensions
+        .iter()
+        .find(|entry| entry.manifest.id == record.extension)
+        .ok_or("the webview's extension isn't loaded")?
+        .manifest;
+      // `<extension id>.<viewer or preview id>/<path or key>`.
+      let (full, rest) = id.split_once('/').ok_or("not a webview id")?;
+      let local = full
+        .strip_prefix(&format!("{}.", manifest.id))
+        .ok_or("not a webview id")?;
+      let contributions = &manifest.contributions;
+      match &record.file {
+        Some(viewed) => (
+          contributions
+            .viewer(local)
+            .and_then(|viewer| viewer.webview.as_ref()?.on_message.clone()),
+          WitWebview::Viewer(ViewedFile {
+            viewer: local.to_owned(),
+            path: viewed.path.display().to_string(),
+          }),
+        ),
+        None => (
+          contributions
+            .preview(local)
+            .and_then(|preview| preview.webview.as_ref()?.on_message.clone()),
+          WitWebview::Preview(PreviewInstance {
+            preview: local.to_owned(),
+            key: rest.to_owned(),
+          }),
+        ),
+      }
+    };
+    let Some(command) = command else {
+      return Ok(());
+    };
+    self.run(&command, None, None, Some(WebviewMessage { source, data }))?;
+    Ok(())
   }
 
   /// A preview's content, as last set by its extension; `None` if it isn't
@@ -1512,8 +1871,17 @@ impl ExtensionHost {
       .map(|record| record.content.clone())
   }
 
-  /// The user closed a preview's tab.
+  /// The user closed a preview's tab, or a viewer's, whose saved state goes.
   pub fn preview_closed(&self, id: &str) {
+    let viewer = self
+      .shared
+      .lock()
+      .previews
+      .get(id)
+      .is_some_and(|record| record.file.is_some());
+    if viewer {
+      self.shared.storage.set_tab_state(id, None);
+    }
     self.shared.close_preview(id);
   }
 

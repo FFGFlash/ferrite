@@ -121,6 +121,20 @@ pub enum AppEvent {
     /// Beside its document, rather than in the same group.
     beside: bool,
   },
+  /// An extension replaced the page of a webview (viewer or preview).
+  ExtensionWebviewChanged { preview: String },
+  /// An extension sent a message (JSON text) to a webview's page.
+  ExtensionWebviewMessage { preview: String, message: String },
+  /// A value an extension stores changed (`value` `None`: removed), or all
+  /// were cleared (`scope` and `key` `None`). `source` is the webview whose
+  /// page changed it.
+  ExtensionStorageChanged {
+    extension: String,
+    scope: Option<String>,
+    key: Option<String>,
+    value: Option<String>,
+    source: Option<String>,
+  },
   /// Something the user should know about, such as files that could not be
   /// reopened or restored unsaved changes.
   Notice { level: NoticeLevel, message: String },

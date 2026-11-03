@@ -8,9 +8,11 @@ import {
   executeCommand,
   formatKeybinding,
   matchesKeybinding,
+  onKeybindingsChanged,
   primaryKeybinding,
   registerCommands,
   setKeybindingOverrides,
+  webviewKeystrokes,
   type Command,
 } from './registry'
 
@@ -102,6 +104,35 @@ describe('command registry', () => {
     title: 'Test',
     run: vi.fn(),
     ...overrides,
+  })
+
+  it('lists the keystrokes webview pages pass on: single keys and chords’ first keys', () => {
+    unregister = registerCommands([
+      command({ id: 'a', keybinding: 'mod+p' }),
+      command({ id: 'b', keybinding: 'mod+k mod+0' }),
+      command({ id: 'c', keybinding: 'mod+shift+p', editorFocus: true }),
+      command({ id: 'd', keybinding: 'f1' }),
+    ])
+    const stroke = (key: string, ctrl = false) => ({
+      key,
+      ctrl,
+      meta: false,
+      alt: false,
+      shift: false,
+    })
+    const strokes = webviewKeystrokes(false)
+    expect(strokes).toEqual(
+      expect.arrayContaining([stroke('p', true), stroke('k', true), stroke('f1')]),
+    )
+    // Editor-only commands don't apply in a page.
+    expect(strokes).not.toContainEqual({ ...stroke('p', true), shift: true })
+    const changed = vi.fn()
+    const stop = onKeybindingsChanged(changed)
+    setKeybindingOverrides({ a: ['mod+o'] })
+    expect(changed).toHaveBeenCalled()
+    expect(webviewKeystrokes(false)).toContainEqual(stroke('o', true))
+    stop()
+    setKeybindingOverrides({})
   })
 
   it('finds enabled commands bound to a key', () => {

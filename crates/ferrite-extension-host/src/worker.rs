@@ -22,7 +22,8 @@ use wasmtime::Store;
 use crate::api::ApiContext;
 use crate::bindings::Extension;
 use crate::bindings::ferrite::extension::types::{
-  Activation, CommandContext, DocumentChange, DocumentInfo, Permission as WitPermission, TextChange,
+  Activation, CommandContext, DocumentChange, DocumentInfo, Permission as WitPermission,
+  TextChange, WebviewMessage,
 };
 use crate::host::Shared;
 use crate::manifest::Manifest;
@@ -74,6 +75,8 @@ pub enum Event {
     context: CommandContext,
     /// From a view item or menu; see `command-argument`.
     argument: Option<String>,
+    /// For a webview's `on_message` command; see `webviews::message`.
+    message: Option<WebviewMessage>,
     reply: Reply,
   },
 }
@@ -325,7 +328,10 @@ fn wit_permission(permission: Permission) -> Option<WitPermission> {
   match permission {
     Permission::DocumentsRead => Some(WitPermission::DocumentsRead),
     Permission::DocumentsWrite => Some(WitPermission::DocumentsWrite),
-    Permission::FilesRead | Permission::FilesWrite | Permission::LanguageServers => None,
+    Permission::FilesRead
+    | Permission::FilesWrite
+    | Permission::LanguageServers
+    | Permission::Network => None,
   }
 }
 
@@ -424,13 +430,16 @@ fn run(shared: &Weak<Shared>, setup: &Setup) -> Result<(), Failure> {
         command,
         context,
         argument,
+        message,
         reply,
       } => {
         store.data_mut().api.argument = argument;
+        store.data_mut().api.message = message;
         let result = guarded(&mut store, budgets.command, "The command", |store| {
           extension.call_run_command(&mut *store, &command, &context)
         });
         store.data_mut().api.argument = None;
+        store.data_mut().api.message = None;
         match result {
           Ok(outcome) => {
             let _ = reply.send(outcome.map_err(|message| truncate(&message)));
@@ -619,6 +628,7 @@ mod tests {
         selections: Vec::new(),
       },
       argument: None,
+      message: None,
       reply,
     };
     assert!(
@@ -642,6 +652,7 @@ mod tests {
           selections: Vec::new(),
         },
         argument: None,
+        message: None,
         reply,
       })
       .expect("queued");

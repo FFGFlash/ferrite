@@ -17,6 +17,7 @@ import { fileProblemsChanged, refreshSettingsProblem } from './problems'
 import { refreshSettingsIfLoaded } from './settings'
 import { showView } from './viewRequests'
 import { filesChanged } from './viewers'
+import { storageChanged, webviewChanged, webviewMessage } from './webviews'
 import { refreshDirectories, setIndexing, setWorkspace } from './workspace'
 
 export function handleEvent(event: AppEvent): void {
@@ -112,6 +113,15 @@ export function handleEvent(event: AppEvent): void {
       break
     case 'extensionShowPreview':
       void showPreviewRequested(event.preview, event.beside)
+      break
+    case 'extensionWebviewChanged':
+      webviewChanged(event.preview)
+      break
+    case 'extensionWebviewMessage':
+      webviewMessage(event.preview, event.message)
+      break
+    case 'extensionStorageChanged':
+      storageChanged(event.extension, event.scope, event.key, event.value, event.source)
       break
     case 'notice':
       notify(event.level, event.message)

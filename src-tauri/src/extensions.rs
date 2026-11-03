@@ -14,6 +14,7 @@ use std::time::{Duration, Instant};
 use ferrite_core::{Document, DocumentId, Editor};
 use ferrite_extension_host::icons::IconTheme;
 use ferrite_extension_host::preview::PreviewElement;
+use ferrite_extension_host::webview::WebviewInfo;
 use ferrite_extension_host::{
   Embedder, ExtensionHost, ExtensionStatus, HostOptions, Limits, MANIFEST_FILE, Notification,
   OpenFolder, Permission, PreviewContent, PreviewInfo, StatusItem, ViewContent,
@@ -33,6 +34,9 @@ use crate::workspace::WorkspaceState;
 
 const EXTENSIONS_DIR: &str = "extensions";
 const PERMISSIONS_FILE: &str = "extension-permissions.json";
+/// Extensions' stored values and webview tabs' states, in the local data
+/// directory.
+const STORAGE_DIR: &str = "extension-storage";
 /// Largest code block highlighted in a preview.
 const MAX_HIGHLIGHTED_CODE_BYTES: usize = 64 * 1024;
 /// Time spent parsing a preview's code blocks to highlight them, each time
@@ -196,6 +200,24 @@ impl Embedder for AppEmbedder {
         preview: id,
         beside,
       },
+      Notification::WebviewChanged(id) => AppEvent::ExtensionWebviewChanged { preview: id },
+      Notification::WebviewMessage { id, message } => AppEvent::ExtensionWebviewMessage {
+        preview: id,
+        message,
+      },
+      Notification::StorageChanged {
+        extension,
+        scope,
+        key,
+        value,
+        source,
+      } => AppEvent::ExtensionStorageChanged {
+        extension,
+        scope,
+        key,
+        value,
+        source,
+      },
     };
     events::emit(&self.app, event);
   }
@@ -229,6 +251,11 @@ fn options(app: &AppHandle, settings: &Settings) -> HostOptions {
     permissions_file: dir.map(|dir| dir.join(PERMISSIONS_FILE)),
     settings: settings.extensions.settings.clone(),
     limits: Limits::default(),
+    storage_dir: app
+      .path()
+      .app_local_data_dir()
+      .ok()
+      .map(|dir| dir.join(STORAGE_DIR)),
   }
 }
 
@@ -243,6 +270,7 @@ pub fn init(app: &AppHandle, load: bool) {
     options.permissions_file = None;
     options.development = bench.languages().to_vec();
     options.settings.clear();
+    options.storage_dir = None;
   }
   let host = ExtensionHost::new(
     std::sync::Arc::new(AppEmbedder { app: app.clone() }),
@@ -501,6 +529,149 @@ pub async fn extension_viewer_open(
     .map_err(CommandError::internal)?
     .map_err(|message| CommandError::new("extension", message))?;
   Ok(ferrite_extension_host::viewer_id(&viewer, &path))
+}
+
+/// Where a webview (viewer or preview) loads its page from; `None` if it
+/// isn't open or isn't a webview.
+#[tauri::command]
+pub fn extension_webview(
+  state: State<'_, ExtensionsState>,
+  preview: String,
+) -> Option<WebviewInfo> {
+  state.host().and_then(|host| host.webview(&preview))
+}
+
+/// A webview's page sent a message (JSON text) to its extension. The
+/// frontend checked that it came from that webview's frame.
+#[tauri::command]
+pub fn extension_webview_message(
+  state: State<'_, ExtensionsState>,
+  preview: String,
+  message: String,
+) -> Result<(), CommandError> {
+  host(&state)?
+    .webview_message(&preview, message)
+    .map_err(|message| CommandError::new("extension", message))
+}
+
+/// The workbench's theme, as webview pages get it: `dark` or `light`, and
+/// variables by name (without `--ferrite-`).
+#[tauri::command]
+pub fn extension_webview_theme(
+  state: State<'_, ExtensionsState>,
+  kind: String,
+  variables: BTreeMap<String, String>,
+) -> Result<(), CommandError> {
+  host(&state)?
+    .set_webview_theme(&kind, variables)
+    .map_err(|message| CommandError::new("extension", message))
+}
+
+/// A webview's page saved its state (JSON text).
+#[tauri::command]
+pub fn extension_webview_set_state(
+  state: State<'_, ExtensionsState>,
+  preview: String,
+  page_state: String,
+) -> Result<(), CommandError> {
+  host(&state)?
+    .set_webview_state(&preview, page_state)
+    .map_err(|message| CommandError::new("extension", message))
+}
+
+/// A webview page's storage request: `get` a value (JSON text, or `null`),
+/// `set` one (`value` `null` removes it), or list the `keys`, in the
+/// `global` or `workspace` scope of the page's extension.
+#[tauri::command]
+pub fn extension_webview_storage(
+  state: State<'_, ExtensionsState>,
+  preview: String,
+  scope: String,
+  op: String,
+  key: Option<String>,
+  value: Option<String>,
+) -> Result<serde_json::Value, CommandError> {
+  let host = host(&state)?;
+  let key = || key.clone().ok_or_else(|| "a key is needed".to_owned());
+  let result = match op.as_str() {
+    "get" => key()
+      .and_then(|key| host.webview_storage_get(&preview, &scope, &key))
+      .map(serde_json::Value::from),
+    "set" => key()
+      .and_then(|key| host.webview_storage_set(&preview, &scope, &key, value))
+      .map(|()| serde_json::Value::Null),
+    "keys" => host
+      .webview_storage_keys(&preview, &scope)
+      .map(serde_json::Value::from),
+    other => Err(format!("no storage operation {other:?}")),
+  };
+  result.map_err(|message| CommandError::new("extensionStorage", message))
+}
+
+/// Removes everything an extension has stored.
+#[tauri::command]
+pub fn extension_clear_storage(
+  state: State<'_, ExtensionsState>,
+  id: String,
+) -> Result<(), CommandError> {
+  tracing::info!(extension = %id, "clearing extension storage");
+  host(&state)?
+    .clear_storage(&id)
+    .map_err(|message| CommandError::new("extensionStorage", message))
+}
+
+/// Serves `ferrite-webview:` requests: `/<token>/<path>` from a webview
+/// page (see `ferrite_extension_host::webview`).
+pub fn serve_webview(
+  app: &AppHandle,
+  request: &tauri::http::Request<Vec<u8>>,
+) -> tauri::http::Response<Vec<u8>> {
+  use tauri::http::{Response, StatusCode, header};
+  let path = request.uri().path().trim_start_matches('/');
+  let (token, rest) = path.split_once('/').unwrap_or((path, ""));
+  let resource = app
+    .state::<ExtensionsState>()
+    .host()
+    .ok_or_else(|| "extensions are not available".to_owned())
+    .and_then(|host| host.webview_resource(token, rest));
+  let response = match resource {
+    Ok(resource) => Response::builder()
+      .status(StatusCode::OK)
+      .header(header::CONTENT_TYPE, resource.mime)
+      .header(header::CONTENT_SECURITY_POLICY, resource.csp)
+      .body(resource.body),
+    Err(message) => {
+      tracing::debug!(%path, %message, "webview request refused");
+      Response::builder()
+        .status(StatusCode::NOT_FOUND)
+        .header(header::CONTENT_TYPE, "text/plain")
+        .body(message.into_bytes())
+    }
+  };
+  // Pages have opaque origins, so reading their own files (`fetch`) is a
+  // cross-origin request; the token in the address is what guards them.
+  response
+    .map(|mut response| {
+      let headers = response.headers_mut();
+      headers.insert(
+        header::ACCESS_CONTROL_ALLOW_ORIGIN,
+        header::HeaderValue::from_static("*"),
+      );
+      headers.insert(
+        header::X_CONTENT_TYPE_OPTIONS,
+        header::HeaderValue::from_static("nosniff"),
+      );
+      headers.insert(
+        header::CACHE_CONTROL,
+        header::HeaderValue::from_static("no-store"),
+      );
+      response
+    })
+    .unwrap_or_else(|_| {
+      let mut response = Response::new(Vec::new());
+      *response.status_mut() = StatusCode::INTERNAL_SERVER_ERROR;
+      response
+    })
 }
 
 /// The user closed a preview's tab, or a viewer's.

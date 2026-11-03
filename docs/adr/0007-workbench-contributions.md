@@ -1,7 +1,10 @@
 # ADR 0007: Workbench contributions
 
-- **Status:** Accepted
+- **Status:** Accepted; amended 2026-11-02
 - **Date:** 2026-10-24
+
+Since [ADR 0025](0025-webviews.md), viewers and previews can be sandboxed webviews: pages of the
+extension's own. Other contributions still supply no markup.
 
 ## Context
 

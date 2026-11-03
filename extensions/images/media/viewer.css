@@ -1,0 +1,136 @@
+/* The Images viewer page: a toolbar, and the picture centered below it. The
+   colors are Ferrite's theme (--ferrite-*), and the controls the kit's. */
+
+html,
+body {
+  height: 100%;
+}
+
+body {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+/* One row: the details give way first. */
+.toolbar {
+  flex-wrap: nowrap;
+  overflow: hidden;
+}
+
+.toolbar > .ferrite-group {
+  flex: none;
+}
+
+.zoom {
+  min-width: 5ch;
+  padding-right: 4px;
+  text-align: right;
+}
+
+/* The picture's format and size, dimmed at the end, cut short when the
+   tab is narrow (its tooltip has all of it). */
+.details {
+  flex: 1 1 0;
+  min-width: 0;
+  padding-left: 8px;
+  overflow: hidden;
+  text-align: right;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.stage {
+  position: relative;
+  display: grid;
+  flex: 1;
+  min-height: 0;
+  /* Centered while it fits; scrolled from its start when it doesn't. */
+  place-items: safe center;
+  overflow: auto;
+  padding: 16px;
+  box-sizing: border-box;
+  outline: none;
+}
+
+.picture {
+  display: block;
+  max-width: none;
+  background: var(--backdrop);
+  box-shadow: 0 0 0 1px var(--ferrite-border);
+}
+
+/* Pixels stay square when a bitmap is shown larger than it is. */
+.picture.pixelated {
+  image-rendering: pixelated;
+}
+
+.picture[hidden] {
+  display: none;
+}
+
+.problem {
+  color: var(--ferrite-text-muted);
+}
+
+/* Backgrounds: on the body for the picture, and on each swatch. */
+[data-background] {
+  --backdrop: var(--solid);
+}
+
+[data-background$='checkerboard'] {
+  --backdrop: conic-gradient(var(--dark) 25%, var(--light) 0 50%, var(--dark) 0 75%, var(--light) 0)
+    0 0 / var(--cell, 16px) var(--cell, 16px);
+}
+
+[data-background='checkerboard'] {
+  --light: var(--ferrite-editor-background);
+  --dark: color-mix(
+    in srgb,
+    var(--ferrite-editor-foreground) 12%,
+    var(--ferrite-editor-background)
+  );
+}
+
+[data-background='light-checkerboard'] {
+  --light: #ffffff;
+  --dark: #d4d4d4;
+}
+
+[data-background='dark-checkerboard'] {
+  --light: #3c3c3c;
+  --dark: #262626;
+}
+
+[data-background='none'] {
+  --solid: transparent;
+}
+
+[data-background='white'] {
+  --solid: #ffffff;
+}
+
+[data-background='black'] {
+  --solid: #000000;
+}
+
+.swatch {
+  --cell: 8px;
+  display: block;
+  width: 14px;
+  height: 14px;
+  background: var(--backdrop);
+  box-shadow: 0 0 0 1px var(--ferrite-border);
+}
+
+/* "No background" shows the editor's, crossed out. */
+.swatch[data-background='none'] {
+  background:
+    linear-gradient(
+      to top right,
+      transparent calc(50% - 1px),
+      var(--ferrite-text-muted) 50%,
+      transparent calc(50% + 1px)
+    ),
+    var(--ferrite-editor-background);
+}

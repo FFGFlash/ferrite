@@ -1,4 +1,6 @@
-const paths = {
+import actionIcons from './actionIcons.json'
+
+const builtIn = {
   files:
     'M14 3H7a2 2 0 0 0-2 2v12M9 7h6l4 4v8a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2V9a2 2 0 0 1 2-2ZM15 7v4h4',
   search: 'M10.5 17a6.5 6.5 0 1 0 0-13 6.5 6.5 0 0 0 0 13ZM15.5 15.5 20 20',
@@ -17,7 +19,15 @@ const paths = {
   bell: 'M6 16v-5a6 6 0 0 1 12 0v5l2 2H4l2-2ZM10 20a2 2 0 0 0 4 0',
 } as const
 
+/** Named icons extensions use for tab actions (`scripts/action-icons.mjs`). */
+export type ActionIconName = keyof typeof actionIcons
+
+const paths: Record<keyof typeof builtIn | ActionIconName, string> = { ...builtIn, ...actionIcons }
+
 export type IconName = keyof typeof paths
+
+export const isActionIcon = (name: string): name is ActionIconName =>
+  Object.hasOwn(actionIcons, name)
 
 interface IconProps {
   name: IconName

@@ -1,7 +1,10 @@
 # ADR 0016: Previews
 
-- **Status:** Accepted
+- **Status:** Accepted; amended 2026-11-02
 - **Date:** 2026-11-01
+
+Since [ADR 0025](0025-webviews.md), a preview can show a page of the extension's own instead of
+content (`webview` in its manifest entry). Content previews are unchanged.
 
 ## Context
 

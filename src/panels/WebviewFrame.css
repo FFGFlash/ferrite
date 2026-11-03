@@ -1,0 +1,12 @@
+/* An extension's page, filling its tab. */
+.webview {
+  display: flex;
+  height: 100%;
+  background: var(--color-editor-background);
+}
+
+.webview__frame {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+}

@@ -4,7 +4,8 @@
  * - **In an extension's viewer**, such as an image. The extension fills it
  *   in with preview content (`PreviewDocument` draws it), when the tab
  *   opens, when the file changes on disk, and when the extension becomes
- *   usable again.
+ *   usable again. A webview viewer shows the extension's page instead
+ *   (`WebviewFrame`).
  * - **A binary file** (`viewer` is `null`), which asks before opening it as
  *   text, as VS Code does, or offers a viewer that can show it.
  */
@@ -17,6 +18,7 @@ import { extensionsStore } from '../state/extensions'
 import { useStore } from '../state/store'
 import { fileVersions, showFileTab, viewerOpened, viewersFor } from '../state/viewers'
 import { PreviewDocument, useContent } from './PreviewPane'
+import { WebviewFrame } from './WebviewFrame'
 import './PreviewPane.css'
 import './ViewerPane.css'
 
@@ -174,8 +176,11 @@ function ExtensionViewer({ item, viewer, path }: { item: ItemId; viewer: string;
       </Notice>
     )
   }
-  return id === null ? (
-    <article className="preview viewer" aria-label={fileName(path)} aria-busy="true" />
+  if (id === null) {
+    return <article className="preview viewer" aria-label={fileName(path)} aria-busy="true" />
+  }
+  return contribution?.webview ? (
+    <WebviewFrame id={id} title={fileName(path)} fileVersion={version} />
   ) : (
     <ViewerContent id={id} path={path} version={version} />
   )

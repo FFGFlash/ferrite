@@ -34,7 +34,9 @@ mod permissions;
 pub mod preview;
 mod readme;
 mod runtime;
+pub mod storage;
 mod usage;
+pub mod webview;
 mod worker;
 
 /// Host bindings generated from the WIT interface.
@@ -145,6 +147,20 @@ pub enum Notification {
   /// An extension asked to show one of its previews, beside its document
   /// or in the same group.
   ShowPreview { id: String, beside: bool },
+  /// An extension replaced a webview's page (by preview id).
+  WebviewChanged(String),
+  /// An extension sent a message (JSON text) to a webview's page.
+  WebviewMessage { id: String, message: String },
+  /// A value an extension stores changed (`None`: removed). `scope` and
+  /// `key` are `None` when all were cleared. `source` is the webview whose
+  /// page changed it, if one did.
+  StorageChanged {
+    extension: String,
+    scope: Option<String>,
+    key: Option<String>,
+    value: Option<String>,
+    source: Option<String>,
+  },
 }
 
 /// What a status bar item shows.
@@ -244,6 +260,9 @@ pub struct HostOptions {
   /// User configuration, by extension id.
   pub settings: BTreeMap<String, toml::Table>,
   pub limits: Limits,
+  /// Where extensions' storage and webview tabs' states are kept; `None`
+  /// keeps them in memory. Read when the host is created.
+  pub storage_dir: Option<PathBuf>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -362,4 +381,6 @@ pub struct ExtensionStatus {
   pub has_settings: bool,
   pub contributions: Contributions,
   pub usage: ResourceUsage,
+  /// Bytes it stores ([`ExtensionHost::clear_storage`]).
+  pub stored_bytes: u64,
 }

@@ -64,6 +64,8 @@ pub struct PreviewInfo {
   pub icon: String,
   /// The document it shows.
   pub document: Option<u64>,
+  /// Whether it shows a webview page instead of content (API 1.5).
+  pub webview: bool,
 }
 
 /// What a preview shows: a tree of nodes, each after its parent.

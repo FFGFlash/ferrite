@@ -47,6 +47,17 @@ pub fn run() {
     .manage(languages::LanguagesState::default())
     .manage(terminal::TerminalState::default())
     .manage(file_drop::DropState::default())
+    // Extensions' webview pages, which run in sandboxed frames.
+    .register_asynchronous_uri_scheme_protocol(
+      ferrite_extension_host::webview::SCHEME,
+      |context, request, responder| {
+        let app = context.app_handle().clone();
+        // Files are read off the main thread.
+        tauri::async_runtime::spawn_blocking(move || {
+          responder.respond(extensions::serve_webview(&app, &request));
+        });
+      },
+    )
     .setup(move |app| {
       let log_dir = match app.path().app_log_dir() {
         Ok(dir) => Some(dir),
@@ -216,6 +227,12 @@ pub fn run() {
       extensions::extension_preview_closed,
       extensions::extension_viewer_open,
       extensions::extension_preview_image,
+      extensions::extension_webview,
+      extensions::extension_webview_message,
+      extensions::extension_webview_set_state,
+      extensions::extension_webview_theme,
+      extensions::extension_webview_storage,
+      extensions::extension_clear_storage,
       extensions::extension_icon,
       extensions::extension_readme,
       extensions::extension_readme_image,

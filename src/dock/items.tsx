@@ -10,19 +10,27 @@ import { useViews, type ViewDescriptor } from '../app/views'
 import { executeCommand, getCommand, primaryKeybinding } from '../commands/registry'
 import { ErrorBoundary } from '../components/ErrorBoundary'
 import { FileIcon } from '../components/FileIcon'
-import { Icon, type IconName } from '../components/Icon'
+import { Icon, isActionIcon, type IconName } from '../components/Icon'
 import { entryIcon } from '../components/fileIcons'
 import { Breadcrumbs } from '../editor/Breadcrumbs'
 import { EditorView } from '../editor/EditorView'
 import type { DocumentSummary } from '../ipc/editor'
-import type { PreviewInfo } from '../ipc/extensions'
+import {
+  runExtensionCommand,
+  type ExtensionStatus,
+  type PreviewInfo,
+  type TabAction,
+} from '../ipc/extensions'
 import { PreviewPane } from '../panels/PreviewPane'
 import { ViewerPane } from '../panels/ViewerPane'
 import { documentsStore } from '../state/documents'
 import { extensionsStore } from '../state/extensions'
 import { iconThemeStore } from '../state/iconTheme'
+import { reportError } from '../state/notifications'
 import { previewsStore } from '../state/previews'
 import { useStore } from '../state/store'
+import { viewerIds } from '../state/viewers'
+import { postToWebview, webviewActionStates } from '../state/webviews'
 import { openNewTerminalMenu } from '../terminal/profileMenu'
 import { closeTerminal, getSession, terminalsStore, type TerminalTab } from '../terminal/terminals'
 import { themeKind } from '../themes/theme'
@@ -244,24 +252,66 @@ export function ItemContent({ resolved }: { resolved: ResolvedItem }): ReactNode
   }
 }
 
+/**
+ * Whether an item stays loaded while its tab is hidden: a webview whose
+ * extension asks for it (`retain_when_hidden`). Other items are unmounted
+ * and drawn again when shown.
+ */
+export function keepsLoaded(
+  resolved: ResolvedItem,
+  extensions: readonly ExtensionStatus[],
+): boolean {
+  const contributions = extensions.map(extension => extension.contributions)
+  switch (resolved.kind) {
+    case 'viewer':
+      return contributions.some(contribution =>
+        contribution.viewers.some(
+          viewer => viewer.fullId === resolved.viewer && viewer.webview?.retainWhenHidden,
+        ),
+      )
+    case 'preview': {
+      // `<extension id>.<preview id>/<key>`.
+      const declared = resolved.preview.id.split('/')[0]
+      return (
+        resolved.preview.webview &&
+        contributions.some(contribution =>
+          contribution.previews.some(
+            preview => preview.fullId === declared && preview.webview?.retainWhenHidden,
+          ),
+        )
+      )
+    }
+    default:
+      return false
+  }
+}
+
 /** Buttons beside the tabs for the active item. */
 export function ItemActions({ resolved }: { resolved: ResolvedItem }): ReactNode {
   if (resolved.kind === 'view') {
     const Actions = resolved.view.actions
     return Actions ? <Actions /> : null
   }
+  if (resolved.kind === 'viewer' && resolved.viewer !== null) {
+    return <ExtensionTabActions resolved={resolved} />
+  }
   if (resolved.kind === 'preview') {
     const { document } = resolved.preview
-    return document === null ? null : (
-      <button
-        type="button"
-        className="dock-action"
-        title="Show Source"
-        aria-label="Show Source"
-        onClick={() => showItem(documentTab(document))}
-      >
-        <FileText size={16} strokeWidth={1.5} aria-hidden="true" />
-      </button>
+    return (
+      <>
+        <ExtensionTabActions resolved={resolved} />
+        {document !== null && (
+          <button
+            type="button"
+            className="dock-action"
+            title="Show Source"
+            aria-label="Show Source"
+            onClick={() => showItem(documentTab(document))}
+          >
+            <FileText size={16} strokeWidth={1.5} aria-hidden="true" />
+          </button>
+        )}
+      </>
     )
   }
   if (resolved.kind === 'terminal') {
@@ -303,6 +353,73 @@ export function ItemActions({ resolved }: { resolved: ResolvedItem }): ReactNode
     )
   }
   return null
+}
+
+/**
+ * The buttons an extension declares for a viewer's or preview's tabs. A
+ * click runs the action's command, with the tab as its argument (the
+ * viewer's file, or the preview's key), or goes to the webview's page,
+ * which can set each button's state.
+ */
+function ExtensionTabActions({
+  resolved,
+}: {
+  resolved: Extract<ResolvedItem, { kind: 'viewer' | 'preview' }>
+}): ReactNode {
+  const extensions = useStore(extensionsStore)
+  const ids = useStore(viewerIds)
+  const states = useStore(webviewActionStates)
+  // `<extension id>.<preview id>/<key>`, or `<viewer id>/<path>` once opened.
+  const id = resolved.kind === 'preview' ? resolved.preview.id : ids[resolved.item]
+  const declared = resolved.kind === 'preview' ? resolved.preview.id.split('/')[0] : resolved.viewer
+  const actions = extensions
+    .flatMap<{ fullId: string; actions: TabAction[] }>(extension =>
+      resolved.kind === 'preview'
+        ? extension.contributions.previews
+        : extension.contributions.viewers,
+    )
+    .find(contribution => contribution.fullId === declared)?.actions
+  if (!actions || actions.length === 0) {
+    return null
+  }
+  const argument =
+    resolved.kind === 'preview'
+      ? resolved.preview.id.slice(resolved.preview.id.indexOf('/') + 1)
+      : resolved.path
+  const run = (action: TabAction) => {
+    if (action.command) {
+      runExtensionCommand(action.command, null, argument).catch((error: unknown) =>
+        reportError(action.title, error),
+      )
+    } else if (id) {
+      postToWebview(id, 'action', action.id)
+    }
+  }
+  return actions.map(action => {
+    const state = (id && states[id]?.[action.id]) || {}
+    if (state.hidden) {
+      return null
+    }
+    const title = state.title ?? action.title
+    return (
+      <button
+        key={action.id}
+        type="button"
+        className="dock-action"
+        title={title}
+        aria-label={title}
+        aria-pressed={state.pressed}
+        disabled={state.disabled || (!action.command && !id)}
+        onClick={() => run(action)}
+      >
+        {action.icon.kind === 'named' && isActionIcon(action.icon.name) ? (
+          <Icon name={action.icon.name} size={16} />
+        ) : action.icon.kind === 'image' ? (
+          <img className="dock-action__image" src={action.icon.url} alt="" />
+        ) : null}
+      </button>
+    )
+  })
 }
 
 /** Shows a terminal's emulator, moving its element here. */

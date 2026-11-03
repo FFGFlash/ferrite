@@ -6,10 +6,11 @@
  */
 import { CircleAlert, Ellipsis } from 'lucide-react'
 import { useCallback, useEffect, useState } from 'react'
-import { formatUsage } from '../app/format'
+import { formatBytes, formatUsage } from '../app/format'
 import { executeCommand } from '../commands/registry'
 import { openContextMenu } from '../components/contextMenuState'
 import {
+  clearExtensionStorage,
   getExtensionReadme,
   getExtensionReadmeImage,
   setExtensionPermissions,
@@ -237,6 +238,23 @@ export function ExtensionPage({ id }: { id: string }) {
               {usage.compileMs > 0 && (
                 <p className="extension-page__muted">Compiled in {duration(usage.compileMs)}</p>
               )}
+            </section>
+          )}
+          {extension.storedBytes > 0 && (
+            <section className="extension-page__section">
+              <h2>Stored data</h2>
+              <p>{formatBytes(extension.storedBytes)}</p>
+              <button
+                type="button"
+                className="extension-page__button"
+                onClick={() =>
+                  clearExtensionStorage(extension.id).catch((error: unknown) =>
+                    reportError('Clearing stored data', error),
+                  )
+                }
+              >
+                Clear Stored Data
+              </button>
             </section>
           )}
           <section className="extension-page__section">

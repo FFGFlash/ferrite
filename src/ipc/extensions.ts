@@ -4,7 +4,12 @@
 import { call } from './index'
 
 export type Permission =
-  'documents-read' | 'documents-write' | 'files-read' | 'files-write' | 'language-servers'
+  | 'documents-read'
+  | 'documents-write'
+  | 'files-read'
+  | 'files-write'
+  | 'language-servers'
+  | 'network'
 
 export type ExtensionState =
   | 'inactive'
@@ -101,6 +106,30 @@ export interface PreviewContribution {
   /** `<extension id>.<preview id>`. */
   fullId: string
   icon: string
+  /** Set when it shows a page instead of preview content. */
+  webview: WebviewContribution | null
+  /** Buttons beside its tabs. */
+  actions: TabAction[]
+}
+
+/** A button beside a viewer's or preview's tabs. */
+export interface TabAction {
+  /** What the page's `ferrite.onAction` gets. */
+  id: string
+  title: string
+  icon: { kind: 'named'; name: string } | { kind: 'image'; url: string }
+  /** Run with the tab as its argument; without one, the click goes to the page. */
+  command: string | null
+}
+
+/** The page a viewer or preview shows instead of preview content. */
+export interface WebviewContribution {
+  /** The HTML file, relative to the extension's folder; `null` when the extension sets the page. */
+  page: string | null
+  /** The command run when the page sends a message. */
+  onMessage: string | null
+  /** Keeps the page loaded while its tab is hidden. */
+  retainWhenHidden: boolean
 }
 
 /** A viewer: a tab that shows matching files the extension's way, not as text. */
@@ -111,9 +140,14 @@ export interface ViewerContribution {
   title: string
   /** File name patterns, as for menu items. */
   patterns: string[]
-  command: string
+  /** Fills it in; optional for a webview. */
+  command: string | null
   /** `default`: matching files open in it; `option`: only when chosen. */
   priority: 'default' | 'option'
+  /** Set when it shows a page instead of preview content. */
+  webview: WebviewContribution | null
+  /** Buttons beside its tabs. */
+  actions: TabAction[]
 }
 
 export interface DecorationColors {
@@ -203,6 +237,15 @@ export interface PreviewInfo {
   icon: string
   /** The document it shows. */
   document: number | null
+  /** Whether it shows a webview page instead of content. */
+  webview: boolean
+}
+
+/** Where a webview loads its page from. */
+export interface WebviewInfo {
+  url: string
+  /** Changes when the extension replaces the page. */
+  version: number
 }
 
 /** Where a preview's link goes, as the backend resolved it. */
@@ -282,6 +325,8 @@ export interface ExtensionStatus {
   hasSettings: boolean
   contributions: Contributions
   usage: ResourceUsage
+  /** Bytes it stores (`clearExtensionStorage`). */
+  storedBytes: number
 }
 
 /** What an extension has used during this session. */
@@ -333,6 +378,32 @@ export const openViewer = (viewer: string, path: string) =>
   call<string>('extension_viewer_open', { viewer, path })
 export const getPreviewImage = (preview: string, path: string) =>
   call<string>('extension_preview_image', { preview, path })
+/** Where a viewer's or preview's webview page is; `null` if it isn't open or isn't a webview. */
+export const getWebview = (preview: string) =>
+  call<WebviewInfo | null>('extension_webview', { preview })
+/** Passes a message (JSON text) from a webview's page to its extension. */
+export const sendWebviewMessage = (preview: string, message: string) =>
+  call<void>('extension_webview_message', { preview, message })
+/** The workbench's theme, for webview pages served from now on. */
+export const setWebviewTheme = (kind: string, variables: Record<string, string>) =>
+  call<void>('extension_webview_theme', { kind, variables })
+/** Saves a webview page's state (JSON text). */
+export const setWebviewState = (preview: string, pageState: string) =>
+  call<void>('extension_webview_set_state', { preview, pageState })
+/**
+ * A webview page's storage request, in its extension's `global` or
+ * `workspace` scope: `get` (JSON text or `null`), `set` (`value` `null`
+ * removes), or `keys`.
+ */
+export const webviewStorage = (
+  preview: string,
+  scope: string,
+  op: string,
+  key: string | null,
+  value: string | null,
+) => call<unknown>('extension_webview_storage', { preview, scope, op, key, value })
+/** Removes everything an extension has stored. */
+export const clearExtensionStorage = (id: string) => call<void>('extension_clear_storage', { id })
 /** An extension's icon as a `data:` URL; `null` if it has none. */
 export const getExtensionIcon = (id: string) => call<string | null>('extension_icon', { id })
 /** An extension's README, rendered as preview content; `null` if it has none. */

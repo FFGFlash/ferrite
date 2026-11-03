@@ -92,6 +92,7 @@ describe('accessibility (axe)', () => {
           languages: [],
           languageServers: [],
         },
+        storedBytes: 0,
         usage: {
           busyMs: 12,
           calls: 3,

@@ -8,6 +8,14 @@ const osNames: Record<string, string> = {
 }
 
 const megabytes = (bytes: number) => `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+
+/** A size the way people read it: `512 bytes`, `3.4 KB`, `1.2 MB`. */
+export function formatBytes(bytes: number): string {
+  if (bytes < 1024) {
+    return `${bytes} ${bytes === 1 ? 'byte' : 'bytes'}`
+  }
+  return bytes < 1024 * 1024 ? `${(bytes / 1024).toFixed(1)} KB` : megabytes(bytes)
+}
 const milliseconds = (ms: number) => `${ms.toFixed(ms < 10 ? 1 : 0)} ms`
 
 /**

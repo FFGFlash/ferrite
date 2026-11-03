@@ -257,6 +257,40 @@ export function primaryKeybinding(command: Command | undefined, mac = isMac()): 
   return first ? formatKeybinding(first, mac) : null
 }
 
+/** A key combination as a webview page matches it (see `webview.js`). */
+export type Keystroke = ParsedBinding
+
+/**
+ * The key combinations that run a command, or start a chord, outside the
+ * editor and terminal: what a focused webview page passes to the workbench
+ * unless it handles them itself.
+ */
+export function webviewKeystrokes(mac = isMac()): Keystroke[] {
+  const seen = new Set<string>()
+  const keystrokes: Keystroke[] = []
+  for (const command of keyCommands(false, false)) {
+    for (const binding of bindingsOf(command, mac)) {
+      const keystroke = parse(stepsOf(binding)[0]!, mac)
+      const key = JSON.stringify(keystroke)
+      if (!seen.has(key)) {
+        seen.add(key)
+        keystrokes.push(keystroke)
+      }
+    }
+  }
+  return keystrokes
+}
+
+/** Calls `listener` when commands or their keybindings change. Returns a function that stops. */
+export function onKeybindingsChanged(listener: () => void): () => void {
+  const stopRegistry = registry.subscribe(listener)
+  const stopOverrides = overrides.subscribe(listener)
+  return () => {
+    stopRegistry()
+    stopOverrides()
+  }
+}
+
 /** The commands keys can run where focus is, in order of precedence. */
 function keyCommands(editorFocused: boolean, terminalFocused: boolean): Command[] {
   const user = overrides.get()

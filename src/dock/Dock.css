@@ -200,9 +200,25 @@
   margin-left: -2px;
 }
 
-.dock-action:hover {
+.dock-action:hover:not(:disabled) {
   background: var(--color-control-hover-background);
   color: var(--color-text);
+}
+
+.dock-action[aria-pressed='true'] {
+  box-shadow: inset 0 0 0 1px var(--color-focus-ring);
+  color: var(--color-text);
+}
+
+.dock-action:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+/* An extension's own icon for a tab action. */
+.dock-action__image {
+  width: 16px;
+  height: 16px;
 }
 
 .dock-group__content {
@@ -222,6 +238,18 @@
   flex: 1;
   min-height: 0;
   overflow: auto;
+}
+
+/* An item that stays loaded while its tab is hidden (a webview that asks). */
+.dock-group__kept {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+
+.dock-group__kept[hidden] {
+  display: none;
 }
 
 .panel-empty {

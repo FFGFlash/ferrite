@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Image Viewer</title>
+    <link rel="stylesheet" href="__ferrite/kit.css" />
+    <link rel="stylesheet" href="viewer.css" />
+    <script src="viewer.js" defer></script>
+  </head>
+  <body data-background="checkerboard">
+    <header class="ferrite-toolbar toolbar">
+      <div class="ferrite-group" role="group" aria-label="Background" id="backgrounds"></div>
+      <span class="ferrite-separator" aria-hidden="true"></span>
+      <div class="ferrite-group" role="group" aria-label="Size">
+        <span class="ferrite-label zoom" id="zoom" aria-live="polite">Fit</span>
+        <button
+          type="button"
+          class="ferrite-button"
+          id="zoom-out"
+          title="Zoom Out (−)"
+          aria-label="Zoom Out"
+        >
+          <span class="ferrite-icon" data-icon="zoom-out"></span>
+        </button>
+        <button
+          type="button"
+          class="ferrite-button"
+          id="zoom-in"
+          title="Zoom In (+)"
+          aria-label="Zoom In"
+        >
+          <span class="ferrite-icon" data-icon="zoom-in"></span>
+        </button>
+        <button type="button" class="ferrite-button" id="fit" title="Fit (F)" aria-label="Fit">
+          <span class="ferrite-icon" data-icon="fit"></span>
+        </button>
+        <button
+          type="button"
+          class="ferrite-button"
+          id="actual-size"
+          title="Actual Size (0)"
+          aria-label="Actual Size"
+        >
+          <span class="ferrite-icon" data-icon="actual-size"></span>
+        </button>
+      </div>
+      <span class="ferrite-label details" id="details"></span>
+    </header>
+    <main class="stage" id="stage" tabindex="0">
+      <img class="picture" id="picture" alt="" />
+      <p class="problem" id="problem" hidden></p>
+    </main>
+  </body>
+</html>

@@ -1,0 +1,108 @@
+/*
+ * Ferrite's kit for webview pages: controls that look like the workbench's,
+ * in the theme's colors. A page opts in with
+ *
+ *   <link rel="stylesheet" href="__ferrite/kit.css">
+ *
+ * (from any folder). The named icons' rules follow, generated from
+ * src/components/actionIcons.json:
+ *
+ *   <span class="ferrite-icon" data-icon="zoom-in"></span>
+ */
+.ferrite-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 8px;
+  border-bottom: 1px solid var(--ferrite-border);
+  background: var(--ferrite-editor-background);
+}
+
+.ferrite-group {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.ferrite-separator {
+  align-self: stretch;
+  width: 1px;
+  margin: 2px 4px;
+  background: var(--ferrite-border);
+}
+
+.ferrite-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  min-width: 24px;
+  height: 24px;
+  padding: 0 6px;
+  border: 1px solid transparent;
+  border-radius: var(--ferrite-radius-control);
+  background: none;
+  color: var(--ferrite-text-muted);
+  font: inherit;
+  font-size: var(--ferrite-font-size-ui-small);
+  cursor: pointer;
+}
+
+.ferrite-button:hover:not(:disabled) {
+  background: var(--ferrite-control-hover-background);
+  color: var(--ferrite-text);
+}
+
+.ferrite-button[aria-pressed='true'] {
+  border-color: var(--ferrite-focus-ring);
+  color: var(--ferrite-text);
+}
+
+.ferrite-button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.ferrite-button:focus-visible,
+.ferrite-input:focus-visible {
+  outline: 1px solid var(--ferrite-focus-ring);
+  outline-offset: -1px;
+}
+
+.ferrite-button.ferrite-primary {
+  background: var(--ferrite-button-background);
+  color: var(--ferrite-button-foreground);
+}
+
+.ferrite-button.ferrite-primary:hover:not(:disabled) {
+  background: var(--ferrite-button-hover-background);
+  color: var(--ferrite-button-foreground);
+}
+
+.ferrite-input {
+  min-width: 0;
+  height: 24px;
+  padding: 0 6px;
+  border: 1px solid var(--ferrite-input-border);
+  border-radius: var(--ferrite-radius-control);
+  background: var(--ferrite-input-background);
+  color: var(--ferrite-text);
+  font: inherit;
+  font-size: var(--ferrite-font-size-ui-small);
+}
+
+.ferrite-label {
+  color: var(--ferrite-text-muted);
+  font-size: var(--ferrite-font-size-ui-small);
+  font-variant-numeric: tabular-nums;
+}
+
+.ferrite-icon {
+  display: inline-block;
+  flex: none;
+  width: 16px;
+  height: 16px;
+  background-color: currentColor;
+  mask: var(--ferrite-icon) center / contain no-repeat;
+}

@@ -40,6 +40,7 @@ import { openPath } from '../state/documents'
 import { reportError } from '../state/notifications'
 import { previewVersions } from '../state/previews'
 import { useStore } from '../state/store'
+import { WebviewFrame } from './WebviewFrame'
 import './PreviewPane.css'
 
 /** A preview's nodes with each one's children, and its headings' anchors. */
@@ -412,6 +413,14 @@ export function useContent(id: string): PreviewContent | null {
 }
 
 export function PreviewPane({ preview }: { preview: PreviewInfo }) {
+  return preview.webview ? (
+    <WebviewFrame id={preview.id} title={preview.title} />
+  ) : (
+    <PreviewContentPane preview={preview} />
+  )
+}
+
+function PreviewContentPane({ preview }: { preview: PreviewInfo }) {
   const content = useContent(preview.id)
   const loadImage = useCallback((path: string) => getPreviewImage(preview.id, path), [preview.id])
   return (

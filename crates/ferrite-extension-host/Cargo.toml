@@ -11,6 +11,7 @@ base64 = { workspace = true }
 ferrite-core = { workspace = true }
 ferrite-text = { workspace = true }
 ferrite-workspace = { workspace = true }
+getrandom = { workspace = true }
 pulldown-cmark = { workspace = true }
 semver = { workspace = true }
 serde = { workspace = true }

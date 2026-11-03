@@ -12,6 +12,7 @@ import { previewClosed, type ViewerContribution } from '../ipc/extensions'
 import { extensionsStore, patternMatcher, usableExtensions } from './extensions'
 import { reportError } from './notifications'
 import { createStore } from './store'
+import { webviewClosed } from './webviews'
 
 /** A file shown in a tab without being a text document. */
 export interface FileTab {
@@ -86,18 +87,23 @@ export function filesChanged(paths: readonly string[]): void {
   })
 }
 
-/** Preview ids of opened viewer tabs, by dock item, to close them in the backend. */
-const opened = new Map<string, string>()
+/** Preview ids of opened viewer tabs, by dock item: to close them in the backend, and for their tab actions. */
+export const viewerIds = createStore<Readonly<Record<string, string>>>({})
 
 export function viewerOpened(item: string, id: string): void {
-  opened.set(item, id)
+  viewerIds.update(ids => (ids[item] === id ? ids : { ...ids, [item]: id }))
 }
 
 /** A viewer's tab closed: its extension stops filling it in. */
 export function viewerClosed(item: string): void {
-  const id = opened.get(item)
-  opened.delete(item)
+  const id = viewerIds.get()[item]
+  viewerIds.update(ids => {
+    const next = { ...ids }
+    delete next[item]
+    return next
+  })
   if (id) {
+    webviewClosed(id)
     previewClosed(id).catch((error: unknown) => reportError('Closing the viewer', error))
   }
 }

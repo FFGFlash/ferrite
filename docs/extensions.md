@@ -14,12 +14,15 @@ do only what the [extension API](../crates/ferrite-extension-api/wit/extension.w
   Markdown);
 - show kinds of files in viewers: tabs that show a file the extension's way, such as an image,
   instead of as text;
+- show pages of their own (HTML, CSS, and JavaScript) in viewers and previews: webviews, which
+  run sandboxed and talk to the extension by messages;
+- keep small values across sessions (storage);
 - add languages: syntax highlighting from Tree-sitter grammars, and language servers;
 - read their own settings;
 - log, and show messages.
 
 There is no network, environment, clock, or process access, and no file access beyond the
-open folder's files. A manifest declares the permissions an extension needs, and the user grants
+open folder's files (webview pages can reach the web only with the `network` permission). A manifest declares the permissions an extension needs, and the user grants
 them before the extension starts.
 (Language servers an extension declares are started by Ferrite, not by the extension, and only
 once the user allows it.)
@@ -40,7 +43,8 @@ This guide uses these examples:
   [TOML](../extensions/toml/), and [Python](../extensions/python/) are extensions like it.
 - [Markdown](../extensions/markdown/) is a language too, and has code: a preview that renders
   the document as you type.
-- [Images](../extensions/images/) shows image files in a viewer, with their format and size.
+- [Images](../extensions/images/) shows image files in a webview viewer: a page that draws the
+  picture on a background you choose, fit to the tab or zoomed, with its format and size.
 
 ## Quick start
 
@@ -186,8 +190,10 @@ as its text. A README can be at most 1 MiB. Tidy, TODOs, and Markdown have both.
 | `files_read`       | Listing and reading [files](#files) in the open folder (API 1.3)                 |
 | `files_write`      | Changing and creating files in the open folder (API 1.3)                         |
 | `language_servers` | Ferrite running the extension's [language servers](#language-servers)            |
+| `network`          | Its [webview](#webviews) pages loading content and code from the web (API 1.5)   |
 
-Commands, settings, logging, messages, languages, and viewers need no permission.
+Commands, settings, logging, messages, storage, languages, viewers, and webviews need no
+permission.
 
 **Requesting a permission doesn't grant it.** When an extension requests permissions the user
 hasn't decided about, Ferrite asks before starting it. The user can allow or deny each
@@ -204,7 +210,8 @@ and `files_write`, which the API 1.0 `permission` type can't name: a call tells 
 
 The full interface, with comments, is
 [`extension.wit`](../crates/ferrite-extension-api/wit/extension.wit). Functions the extension
-calls are in `host`, `workbench`, `files`, and `viewers`; the extension exports the rest.
+calls are in `host`, `workbench`, `files`, `viewers`, `webviews`, and `storage`; the extension
+exports the rest.
 
 ### Positions and versions
 
@@ -317,6 +324,13 @@ Values are checked against the declaration. Invalid values are listed in the Ext
 the settings editor, and the default is used instead. Values are read at call time, so a changed setting applies on the
 next read.
 
+**Storage** (API 1.5). The `storage` interface keeps small values across sessions, as JSON
+text: `get(scope, key)`, `set(scope, key, value)` (`none` removes it), and `keys(scope)`. The
+scope is `global`, or `workspace` for the folder open in the editor (nothing is kept while none
+is open, and `set` fails). Each scope holds at most 1 MiB, and keys are at most 200 bytes.
+The extension's [webview](#webviews) pages share the values, and hear when its code changes them.
+Users see how much an extension stores on its page in the Extensions view, and can clear it.
+
 **Logging and messages:**
 
 - `log(level, message)` writes to Ferrite's log, tagged with the extension's id. Messages are cut
@@ -332,7 +346,7 @@ next read.
 
 Contributions are declared in the manifest, and the workbench draws them itself. An extension
 never supplies markup or CSS: it supplies text, colors that must be hex colors, and icons that
-are shown as images.
+are shown as images. The exception is [webviews](#webviews), pages that run sandboxed.
 
 - **Ids.** Contribution ids are local to the extension (`list`, `count`). In the workbench they
   become `<extension id>.<id>`.
@@ -603,19 +617,21 @@ The top level holds blocks and inline nodes. Anything out of place is rejected w
 ### Viewers
 
 A viewer shows a kind of file the extension's way instead of as text, such as a picture of an
-image file. [Images](../extensions/images/) is the example. Viewers are API 1.4.
+image file. Viewers are API 1.4. This one fills the tab with [preview](#previews) content, here
+a summary of a font file; a viewer can also show a page of its own instead
+([webviews](#webviews)), as [Images](../extensions/images/) does.
 
 ```toml
 [[commands]]
-id = "example.images.show"
-title = "Show Image"
+id = "example.fonts.show"
+title = "Show Font"
 hidden = true                     # run by the viewer, not from the palette
 
 [[viewers]]
-id = "image"                      # used as "example.images.image"
-title = "Image Viewer"            # shown when choosing how to open a file
-patterns = ["*.png", "*.{jpg,jpeg}", "*.gif"]   # file names, as for menu items
-command = "example.images.show"   # fills the viewer in
+id = "font"                       # used as "example.fonts.font"
+title = "Font Viewer"             # shown when choosing how to open a file
+patterns = ["*.ttf", "*.{otf,woff}"]   # file names, as for menu items
+command = "example.fonts.show"    # fills the viewer in
 priority = "default"              # or "option"
 ```
 
@@ -640,6 +656,137 @@ priority = "default"              # or "option"
 - **Lifetime.** A viewer tab is the workbench's: it's saved with the layout and stays open when
   the extension stops, which removes only its content. Viewers can't edit their files.
 
+### Webviews
+
+A viewer or preview can show a page of the extension's own (HTML, CSS, and JavaScript) instead
+of preview content, for what content can't draw: [Images](../extensions/images/) shows a picture
+you can zoom, on a background you choose. Webviews are API 1.5
+([ADR 0025](adr/0025-webviews.md)).
+
+```toml
+[[commands]]
+id = "example.images.details"
+title = "Image Details"
+hidden = true
+
+[[viewers]]
+id = "svg"
+title = "Image Viewer"
+patterns = ["*.svg"]
+webview = "media/viewer.html"          # a page in the extension's folder; or `true`, and set it from code
+on_message = "example.images.details"  # optional: run when the page sends a message
+retain_when_hidden = false             # optional: keep the page loaded while its tab is hidden
+priority = "option"
+
+[[viewers.actions]]                    # optional: buttons beside the tab
+id = "fit"
+title = "Fit"
+icon = "fit"                           # a named icon, or an SVG or PNG file in the folder
+# command = "example.images.fit"       # optional: run with the tab as argument, instead of telling the page
+```
+
+A preview takes the same keys under `[[previews]]`, and opens with `show-preview` as before. A
+webview viewer's `command` is optional, since the page can load the file itself; if it has one,
+it runs as for any viewer.
+
+**The page** is an ordinary page: addresses in it are found next to it in the extension's
+folder, so `<script src="viewer.js">` and `<link rel="stylesheet" href="viewer.css">` work.
+Before its own scripts run, it has a `ferrite` object:
+
+| Member                                      | What it's for                                                                                                                                                               |
+| ------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `kind`                                      | `"viewer"` or `"preview"`                                                                                                                                                   |
+| `fileUrl`, `fileName`                       | In a viewer, the file open in it, for `<img src>`, `fetch`, and so on. `fileUrl` changes with the file                                                                      |
+| `onFileChanged(fn)`                         | In a viewer: called with the new `fileUrl` when the file changes on disk                                                                                                    |
+| `postMessage(value)`                        | Sends a value JSON can represent to the extension                                                                                                                           |
+| `onMessage(fn)`                             | Called with each message the extension sends; those sent before the page listens wait for it                                                                                |
+| `getState()`, `setState(value)`             | This tab's state (at most 64 KiB), back when the page loads again                                                                                                           |
+| `storage`, `workspaceStorage`               | The extension's [stored values](#settings-logging-and-messages): `get(key)`, `set(key, value)` (`undefined` removes it), `keys()`, each a promise                           |
+| `onStorageChanged(fn)`                      | Called with `{ scope, key, value }` when the extension's code or another of its pages changes a stored value; `scope` and `key` are `null` when the user cleared everything |
+| `theme`, `onThemeChanged(fn)`               | `"dark"` or `"light"`, and a call when the theme changes                                                                                                                    |
+| `onAction(fn)`, `setActionState(id, state)` | Clicks on the tab's actions without a command, and how each looks: `pressed`, `disabled`, `hidden`, `title`                                                                 |
+
+Each `on…` function returns a function that stops listening.
+
+**Messages.** `ferrite.postMessage(value)` runs the entry's `on_message` command (starting the
+extension if needed). In it, **`webviews::message()`** returns `{ source, data }`: the tab
+(`viewer({ viewer, path })` or `preview({ preview, key })`) and the message as JSON text. The
+extension answers with **`webviews::post-message(source, json)`**, and can message any of its
+open webview tabs the same way. Messages are JSON, at most 1 MiB. **`webviews::set-webview-html(webview, html)`**
+replaces a tab's page (at most 4 MiB), for `webview = true`; addresses in it are found from the
+extension's folder. Both return `false` once the tab is closed. Images' page asks for the
+picture's details:
+
+```js
+ferrite.onMessage(({ details }) => (document.getElementById('details').textContent = details))
+ferrite.postMessage({ type: 'details' })
+```
+
+```rust
+fn run_command(command: String, _: CommandContext) -> Result<(), String> {
+  let message = webviews::message().ok_or("no message")?;
+  // ... read the file named by message.source ...
+  webviews::post_message(&message.source, r#"{"details":"PNG · 128 × 128 pixels"}"#)
+    .map_err(|error| format!("{error:?}"))?;
+  Ok(())
+}
+```
+
+**Lifetime.** Only the active tab of a group is drawn, so a page is unloaded when its tab is
+hidden, and loads again when it's shown: save what it needs with `setState`. A viewer's state
+also comes back in the next session, since its tab is saved with the layout; closing the tab
+forgets it. With `retain_when_hidden = true` the page stays loaded instead, at the cost of its
+memory (moving the tab to another group still loads it again).
+
+**Looking like Ferrite.** Every page gets the theme as CSS variables, which change with it:
+`--ferrite-<token>` for each [theme token](#themes) (`--ferrite-editor-background`,
+`--ferrite-text-muted`, `--ferrite-focus-ring`, …), and `--ferrite-font-ui`,
+`--ferrite-font-mono`, `--ferrite-font-size-ui`, `--ferrite-font-size-ui-small`,
+`--ferrite-font-size-editor`, `--ferrite-radius-control`, and `--ferrite-color-scheme`. The root
+element has `data-ferrite-theme="dark"` or `"light"`. Defaults for body text, links, focus
+rings, selection, and scroll bars come with them, with no specificity, so any style of the page's
+wins. For controls like Ferrite's, link the kit, from any folder:
+
+```html
+<link rel="stylesheet" href="__ferrite/kit.css" />
+
+<div class="ferrite-toolbar">
+  <button class="ferrite-button" aria-pressed="true" aria-label="Zoom In">
+    <span class="ferrite-icon" data-icon="zoom-in"></span>
+  </button>
+</div>
+```
+
+It has `ferrite-toolbar`, `ferrite-group`, `ferrite-separator`, `ferrite-button` (pressed with
+`aria-pressed="true"`; `ferrite-primary` for the main action), `ferrite-input`, `ferrite-label`,
+and `ferrite-icon`, a 16-pixel icon in the text color. The named icons, for the kit and for tab
+actions: `actual-size`, `add`, `chevron-down`, `chevron-left`, `chevron-right`, `chevron-up`,
+`close`, `code`, `copy`, `crop`, `download`, `edit`, `error`, `eye`, `eye-off`, `file`,
+`filter`, `fit`, `flip-horizontal`, `flip-vertical`, `grid`, `image`, `info`, `layers`, `link`,
+`moon`, `more`, `move`, `open`, `palette`, `pause`, `play`, `refresh`, `remove`, `rotate`,
+`save`, `search`, `settings`, `split`, `stop`, `sun`, `upload`, `warning`, `zoom-in`,
+`zoom-out`.
+
+**Tab actions** are buttons beside the tab while it's active, at most 10. Without a `command`, a
+click goes to the page (`ferrite.onAction(id)`); with one, the command runs with the tab as its
+argument (`workbench::command-argument()`: the viewer's file, or the preview's key), even while
+the page isn't loaded. Actions without a command need a webview; any viewer or preview can have
+actions with one. An icon file is shown as an image (it can't follow the theme's colors).
+
+**The keyboard.** Ferrite's shortcuts work while a page has focus: the page passes on key
+presses bound to Ferrite commands, and the second key of a chord. To use such a key itself,
+handle it with `event.preventDefault()` in a `keydown` listener on an element or the
+`document` (a listener on `window` runs too late). Other keys, such as typing or Ctrl+C in a
+field, stay in the page.
+
+**The sandbox.** A page runs in a frame sandboxed with only `allow-scripts`, so it has an origin
+of its own: it can't reach Ferrite's window, IPC, cookies, or `localStorage`, navigate, open
+popups, or submit forms. Its address is made for its tab, and a content security policy allows
+only the extension's files, the viewed file, and `data:` and `blob:` URLs (inline scripts and
+styles are fine). With the [`network` permission](#permissions), granted by the user, the policy
+also allows `https:` for scripts, styles, images, media, fonts, and `fetch`, and `wss:` for
+sockets.
+
 ### Limits
 
 | Item                               | Limit                                   |
@@ -652,6 +799,11 @@ priority = "default"              # or "option"
 | Previews                           | 10 types per extension                  |
 | Viewers                            | 10 per extension, 20 patterns each      |
 | Viewed file reads                  | 16 MiB per call                         |
+| Tab actions                        | 10 per viewer or preview; icons 32 KiB  |
+| Webview pages set from code        | 4 MiB                                   |
+| Webview messages                   | 1 MiB, JSON                             |
+| Webview tab state                  | 64 KiB per tab                          |
+| Storage                            | 1 MiB per scope; keys 200 bytes         |
 | Preview content                    | 100,000 nodes, 8 MiB of text            |
 | Status text / tooltip              | 100 / 500 characters (cut, not refused) |
 | View items                         | 5,000 per view                          |
@@ -946,17 +1098,18 @@ model for testing an extension end to end. Run them with
 
 Any language that can produce a WebAssembly component for the `extension` world works. The
 component must import nothing but the Ferrite interfaces (`ferrite:extension/host`,
-`ferrite:extension/workbench`, `ferrite:extension/files`, and `ferrite:extension/viewers`). The host provides no WASI, so
+`ferrite:extension/workbench`, `ferrite:extension/files`, `ferrite:extension/viewers`,
+`ferrite:extension/webviews`, and `ferrite:extension/storage`). The host provides no WASI, so
 a component that imports `wasi:*` interfaces (most toolchains' defaults) fails to start, with a
 message saying so. Rust on `wasm32-unknown-unknown` is the supported path for now.
 
 ## Versioning
 
-The WIT package is versioned: `ferrite:extension@1.4.0`, `api_version = "1"`.
+The WIT package is versioned: `ferrite:extension@1.5.0`, `api_version = "1"`.
 
 - **Additions.** New host functions arrive as minor versions of the package. Version 1.1 added the
-  `workbench` interface, 1.2 added previews to it, 1.3 added the `files` interface, and 1.4 the
-  `viewers` interface. Wasmtime
+  `workbench` interface, 1.2 added previews to it, 1.3 added the `files` interface, 1.4 the
+  `viewers` interface, and 1.5 the `webviews` and `storage` interfaces. Wasmtime
   links components built against an older minor version: the host's tests load Tidy builds made
   against 1.0 and 1.2 and a TODOs build made against 1.1.
 - **Breaking changes.** Changes that break existing extensions get a new major version and a new
