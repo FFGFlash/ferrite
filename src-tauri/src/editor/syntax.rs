@@ -468,17 +468,17 @@ fn spawn_parse(app: &AppHandle, id: DocumentId, job: ParseJob) {
     Some(format!("parse:{id}")),
     move |token| {
       let started = Instant::now();
-      let tree = match parse(
+      let (tree, failed) = match parse(
         &job.language,
         &job.registry,
         &job.snapshot,
         job.old.as_ref(),
         || token.is_cancelled(),
       ) {
-        Ok(tree) => tree,
+        Ok(tree) => (tree, false),
         Err(error) => {
           tracing::error!(%error, "syntax highlighting is unavailable");
-          None
+          (None, true)
         }
       };
       task_app
@@ -495,7 +495,9 @@ fn spawn_parse(app: &AppHandle, id: DocumentId, job: ParseJob) {
           .get_mut(&id)
           .is_some_and(|syntax| syntax.finish(job.version, tree, document.buffer()))
       };
-      if updated {
+      // A grammar that failed to load leaves the document to fold by
+      // indentation, which the view finds out when it refreshes.
+      if updated || failed {
         events::emit(
           &task_app,
           AppEvent::SyntaxUpdated {

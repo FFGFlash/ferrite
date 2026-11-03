@@ -75,9 +75,11 @@ impl Language {
     &self.0.definition.name
   }
 
-  /// Whether the language has a fold query. Loads the grammar.
+  /// Whether the language has a fold query: it declares one, and its
+  /// grammar hasn't failed to load. Doesn't load the grammar (or wait for
+  /// it to load), as compiling one can take a while.
   pub fn has_folds(&self) -> bool {
-    self.grammar().is_ok_and(|grammar| grammar.folds.is_some())
+    self.0.definition.folds.is_some() && self.0.grammar.get().is_none_or(|grammar| grammar.is_ok())
   }
 
   /// The compiled grammar, loaded on first use.
@@ -384,6 +386,20 @@ mod tests {
     let (b, _) = Registry::new([definition("html", &["html"], &[])]);
     assert_eq!(a.get("html"), a.clone().get("html"));
     assert_ne!(a.get("html"), b.get("html"));
+  }
+
+  #[test]
+  fn fold_support_is_known_without_loading_the_grammar() {
+    let mut html = definition("html", &["html"], &[]);
+    html.folds = Some(PathBuf::from("missing.scm"));
+    let (registry, _) = Registry::new([html, definition("css", &["css"], &[])]);
+    let html = registry.get("html").expect("registered");
+    assert!(html.has_folds());
+    assert!(html.0.grammar.get().is_none(), "not loaded");
+    assert!(!registry.get("css").expect("registered").has_folds());
+    // Once its grammar fails to load, it folds by indentation instead.
+    assert!(html.grammar().is_err());
+    assert!(!html.has_folds());
   }
 
   #[test]
