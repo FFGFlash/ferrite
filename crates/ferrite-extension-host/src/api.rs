@@ -8,6 +8,7 @@
 use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::ops::Range as Span;
 use std::path::Path;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, RwLock, Weak};
 use std::time::Instant;
 
@@ -101,6 +102,8 @@ pub struct ApiContext {
   messages: RateLimit,
   /// Which start of the extension this is.
   generation: u64,
+  /// Set when this start of the extension is stopped.
+  cancel: Arc<AtomicBool>,
   processes: Arc<ProcessTable>,
   /// The argument of the command being run.
   pub argument: Option<String>,
@@ -143,6 +146,7 @@ impl ApiContext {
       logs: RateLimit::new(200.0, 50.0),
       messages: RateLimit::new(10.0, 1.0),
       generation: setup.generation,
+      cancel: setup.cancel.clone(),
       processes: setup.processes.clone(),
       argument: None,
       payload: Payload::None,
@@ -164,7 +168,15 @@ impl ApiContext {
     self.granted.contains(&permission)
   }
 
+  /// The host's shared state, unless this start of the extension was
+  /// stopped: what it showed is gone, and it mustn't show more over what the
+  /// next start shows (it runs until its call is interrupted).
   pub(crate) fn shared(&self) -> Result<Arc<Shared>, ApiError> {
+    if self.cancel.load(Ordering::Relaxed) {
+      return Err(ApiError::InvalidArgument(
+        "the extension was stopped".into(),
+      ));
+    }
     self
       .shared
       .upgrade()

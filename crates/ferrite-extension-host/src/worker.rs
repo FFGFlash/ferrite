@@ -465,6 +465,10 @@ fn run(shared: &Weak<Shared>, setup: &Setup) -> Result<(), Failure> {
   let compiling = Instant::now();
   let component = runtime.compile(entrypoint)?;
   setup.usage.record_compile(compiling.elapsed());
+  // Stopped while compiling (say, reloaded): another start may be running.
+  if setup.cancel.load(Ordering::Relaxed) {
+    return Ok(());
+  }
   let mut store = Store::new(
     runtime.engine(),
     StoreState {

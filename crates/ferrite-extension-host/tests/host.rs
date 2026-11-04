@@ -1888,6 +1888,9 @@ fn git_extension() -> Option<(Setup, PathBuf)> {
     eprintln!("git isn't installed; skipping");
     return None;
   }
+  // For the extension's commits too: CI machines have no identity set.
+  git(&repo, &["config", "user.name", "Test"]);
+  git(&repo, &["config", "user.email", "test@example.com"]);
   Some((s, repo))
 }
 
