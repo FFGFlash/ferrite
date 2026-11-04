@@ -51,7 +51,9 @@ const file = option('file', null)
 const withExtensions = args.includes('--extensions')
 /** `--language DIR`: language extensions to load on their own. */
 const languages = args.flatMap((arg, index) =>
-  arg === '--language' && args[index + 1] ? ['--bench-language', path.resolve(args[index + 1])] : [],
+  arg === '--language' && args[index + 1]
+    ? ['--bench-language', path.resolve(args[index + 1])]
+    : [],
 )
 
 if (!fs.existsSync(binary)) {
