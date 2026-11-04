@@ -14,6 +14,10 @@ do only what the [extension API](../crates/ferrite-extension-api/wit/extension.w
   entry if they like), editor decorations, and previews (formatted pages, such as rendered
   Markdown);
 - ask the user to choose from a list, type a line of text, or confirm (API 1.7);
+- provide read-only documents at addresses of their own, such as a file's version in a commit,
+  and open tabs comparing two documents (API 1.8);
+- name the originals files are compared with as they're edited, marking changed lines beside
+  the text, and take changes the user applies to them, as Git stages them (API 1.9);
 - show kinds of files in viewers: tabs that show a file the extension's way, such as an image,
   instead of as text;
 - show pages of their own (HTML, CSS, and JavaScript) in viewers and previews: webviews, which
@@ -1049,6 +1053,84 @@ if let Some(answer) = prompts::answer()
 }
 ```
 
+### Provided documents and diffs
+
+The `documents` interface (API 1.8) lets an extension provide read-only documents at addresses of
+its own, and open tabs comparing two documents. It needs no permission.
+
+The manifest declares the schemes it provides, each with the command that provides a text:
+
+```toml
+[[text_providers]]
+scheme = "git"                  # 2 to 32 lowercase letters, digits, +, -, or .
+command = "example.git.provide" # one of the extension's commands
+```
+
+An address is the scheme, a colon, and whatever the extension likes: Git's are
+`git:<revision>:<path>`. The name after the last `/`, `\`, or `:` is the tab's title and picks
+the language, so `git:HEAD:src/main.rs` is highlighted as Rust. Schemes the editor or the web use
+(`file`, `untitled`, `http`, `https`, `data`, `blob`, `ferrite`) are refused.
+
+When the editor needs a text, it runs the provider's command, during which
+**`documents::requested()`** returns the address. The command answers with
+**`provide(uri, text)`**, at most 32 MiB; `none` means there's nothing there, which shows as
+empty. A command that doesn't answer fails the request.
+
+```rust
+"example.git.provide" => {
+  if let Some(uri) = documents::requested() {
+    let text = read_version(&uri); // e.g. `git cat-file blob HEAD:src/main.rs` with processes::run
+    documents::provide(&uri, text.as_deref()).map_err(|e| format!("{e:?}"))?;
+  }
+}
+```
+
+- **`changed(uris)`** says texts may have changed, so open documents showing them ask again. An
+  address ending in `*` stands for every address starting with what's before it (`git:HEAD:*`).
+- **`open(uri)`** opens the document at one of the extension's addresses in a tab of its own.
+- **`open-diff(original, modified, title)`** opens a tab comparing two documents: the original on
+  the left (or above, inline) and the modified one on the right. Each is a file's absolute path
+  or an address some extension provides. A file can be edited in the tab. The same two sides and
+  title show in the same tab.
+
+Diff tabs line up the sides, mark changed lines and characters, and collapse unchanged lines
+away from changes. Buttons beside the tabs (and the Diff commands) move between changes (F7 and
+Shift+F7) and choose side by side or inline, whether whitespace at the ends of lines counts, and
+whether unchanged lines collapse; the choices are remembered. Narrower than 900 pixels, a diff
+shows inline. Files with more than 500,000 lines aren't compared.
+
+### Quick diff
+
+The `quick-diff` interface (API 1.9) compares open files with originals the extension names,
+such as Git's index. The editor marks lines changed from the original beside the text as it's
+edited: a green bar for added lines, blue for changed ones, and a red wedge where lines were
+removed. Clicking a marker (or **Show Next Change**, Alt+F3) shows the change's original lines
+between the editor's lines, with buttons to revert it, apply it to the original, or move to the
+next or previous change. **Revert Selected Ranges** reverts the changes the selections touch.
+
+```toml
+[quick_diff]
+original = "example.git.original"    # names a file's original
+apply = "example.git.stage"          # optional: applies changes to an original
+apply_title = "Stage"                # with apply: what applying is called
+```
+
+- The **`original`** command runs when a file opens (and when the extension says originals
+  changed). **`requested-file()`** returns the file's absolute path, and the command answers
+  with **`set-original(path, uri)`**: an address the extension provides (see
+  [Provided documents and diffs](#provided-documents-and-diffs)), or `none` for a file without
+  one, which isn't marked. The editor reads the original's text, and reads it again when the
+  extension says that address changed (`documents::changed`).
+- The **`apply`** command runs when the user applies changes (a change's button, or the diff
+  tab's "<apply_title> Selected Ranges"). **`to-apply()`** returns the original's address and
+  its whole new text: the original with the chosen changes made. Git writes it to the index.
+- **`originals-changed(paths)`** makes the editor ask again for these open files' originals,
+  or all of them when the list is empty, as when files become tracked.
+- **`apply-selected-ranges()`** applies the changes the selections in the active editor touch,
+  for a command of the extension's own, such as Git's **Stage Selected Ranges**.
+
+The first extension with a `[quick_diff]` that names an original for a file is used.
+
 ### Explorer marks
 
 An extension marks files and folders in the explorer with `explorer::set-file-marks(marks)` (API
@@ -1056,7 +1138,8 @@ An extension marks files and folders in the explorer with `explorer::set-file-ma
 
 - **`path`**, absolute. `/` works on Windows too.
 - **`badge`**: one or two characters at the end of the row, such as `M`.
-- **`color`**: the name of a color the manifest declares, for the row's text.
+- **`color`**: the name of a color the manifest declares, for the row's text (and the title of
+  the file's tabs, which show the badge too).
 - **`tooltip`**: plain text, also read by screen readers.
 - **`faded`**: dims the row, as the explorer does for files Git ignores.
 - **`inherit`**: marks everything inside a folder too, such as an untracked folder.
@@ -1103,6 +1186,7 @@ light = "#895503"                    # optional; the dark color otherwise
 | Status text / tooltip              | 100 / 500 characters (cut, not refused) |
 | View items                         | 5,000 per view; 10,000 with `views`     |
 | View containers                    | 5 per extension                         |
+| Text providers / provided text     | 5 per extension / 32 MiB                |
 | Pick items / confirm buttons       | 1,000 / 4                               |
 | Decorated ranges                   | 10,000 per type and document            |
 | Programs / colors                  | 10 / 50 per extension                   |
@@ -1402,20 +1486,22 @@ Any language that can produce a WebAssembly component for the `extension` world 
 component must import nothing but the Ferrite interfaces (`ferrite:extension/host`,
 `ferrite:extension/workbench`, `ferrite:extension/files`, `ferrite:extension/viewers`,
 `ferrite:extension/webviews`, `ferrite:extension/storage`, `ferrite:extension/workspace`,
-`ferrite:extension/processes`, `ferrite:extension/explorer`, `ferrite:extension/views`, and
-`ferrite:extension/prompts`). The host provides no WASI, so
+`ferrite:extension/processes`, `ferrite:extension/explorer`, `ferrite:extension/views`,
+`ferrite:extension/prompts`, `ferrite:extension/documents`, and `ferrite:extension/quick-diff`). The host provides no WASI, so
 a component that imports `wasi:*` interfaces (most toolchains' defaults) fails to start, with a
 message saying so. Rust on `wasm32-unknown-unknown` is the supported path for now.
 
 ## Versioning
 
-The WIT package is versioned: `ferrite:extension@1.7.0`, `api_version = "1"`.
+The WIT package is versioned: `ferrite:extension@1.9.0`, `api_version = "1"`.
 
 - **Additions.** New host functions arrive as minor versions of the package. Version 1.1 added the
   `workbench` interface, 1.2 added previews to it, 1.3 added the `files` interface, 1.4 the
   `viewers` interface, 1.5 the `webviews` and `storage` interfaces, 1.6 the `workspace`, `processes`, and `explorer`
-  interfaces, and 1.7 the `views` and `prompts` interfaces, with `files::delete`,
-  `workspace::open-file`, and `host::set-configuration`. Wasmtime
+  interfaces, 1.7 the `views` and `prompts` interfaces, with `files::delete`,
+  `workspace::open-file`, and `host::set-configuration`, 1.8 the `documents` interface, and 1.9 the
+  `quick-diff` interface.
+  Wasmtime
   links components built against an older minor version: the host's tests load Tidy builds made
   against 1.0 and 1.2 and a TODOs build made against 1.1.
 - **Breaking changes.** Changes that break existing extensions get a new major version and a new

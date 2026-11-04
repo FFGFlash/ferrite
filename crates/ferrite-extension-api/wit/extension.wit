@@ -1,13 +1,14 @@
 /// The Ferrite extension API, version 1 (1.1: workbench contributions;
 /// 1.2: previews; 1.3: files; 1.4: viewers; 1.5: webviews and storage;
 /// 1.6: workspace, processes, and explorer marks; 1.7: tree views,
-/// prompts, deleting files, and opening files).
+/// prompts, deleting files, and opening files; 1.8: provided documents
+/// and diffs).
 ///
 /// An extension is a WebAssembly component targeting the `extension` world.
 /// It can call only the functions it imports here; there is no other
 /// filesystem, network, environment, clock, or process access. See
 /// `docs/extensions.md`.
-package ferrite:extension@1.7.0;
+package ferrite:extension@1.9.0;
 
 /// Types shared by the host functions and the extension's exports.
 interface types {
@@ -883,6 +884,85 @@ interface prompts {
   answer: func() -> option<prompt-answer>;
 }
 
+/// Read-only documents the extension provides for addresses of its own,
+/// and tabs comparing two documents. (1.8)
+///
+/// The manifest's `[[text_providers]]` declare schemes, such as `git`, with
+/// the command that provides the text at an address (`git:HEAD:src/main.rs`)
+/// when the editor needs it: when a tab shows it, and again after `changed`.
+/// While that command runs, `requested` returns the address, and the
+/// command answers with `provide`. Needs no permission.
+interface documents {
+  use types.{api-error};
+
+  /// The address the running command was run to provide text for, when
+  /// it's a text provider's command; `none` otherwise.
+  requested: func() -> option<string>;
+
+  /// Answers a request: the text at `uri` (at most 32 MiB), or `none` when
+  /// there's nothing there, which shows as empty.
+  provide: func(uri: string, text: option<string>) -> result<_, api-error>;
+
+  /// The texts at these addresses of the extension's may have changed, so
+  /// open documents showing them ask for them again. An address ending in
+  /// `*` stands for every address starting with what's before it
+  /// (`git:*` for all of a scheme's).
+  changed: func(uris: list<string>) -> result<_, api-error>;
+
+  /// Opens the document at one of the extension's addresses, read-only, in
+  /// a tab of its own.
+  open: func(uri: string) -> result<_, api-error>;
+
+  /// Opens a tab comparing two documents: `original` on the left (or
+  /// above) and `modified` on the right. Each is a file's absolute path or
+  /// an address a provider declares. When `modified` is a file, it can be
+  /// edited in the tab.
+  open-diff: func(original: string, modified: string, title: string) -> result<_, api-error>;
+}
+
+/// Comparing files with their originals as they're edited (1.9): the
+/// editor marks changed lines beside the text, shows a change's original
+/// lines on request, and can revert changes, or apply them to the original
+/// (staging them, for Git).
+///
+/// The manifest's `[quick_diff]` names the command that finds a file's
+/// original (`original`), and optionally the command that applies changes to
+/// it (`apply`, with `apply_title`, such as "Stage"). An original is an
+/// address the extension provides (see `documents`); the editor reads it, and
+/// reads it again when the extension says it changed.
+interface quick-diff {
+  use types.{api-error};
+
+  /// The file (an absolute path) the running `original` command was run
+  /// for; `none` otherwise.
+  requested-file: func() -> option<string>;
+
+  /// Answers the request: the address of the file's original, or `none`
+  /// when it has none (a file Git doesn't track), when nothing is marked.
+  set-original: func(path: string, uri: option<string>) -> result<_, api-error>;
+
+  /// An original with changes made to it.
+  record applied {
+    /// The original's address.
+    uri: string,
+    /// Its text with the changes made (at most 32 MiB).
+    text: string,
+  }
+
+  /// While the `apply` command runs: what to make the original.
+  to-apply: func() -> option<applied>;
+
+  /// Files' originals may be different ones now (a file became tracked, say):
+  /// the editor asks again for these open files', or for all when the list
+  /// is empty.
+  originals-changed: func(paths: list<string>) -> result<_, api-error>;
+
+  /// Applies the changes the selections in the active editor touch to its
+  /// file's original, as if the user chose to: for a command such as "Stage
+  /// Selected Ranges".
+  apply-selected-ranges: func() -> result<_, api-error>;
+}
+
 world extension {
   use types.{activation, command-context, document-change, document-id, document-info};
 
@@ -897,6 +977,8 @@ world extension {
   import explorer;
   import views;
   import prompts;
+  import documents;
+  import quick-diff;
 
   /// Called once before any other export. An error fails the extension.
   export activate: func(context: activation) -> result<_, string>;

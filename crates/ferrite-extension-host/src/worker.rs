@@ -64,6 +64,19 @@ pub enum Payload {
   Expand(ExpandingItem),
   /// The user answered a prompt; see `prompts::answer`.
   Answer(PromptAnswer),
+  /// The editor needs the text at an address; see `documents::requested`.
+  Provide(ProvideRequest),
+  /// The editor needs a file's original; see `quick-diff::requested-file`.
+  Original(crate::quick_diff::OriginalRequest),
+  /// Changes to apply to an original; see `quick-diff::to-apply`.
+  Apply(crate::bindings::ferrite::extension::quick_diff::Applied),
+}
+
+/// A request for the text at an address, answered with
+/// `documents::provide`.
+pub struct ProvideRequest {
+  pub id: u64,
+  pub uri: String,
 }
 
 /// Why a worker stopped running its extension.

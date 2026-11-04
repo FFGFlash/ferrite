@@ -87,6 +87,18 @@
   --color-peek-result-background: #202328;
   --color-peek-match: rgb(240 138 75 / 0.3);
 
+  /* Diff tabs: changed lines, the characters that changed in them, and the
+     room left where the other side has lines. */
+  --color-diff-inserted-line: rgb(155 185 85 / 0.12);
+  --color-diff-inserted-text: rgb(155 185 85 / 0.28);
+  --color-diff-removed-line: rgb(255 0 0 / 0.12);
+  --color-diff-removed-text: rgb(255 0 0 / 0.28);
+  --color-diff-filler: rgb(204 204 204 / 0.12);
+  /* Beside lines changed from a file's original (Git's index, say). */
+  --color-editor-gutter-added: #2ea043;
+  --color-editor-gutter-modified: #1b81a8;
+  --color-editor-gutter-removed: #f85149;
+
   --color-widget-background: #25282e;
   --color-widget-border: #363a42;
   --color-input-background: #1b1d21;
@@ -199,6 +211,15 @@
   --color-peek-editor-background: #f7f9fc;
   --color-peek-result-background: #f3f4f6;
   --color-peek-match: rgb(185 80 31 / 0.22);
+
+  --color-diff-inserted-line: rgb(155 185 85 / 0.18);
+  --color-diff-inserted-text: rgb(120 160 40 / 0.3);
+  --color-diff-removed-line: rgb(255 0 0 / 0.1);
+  --color-diff-removed-text: rgb(255 0 0 / 0.22);
+  --color-diff-filler: rgb(34 34 34 / 0.1);
+  --color-editor-gutter-added: #48985d;
+  --color-editor-gutter-modified: #2090d3;
+  --color-editor-gutter-removed: #e51400;
 
   --color-widget-background: #ffffff;
   --color-widget-border: #d3d6dc;

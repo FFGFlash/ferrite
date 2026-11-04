@@ -164,6 +164,14 @@ export type AppEvent =
   | { type: 'documentOpened'; document: DocumentSummary; active: boolean }
   /** A file named at startup that isn't text, to open in a viewer or ask about. */
   | { type: 'openFile'; path: string; active: boolean }
+  /** A document's changes from its original are ready: its editors fetch views again. */
+  | { type: 'quickDiffChanged'; documentId: number }
+  /** An extension asked to apply the changes the active editor's selections touch to the original. */
+  | { type: 'applySelectedRanges' }
+  /** An extension asked to open the document at an address it provides. */
+  | { type: 'openProvided'; uri: string }
+  /** An extension asked to open a tab comparing two documents (paths or provided addresses). */
+  | { type: 'openDiff'; original: string; modified: string; title: string }
   | { type: 'indexStatus'; indexing: boolean; files: number; truncated: boolean }
   | { type: 'extensionsChanged' }
   /** `id` is the extension's id, `extension` its name. */

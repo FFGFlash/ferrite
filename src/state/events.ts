@@ -3,7 +3,15 @@ import { editorsFor, mountedEditors } from '../editor/activeEditor'
 import { fileDrag } from '../components/drag'
 import { subscribeToEvents, type AppEvent } from '../ipc/workspace'
 import { applySettings } from './appearance'
-import { documentsStore, openPath, revealInDocument, setDirty, updateSummary } from './documents'
+import {
+  documentsStore,
+  openPath,
+  openProvided,
+  revealInDocument,
+  setDirty,
+  updateSummary,
+} from './documents'
+import { applySelectedRanges, noteReloaded, openDiff } from './diffs'
 import {
   refreshExtensions,
   refreshStatusItems,
@@ -54,6 +62,7 @@ export function handleEvent(event: AppEvent): void {
     case 'documentSaved':
       updateSummary(event.document)
       refreshEditors(event.document.id)
+      noteReloaded(event.document.id)
       break
     case 'documentChangedOnDisk':
       notify(
@@ -97,6 +106,18 @@ export function handleEvent(event: AppEvent): void {
       break
     case 'openFile':
       void openPath(event.path)
+      break
+    case 'quickDiffChanged':
+      refreshEditors(event.documentId)
+      break
+    case 'applySelectedRanges':
+      void applySelectedRanges()
+      break
+    case 'openProvided':
+      void openProvided(event.uri)
+      break
+    case 'openDiff':
+      openDiff({ original: event.original, modified: event.modified, title: event.title })
       break
     case 'indexStatus':
       setIndexing(event.indexing)

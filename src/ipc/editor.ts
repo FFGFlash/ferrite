@@ -84,6 +84,8 @@ export type EditorOp =
   | { type: 'unfoldRecursively' }
   /** Folds the regions nested `level` deep (1 is outermost), except around the cursors. */
   | { type: 'foldLevel'; level: number }
+  /** Folds exactly these `[start, end)` line ranges (line `start` stays visible), unfolding others. */
+  | { type: 'setFolds'; regions: [number, number][] }
 
 export interface SearchQuery {
   pattern: string
@@ -247,7 +249,51 @@ interface ViewFields {
   language: LanguageStatus | null
   /** Extension decorations on the view's lines. */
   decorations: DecorationView[]
+  /** Changes from the file's original touching the view's lines, for the gutter. */
+  changes: GutterChange[]
 }
+
+/**
+ * Lines changed from a file's original (an extension names it, such as
+ * Git's index): `start..end`, or, for lines removed, the place before `start`.
+ */
+export interface GutterChange {
+  start: number
+  end: number
+  kind: 'added' | 'modified' | 'removed'
+}
+
+/** A change from a file's original, with its original lines, to show inline. */
+export interface Hunk {
+  /** Its place among the changes (from 0), and how many there are. */
+  index: number
+  total: number
+  original: [number, number]
+  modified: [number, number]
+  lines: PeekLines
+  chars: { original: Range; modified: Range }[]
+  /** What applying it to the original is called (such as Stage), if it can be. */
+  applyTitle: string | null
+}
+
+/** The change at `line` of a document, or the next or previous one from it. */
+export const quickDiffHunk = (id: number, line: number, direction: 'at' | 'next' | 'previous') =>
+  call<Hunk | null>('quick_diff_hunk', { id, line, direction })
+/**
+ * Reverts a document's changes from its original that `lines` (`[first, last]`
+ * pairs) touch, or else those the selections of its view `view` touch.
+ */
+export const quickDiffRevert = (id: number, view: number, lines: [number, number][] | null) =>
+  call<boolean>('quick_diff_revert', { id, view, lines })
+/** Applies (stages) a document's changes, chosen as for `quickDiffRevert`, to its original. */
+export const quickDiffApply = (id: number, view: number, lines: [number, number][] | null) =>
+  call<boolean>('quick_diff_apply', { id, view, lines })
+/** In a diff tab: reverts the modified document's changes the selections of its view touch. */
+export const diffRevert = (original: number, modified: number, view: number) =>
+  call<boolean>('diff_revert', { original, modified, view, lines: null })
+/** In a diff tab: applies those changes to the original, which an extension provides. */
+export const diffApply = (original: number, modified: number, view: number) =>
+  call<boolean>('diff_apply', { original, modified, view, lines: null })
 
 /** A range decorated by an extension. */
 export interface DecorationView {
@@ -331,8 +377,35 @@ export const closeDocument = (id: number) => call<boolean>('document_close', { i
  * Opens a file as text. One that looks binary fails with `binary`, unless
  * `binary` is set (the user chose to open it anyway).
  */
-export const openDocument = (path: string, binary = false) =>
-  call<DocumentSummary>('document_open', { path, binary })
+export const openDocument = (path: string, binary = false, hidden = false) =>
+  call<DocumentSummary>('document_open', { path, binary, hidden })
+/**
+ * Opens the read-only document an extension provides at `uri` (such as
+ * `git:HEAD:src/main.rs`), asking the extension for its text.
+ *
+ * With `hidden`, a document not open yet opens only for a diff tab, and
+ * isn't listed (`listDocuments`) until opened without it. The same holds
+ * for `openDocument`.
+ */
+export const openProvidedDocument = (uri: string, hidden = false) =>
+  call<DocumentSummary>('document_open_provided', { uri, hidden })
+/** Stops listing a document whose last tab closed while a diff tab still shows it. */
+export const hideDocument = (id: number) => call<void>('document_hide', { id })
+
+/** Lines that changed: `original` lines `[start, end)` became `modified` ones. */
+export interface LineChange {
+  original: [number, number]
+  modified: [number, number]
+  /** The characters that changed within them, when they were compared. */
+  chars: { original: Range; modified: Range }[]
+}
+
+/** The changes from one open document to another. */
+export const computeDiff = (original: number, modified: number, ignoreTrimWhitespace: boolean) =>
+  call<LineChange[]>('diff_compute', { original, modified, ignoreTrimWhitespace })
+/** Lines `start..end` of an open document with their highlights. */
+export const documentLines = (id: number, start: number, end: number) =>
+  call<PeekLines>('editor_document_lines', { id, start, end })
 /** A language a document can be set to. */
 export interface LanguageChoice {
   id: string

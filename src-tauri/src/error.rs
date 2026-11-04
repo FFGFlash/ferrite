@@ -31,6 +31,7 @@ impl From<CoreError> for CommandError {
       CoreError::UnknownDocument(_) => "unknownDocument",
       CoreError::Edit(_) => "invalidEdit",
       CoreError::Search(_) => "invalidSearch",
+      CoreError::ReadOnly(_) => "readOnly",
     };
     tracing::warn!(%error, code, "editor command failed");
     Self::new(code, error.to_string())

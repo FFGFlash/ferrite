@@ -37,7 +37,12 @@ use crate::{settings, ui_state};
 
 #[tauri::command]
 pub fn document_list(state: State<'_, EditorState>) -> Vec<DocumentSummary> {
-  state.lock().documents().map(DocumentSummary::of).collect()
+  state
+    .lock()
+    .documents()
+    .filter(|document| !state.is_hidden(document.id()))
+    .map(DocumentSummary::of)
+    .collect()
 }
 
 /// Creates an untitled document, optionally containing `text` (e.g. the
@@ -67,17 +72,45 @@ pub fn document_new(
 
 /// Opens a file as a text document. A file that looks binary fails with
 /// `binary`, unless `binary` is set (the user chose to open it anyway).
+/// With `hidden`, a file not open yet opens for a diff tab only (see
+/// [`EditorState::is_hidden`]); without, a hidden one gets listed.
 #[tauri::command]
 pub async fn document_open(
   app: AppHandle,
   path: String,
   binary: Option<bool>,
+  hidden: Option<bool>,
 ) -> Result<DocumentSummary, CommandError> {
   let options = DecodeOptions {
     encoding: None,
     binary: binary.unwrap_or(false),
   };
-  open_path(&app, Path::new(&path), options).await
+  let hidden = hidden.unwrap_or(false);
+  let summary = open_path(&app, Path::new(&path), options, hidden).await?;
+  if !hidden {
+    show_hidden(&app, DocumentId::from_raw(summary.id));
+  }
+  Ok(summary)
+}
+
+/// Lists a hidden document: it got a tab of its own.
+pub(super) fn show_hidden(app: &AppHandle, id: DocumentId) {
+  let state = app.state::<EditorState>();
+  if state.is_hidden(id) {
+    state.set_hidden(id, false);
+    ui_state::record_open_files(app);
+  }
+}
+
+/// Stops listing a document whose last tab closed while a diff tab still
+/// shows it.
+#[tauri::command]
+pub fn document_hide(app: AppHandle, id: u64) -> Result<(), CommandError> {
+  let id = DocumentId::from_raw(id);
+  app.state::<EditorState>().lock().document(id)?;
+  app.state::<EditorState>().set_hidden(id, true);
+  ui_state::record_open_files(&app);
+  Ok(())
 }
 
 /// Shows an open dialog and returns the chosen file, which the workbench
@@ -261,13 +294,26 @@ pub async fn document_close(window: WebviewWindow, id: u64) -> Result<bool, Comm
     }
   }
   let state = window.state::<EditorState>();
-  let closed = state.lock().close(id)?;
-  fold_memory::remember(window.app_handle(), &closed);
+  let mut closed = state.lock().close(id)?;
+  // The folds of its first tab are the ones to remember, not a diff's.
+  if let Some(first) = closed
+    .views()
+    .into_iter()
+    .filter(|view| !super::is_diff_view(*view))
+    .min()
+  {
+    closed.use_view(first);
+  }
+  if !state.is_hidden(id) {
+    fold_memory::remember(window.app_handle(), &closed);
+  }
+  state.set_hidden(id, false);
   fold_memory::forget(window.app_handle(), id);
   window.state::<BackupState>().forget(id);
   state.counts.forget(id);
   state.syntax.forget(id);
   state.regions.forget(id);
+  state.quick.forget(id);
   window.state::<LspState>().close(&closed);
   window.state::<ExtensionsState>().closed(id);
   tracing::info!(document = %id, "closed document");
@@ -322,7 +368,8 @@ fn build_view(
   view.foldable = folding::foldable_lines(app, document, &visible);
   let lines = view.start_line..view.end_line;
   (view.diagnostics, view.language) = lsp.view(app, document, lines.clone());
-  view.decorations = extensions.add_to_view(document, lines, &mut view.diagnostics);
+  view.decorations = extensions.add_to_view(document, lines.clone(), &mut view.diagnostics);
+  view.changes = super::quick_diff::view_changes(app, document, lines);
   view
 }
 
@@ -588,6 +635,7 @@ async fn open_path(
   app: &AppHandle,
   path: &Path,
   options: DecodeOptions,
+  hidden: bool,
 ) -> Result<DocumentSummary, CommandError> {
   let path = paths::normalize(path);
   let state = app.state::<EditorState>();
@@ -610,9 +658,11 @@ async fn open_path(
   let bytes = loaded.text.len();
   let encoding = loaded.encoding;
   let id = editor.open(path.clone(), loaded);
-  tracing::info!(document = %id, path = %path.display(), bytes, ?encoding, "opened file");
+  state.set_hidden(id, hidden);
+  tracing::info!(document = %id, path = %path.display(), bytes, ?encoding, hidden, "opened file");
   let document = editor.document(id)?;
   fold_memory::recall(app, document);
+  super::quick_diff::track(app, id, path.clone());
   app.state::<ExtensionsState>().sync(document);
   let summary = DocumentSummary::of(document);
   drop(editor);
@@ -722,6 +772,7 @@ async fn save_in(
   app.state::<BackupState>().touch();
   if !same_file {
     ui_state::record_open_files(app);
+    super::quick_diff::track(app, id, saved_path.clone());
   }
   if settings::is_settings_file(app, &saved_path) {
     // The file is saved either way; report invalid settings to the user.

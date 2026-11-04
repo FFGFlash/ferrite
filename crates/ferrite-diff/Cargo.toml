@@ -1,0 +1,13 @@
+[package]
+name = "ferrite-diff"
+description = "Text diffs for Ferrite: changed lines, and the changed characters within them."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+imara-diff = { workspace = true }
+
+[lints]
+workspace = true

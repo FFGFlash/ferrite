@@ -91,10 +91,11 @@ fn write_atomically(path: &std::path::Path, state: &UiState) -> std::io::Result<
 /// Records which files are open, after documents are opened, closed, or saved
 /// to a new path.
 pub fn record_open_files(app: &AppHandle) {
-  let files: Vec<PathBuf> = app
-    .state::<EditorState>()
+  let state = app.state::<EditorState>();
+  let files: Vec<PathBuf> = state
     .lock()
     .documents()
+    .filter(|document| !state.is_hidden(document.id()))
     .filter_map(|document| document.path().map(PathBuf::from))
     .collect();
   app

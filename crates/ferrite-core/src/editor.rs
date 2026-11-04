@@ -52,6 +52,24 @@ impl Editor {
     id
   }
 
+  /// Opens a read-only document an extension provides at `uri`. Callers
+  /// check [`Self::find_by_uri`] first.
+  pub fn open_provided(&mut self, uri: String, text: &str) -> DocumentId {
+    let id = self.allocate_id();
+    let mut document = Document::new(id, text, None, 0, &self.config);
+    document.provided = Some(uri);
+    self.documents.insert(id, document);
+    id
+  }
+
+  pub fn find_by_uri(&self, uri: &str) -> Option<DocumentId> {
+    self
+      .documents
+      .values()
+      .find(|document| document.provided_uri() == Some(uri))
+      .map(Document::id)
+  }
+
   pub fn find_by_path(&self, path: &Path) -> Option<DocumentId> {
     self
       .documents
@@ -137,6 +155,39 @@ impl Editor {
 #[cfg(test)]
 mod tests {
   use super::*;
+  use crate::ops::EditorOp;
+
+  #[test]
+  fn provided_documents_are_read_only_and_never_dirty() {
+    let mut editor = Editor::default();
+    let id = editor.open_provided("git:HEAD:src/main.rs".into(), "fn main() {}\n");
+    assert_eq!(editor.find_by_uri("git:HEAD:src/main.rs"), Some(id));
+    let document = editor.document_mut(id).expect("open");
+    assert_eq!(document.title(), "main.rs");
+    assert!(document.is_read_only());
+    assert_eq!(document.path(), None);
+
+    // Typing changes nothing; moving and selecting still work.
+    assert!(
+      !document
+        .apply(EditorOp::Insert("x".into()))
+        .expect("applies")
+    );
+    assert!(!document.apply(EditorOp::SelectAll).expect("applies"));
+    assert_eq!(document.selections().primary().range(), 0..13);
+    assert_eq!(document.buffer().contents(), "fn main() {}\n");
+    assert!(document.apply_edits(Vec::new()).is_err());
+
+    // Its extension can change it, and it stays clean.
+    assert!(
+      document
+        .set_provided_text("fn main() { run(); }\n")
+        .expect("sets")
+    );
+    assert!(!document.is_dirty());
+    assert!(!document.apply(EditorOp::Undo).expect("applies"));
+    assert_eq!(document.buffer().contents(), "fn main() { run(); }\n");
+  }
 
   #[test]
   fn ids_and_untitled_numbers_are_never_reused() {

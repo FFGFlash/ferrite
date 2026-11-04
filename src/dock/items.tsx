@@ -3,7 +3,20 @@
  * exited state), its content, and the buttons shown beside the tabs while
  * it's active.
  */
-import { ChevronDown, FileText, Plus, SquareTerminal, Trash2 } from 'lucide-react'
+import {
+  ArrowDown,
+  ArrowUp,
+  ChevronDown,
+  Columns2,
+  FileText,
+  FoldVertical,
+  Pilcrow,
+  Plus,
+  SquarePlus,
+  SquareTerminal,
+  Trash2,
+  Undo2,
+} from 'lucide-react'
 import { useEffect, useRef, type ReactNode } from 'react'
 import { findPage, type PageDescriptor } from '../app/pages'
 import { useViews, type ViewDescriptor } from '../app/views'
@@ -13,6 +26,7 @@ import { FileIcon } from '../components/FileIcon'
 import { Icon, isActionIcon, type IconName } from '../components/Icon'
 import { entryIcon } from '../components/fileIcons'
 import { Breadcrumbs } from '../editor/Breadcrumbs'
+import { DiffView } from '../editor/DiffView'
 import { EditorView } from '../editor/EditorView'
 import type { DocumentSummary } from '../ipc/editor'
 import {
@@ -23,8 +37,20 @@ import {
 } from '../ipc/extensions'
 import { PreviewPane } from '../panels/PreviewPane'
 import { ViewerPane } from '../panels/ViewerPane'
-import { documentsStore } from '../state/documents'
-import { extensionsStore } from '../state/extensions'
+import {
+  applyDiffRanges,
+  diffControls,
+  diffsStore,
+  isAddress,
+  loadDiff,
+  revertDiffRanges,
+  parseDiffItem,
+  type DiffSpec,
+  type DiffState,
+} from '../state/diffs'
+import { documentsStore, openPath, openProvided } from '../state/documents'
+import { layoutStore, updateLayout } from '../state/layout'
+import { extensionsStore, usableExtensions } from '../state/extensions'
 import { iconThemeStore } from '../state/iconTheme'
 import { reportError } from '../state/notifications'
 import { previewsStore } from '../state/previews'
@@ -46,6 +72,8 @@ export type ResolvedItem =
   | { kind: 'page'; item: ItemId; page: PageDescriptor }
   /** A file in an extension's viewer, or (`viewer: null`) a binary file to open as text. */
   | { kind: 'viewer'; item: ItemId; viewer: string | null; path: string }
+  /** Two documents compared; `state` is undefined until they start opening. */
+  | { kind: 'diff'; item: ItemId; spec: DiffSpec; state: DiffState | undefined }
 
 const fileName = (path: string) => path.split(/[/\\]/).pop() || path
 
@@ -56,6 +84,7 @@ export function useResolver(): (item: ItemId) => ResolvedItem | null {
   const previews = useStore(previewsStore)
   const extensions = useStore(extensionsStore)
   const views = useViews()
+  const diffs = useStore(diffsStore)
   return (item: ItemId) => {
     const id = itemId(item)
     switch (itemKind(item)) {
@@ -82,6 +111,10 @@ export function useResolver(): (item: ItemId) => ResolvedItem | null {
       }
       case 'viewer':
         return { kind: 'viewer', item, ...parseViewerItem(item) }
+      case 'diff': {
+        const spec = parseDiffItem(item)
+        return spec ? { kind: 'diff', item, spec, state: diffs[item] } : null
+      }
       default:
         return null
     }
@@ -102,13 +135,37 @@ export function itemTitle(resolved: ResolvedItem): string {
       return resolved.page.title
     case 'viewer':
       return fileName(resolved.path)
+    case 'diff':
+      return resolved.spec.title
   }
+}
+
+/** The file a tab shows, for its explorer marks: a document's, a viewer's, or a diff's modified file. */
+export function itemPath(resolved: ResolvedItem): string | null {
+  switch (resolved.kind) {
+    case 'document':
+      return resolved.document.path
+    case 'viewer':
+      return resolved.path
+    case 'diff':
+      return isAddress(resolved.spec.modified) ? null : resolved.spec.modified
+    default:
+      return null
+  }
+}
+
+/** Whether a tab has unsaved changes. */
+export function itemDirty(resolved: ResolvedItem): boolean {
+  return (
+    (resolved.kind === 'document' && resolved.document.dirty) ||
+    (resolved.kind === 'diff' && resolved.state?.status === 'ready' && resolved.state.dirty)
+  )
 }
 
 /** The tab's accessible name: the title, and whether it's unsaved or exited. */
 export function itemLabel(resolved: ResolvedItem): string {
   const title = itemTitle(resolved)
-  if (resolved.kind === 'document' && resolved.document.dirty) {
+  if (itemDirty(resolved)) {
     return `${title}, unsaved`
   }
   if (resolved.kind === 'terminal' && resolved.terminal.exited) {
@@ -134,6 +191,8 @@ export function itemTooltip(resolved: ResolvedItem): string {
       return resolved.page.title
     case 'viewer':
       return resolved.path
+    case 'diff':
+      return `${resolved.spec.original} ↔ ${resolved.spec.modified}`
   }
 }
 
@@ -186,8 +245,20 @@ export function ItemIcon({ resolved, className = 'dock-tab__icon', size = 16 }: 
           icon={entryIcon(fileName(resolved.path), null, iconTheme, light)}
         />
       )
+    case 'diff':
+      return (
+        <FileIcon
+          className={className}
+          size={size}
+          kind="file"
+          icon={entryIcon(sideName(resolved.spec.modified), null, iconTheme, light)}
+        />
+      )
   }
 }
+
+/** The file name at the end of a diff side's path or address. */
+const sideName = (side: string) => side.split(/[/\\:]/).pop() || side
 
 /** What the active tab shows. */
 export function ItemContent({ resolved }: { resolved: ResolvedItem }): ReactNode {
@@ -236,6 +307,12 @@ export function ItemContent({ resolved }: { resolved: ResolvedItem }): ReactNode
         </div>
       )
     }
+    case 'diff':
+      return (
+        <ErrorBoundary name={`The diff ${resolved.spec.title}`} resetKey={resolved.item}>
+          <DiffPane key={resolved.item} item={resolved.item} state={resolved.state} />
+        </ErrorBoundary>
+      )
     case 'viewer':
       return (
         <div className="dock-view">
@@ -313,6 +390,9 @@ export function ItemActions({ resolved }: { resolved: ResolvedItem }): ReactNode
         )}
       </>
     )
+  }
+  if (resolved.kind === 'diff') {
+    return <DiffActions resolved={resolved} />
   }
   if (resolved.kind === 'terminal') {
     const keys = primaryKeybinding(getCommand('terminal.new'))
@@ -420,6 +500,119 @@ function ExtensionTabActions({
       </button>
     )
   })
+}
+
+/** A diff tab: opens its documents, then compares them. */
+function DiffPane({ item, state }: { item: ItemId; state: DiffState | undefined }) {
+  useEffect(() => {
+    void loadDiff(item)
+  }, [item])
+  if (state?.status === 'ready') {
+    return <DiffView item={item} original={state.original} modified={state.modified} />
+  }
+  return (
+    <div className="dock-view diff-view-status" role="status">
+      {state?.status === 'failed' ? `Couldn't open the diff: ${state.message}` : 'Opening…'}
+    </div>
+  )
+}
+
+/** A diff tab's buttons: moving between changes, how changes show, and the file. */
+function DiffActions({ resolved }: { resolved: Extract<ResolvedItem, { kind: 'diff' }> }) {
+  const { diff } = useStore(layoutStore)
+  const toggle = (key: keyof typeof diff) => updateLayout({ diff: { ...diff, [key]: !diff[key] } })
+  const button = (
+    label: string,
+    command: string | null,
+    icon: ReactNode,
+    onClick: () => void,
+    pressed?: boolean,
+  ) => {
+    const keys = command ? primaryKeybinding(getCommand(command)) : null
+    return (
+      <button
+        type="button"
+        className="dock-action"
+        title={keys ? `${label} (${keys})` : label}
+        aria-label={label}
+        aria-pressed={pressed}
+        onClick={onClick}
+      >
+        {icon}
+      </button>
+    )
+  }
+  const { original, modified } = resolved.spec
+  const extensions = useStore(extensionsStore)
+  // What the extension providing the original calls applying changes to it.
+  const scheme = isAddress(original) ? original.slice(0, original.indexOf(':')) : null
+  const applyTitle =
+    scheme === null
+      ? null
+      : (usableExtensions(extensions)
+          .map(extension => extension.contributions)
+          .find(contributions =>
+            contributions.textProviders.some(provider => provider.scheme === scheme),
+          )?.quickDiff?.applyTitle ?? null)
+  const editable = !isAddress(modified)
+  return (
+    <>
+      {editable &&
+        applyTitle &&
+        button(
+          `${applyTitle} Selected Ranges`,
+          null,
+          <SquarePlus size={16} strokeWidth={1.5} aria-hidden="true" />,
+          () => void applyDiffRanges(resolved.item),
+        )}
+      {editable &&
+        button(
+          'Revert Selected Ranges',
+          'diff.revertSelectedRanges',
+          <Undo2 size={16} strokeWidth={1.5} aria-hidden="true" />,
+          () => void revertDiffRanges(resolved.item),
+        )}
+      {button(
+        'Previous Change',
+        'diff.previousChange',
+        <ArrowUp size={16} strokeWidth={1.5} aria-hidden="true" />,
+        () => diffControls(resolved.item)?.goToChange(true),
+      )}
+      {button(
+        'Next Change',
+        'diff.nextChange',
+        <ArrowDown size={16} strokeWidth={1.5} aria-hidden="true" />,
+        () => diffControls(resolved.item)?.goToChange(false),
+      )}
+      {button(
+        'Side by Side',
+        'diff.toggleInline',
+        <Columns2 size={16} strokeWidth={1.5} aria-hidden="true" />,
+        () => toggle('inline'),
+        !diff.inline,
+      )}
+      {button(
+        'Show Leading and Trailing Whitespace Differences',
+        'diff.toggleWhitespace',
+        <Pilcrow size={16} strokeWidth={1.5} aria-hidden="true" />,
+        () => toggle('ignoreTrimWhitespace'),
+        !diff.ignoreTrimWhitespace,
+      )}
+      {button(
+        'Collapse Unchanged Lines',
+        'diff.toggleUnchanged',
+        <FoldVertical size={16} strokeWidth={1.5} aria-hidden="true" />,
+        () => toggle('hideUnchanged'),
+        diff.hideUnchanged,
+      )}
+      {button(
+        'Open File',
+        null,
+        <FileText size={16} strokeWidth={1.5} aria-hidden="true" />,
+        () => void (isAddress(modified) ? openProvided(modified) : openPath(modified)),
+      )}
+    </>
+  )
 }
 
 /** Shows a terminal's emulator, moving its element here. */

@@ -15,6 +15,7 @@ import { Sash } from '../components/Sash'
 import { WelcomePage } from '../editor/WelcomePage'
 import type { AppInfo } from '../ipc'
 import { extensionsStore } from '../state/extensions'
+import { rowMark, useFileMarks } from '../state/fileMarks'
 import { createStore, useStore } from '../state/store'
 import {
   activateTab,
@@ -32,7 +33,9 @@ import {
   ItemActions,
   ItemContent,
   ItemIcon,
+  itemDirty,
   itemLabel,
+  itemPath,
   itemTitle,
   itemTooltip,
   keepsLoaded,
@@ -551,6 +554,12 @@ function Tab({ resolved, group, active, panelId }: TabProps) {
     leave: clearHint,
   })
 
+  // Extensions' marks on its file, as in the explorer (Git's status, say).
+  const marks = useFileMarks()
+  const path = itemPath(resolved)
+  const mark = path ? rowMark(marks.index, path, false, marks.color) : null
+  const tooltip = itemTooltip(resolved)
+
   return (
     <div
       ref={element => {
@@ -564,10 +573,11 @@ function Tab({ resolved, group, active, panelId }: TabProps) {
       aria-controls={active ? panelId : undefined}
       aria-label={itemLabel(resolved)}
       tabIndex={active ? 0 : -1}
-      title={itemTooltip(resolved)}
+      title={mark?.tooltip ? `${tooltip}\n${mark.tooltip}` : tooltip}
       data-kind={resolved.kind}
+      data-faded={mark?.faded || undefined}
       data-item={item}
-      data-dirty={(resolved.kind === 'document' && resolved.document.dirty) || undefined}
+      data-dirty={itemDirty(resolved) || undefined}
       data-exited={(resolved.kind === 'terminal' && resolved.terminal.exited) || undefined}
       data-drop={dropSide ?? undefined}
       onPointerDown={event => startItemDrag(event, item, title)}
@@ -584,7 +594,18 @@ function Tab({ resolved, group, active, panelId }: TabProps) {
       onKeyDown={onKeyDown}
     >
       <ItemIcon resolved={resolved} />
-      <span className="dock-tab__title">{title}</span>
+      <span className="dock-tab__title" style={mark?.color ? { color: mark.color } : undefined}>
+        {title}
+      </span>
+      {mark?.badge && (
+        <span
+          className="dock-tab__badge"
+          style={mark.color ? { color: mark.color } : undefined}
+          aria-hidden="true"
+        >
+          {mark.badge}
+        </span>
+      )}
       {/* A pointer shortcut: a control inside a tab can't be reached by screen
           readers, so keyboards close tabs with Delete or the tab's menu. */}
       <span

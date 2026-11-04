@@ -4,20 +4,24 @@
 
 mod commands;
 mod counts;
+mod diff;
 pub(crate) mod fold_memory;
 mod folding;
 mod minimap;
 mod peek;
 pub(crate) mod protocol;
+mod provided;
+pub(crate) mod quick_diff;
 pub(crate) mod syntax;
 
+use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use std::time::Instant;
 
-use ferrite_core::Editor;
+use ferrite_core::{DocumentId, Editor, ViewId};
 use ferrite_tasks::Priority;
 use ferrite_workspace::{Abandoned, FileError, load_text_file};
 use tauri::{AppHandle, Manager, WebviewWindow};
@@ -28,7 +32,18 @@ use crate::ui_state::UiStateStore;
 use protocol::DocumentSummary;
 
 pub use commands::*;
+pub use diff::*;
 pub use peek::*;
+pub use provided::*;
+pub use quick_diff::*;
+
+/// Views numbered from here are diff tabs' (`DiffView.tsx`): their folds
+/// hide unchanged lines, so they aren't remembered.
+pub const DIFF_VIEWS: u32 = 1 << 30;
+
+pub fn is_diff_view(view: ViewId) -> bool {
+  view.get() >= DIFF_VIEWS
+}
 
 /// The authoritative editor state. Commands hold the lock only briefly; file
 /// I/O and dialogs run without it.
@@ -46,6 +61,11 @@ pub struct EditorState {
   /// The text last copied as whole lines (copy with nothing selected), so
   /// pasting it can insert whole lines too.
   copied_lines: Mutex<Option<String>>,
+  /// Documents open only for diff tabs, with no tab of their own: the
+  /// workbench doesn't list them, and they aren't reopened next time.
+  hidden: Mutex<HashSet<DocumentId>>,
+  /// Open files' originals and changes from them.
+  pub(crate) quick: quick_diff::QuickDiffs,
   /// Set once the user has confirmed closing the window with unsaved changes.
   close_confirmed: AtomicBool,
   close_prompt_open: AtomicBool,
@@ -70,6 +90,24 @@ impl EditorState {
       .copied_lines
       .lock()
       .unwrap_or_else(PoisonError::into_inner) = text;
+  }
+
+  pub(crate) fn is_hidden(&self, id: DocumentId) -> bool {
+    self
+      .hidden
+      .lock()
+      .unwrap_or_else(PoisonError::into_inner)
+      .contains(&id)
+  }
+
+  /// Hides a document (`true`) or lists it again.
+  pub(crate) fn set_hidden(&self, id: DocumentId, hidden: bool) {
+    let mut set = self.hidden.lock().unwrap_or_else(PoisonError::into_inner);
+    if hidden {
+      set.insert(id);
+    } else {
+      set.remove(&id);
+    }
   }
 
   fn has_unsaved_changes(&self) -> bool {

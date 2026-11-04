@@ -45,8 +45,8 @@ pub mod bindings {
 }
 
 pub use bindings::ferrite::extension::{
-  explorer, files, host, processes, prompts, storage, types, viewers, views, webviews, workbench,
-  workspace,
+  documents, explorer, files, host, processes, prompts, quick_diff, storage, types, viewers, views,
+  webviews, workbench, workspace,
 };
 pub use bindings::{Guest, export_extension};
 

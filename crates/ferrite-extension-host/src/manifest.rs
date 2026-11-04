@@ -170,6 +170,9 @@ struct RawManifest {
   colors: BTreeMap<String, contributions::RawColor>,
   #[serde(default)]
   view_containers: Vec<contributions::RawViewContainer>,
+  #[serde(default)]
+  text_providers: Vec<contributions::RawTextProvider>,
+  quick_diff: Option<contributions::RawQuickDiff>,
   on_folder_changed: Option<String>,
 }
 
@@ -478,6 +481,8 @@ pub fn parse(
       programs: raw.programs,
       colors: raw.colors,
       view_containers: raw.view_containers,
+      text_providers: raw.text_providers,
+      quick_diff: raw.quick_diff,
     },
     &raw.id,
     &commands,
@@ -797,6 +802,42 @@ when = "!tree"
     assert!(error_of(&explorer).contains("only apply to view menus"));
     let empty = VALID.to_owned() + "\n[[view_containers]]\nid = \"empty\"\ntitle = \"Empty\"\n";
     assert!(error_of(&empty).contains("has no views"));
+  }
+
+  #[test]
+  fn reads_and_checks_text_providers() {
+    let provider = "\n[[text_providers]]\nscheme = \"git\"\ncommand = \"example.tidy.trim\"\n";
+    let manifest = parse_text(&format!("{VALID}{provider}")).expect("valid");
+    let git = manifest
+      .contributions
+      .text_provider("git")
+      .expect("declared");
+    assert_eq!(git.command, "example.tidy.trim");
+    assert!(manifest.contributions.needs_code());
+
+    let bad =
+      |from: &str, to: &str| error_of(&format!("{VALID}{}", provider.replacen(from, to, 1)));
+    assert!(bad("\"git\"", "\"file\"").contains("reserved"));
+    assert!(bad("\"git\"", "\"Git\"").contains("lowercase"));
+    assert!(bad("\"git\"", "\"g\"").contains("2 to 32"));
+    assert!(bad("example.tidy.trim", "example.tidy.nope").contains("not one of"));
+    let twice = format!("{VALID}{provider}{provider}");
+    assert!(error_of(&twice).contains("git"));
+  }
+
+  #[test]
+  fn reads_and_checks_quick_diff() {
+    let table = "\n[quick_diff]\noriginal = \"example.tidy.trim\"\napply = \"example.tidy.trim\"\napply_title = \"Stage\"\n";
+    let manifest = parse_text(&format!("{VALID}{table}")).expect("valid");
+    let quick_diff = manifest.contributions.quick_diff.expect("declared");
+    assert_eq!(quick_diff.apply_title.as_deref(), Some("Stage"));
+    let without_title = table.replace("apply_title = \"Stage\"\n", "");
+    assert!(error_of(&format!("{VALID}{without_title}")).contains("go together"));
+    let unknown = table.replace(
+      "original = \"example.tidy.trim\"",
+      "original = \"example.tidy.nope\"",
+    );
+    assert!(error_of(&format!("{VALID}{unknown}")).contains("not one of"));
   }
 
   #[test]

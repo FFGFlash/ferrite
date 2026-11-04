@@ -722,6 +722,8 @@ describe('ExplorerPanel', () => {
           programs: [],
           colors: [],
           viewContainers: [],
+          textProviders: [],
+          quickDiff: null,
         },
       } as never,
     ])

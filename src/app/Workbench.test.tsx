@@ -8,6 +8,7 @@ import { dockStore, moveItem, restoreDock } from '../dock/dock'
 import { findGroup, groupOf } from '../dock/model'
 import type { AppInfo } from '../ipc'
 import { documentsStore } from '../state/documents'
+import { fileMarksStore } from '../state/fileMarks'
 import { DEFAULT_LAYOUT, layoutStore } from '../state/layout'
 import { dragFilesTo, dragTo, pressToDrag } from '../test/drag'
 import { Workbench } from './Workbench'
@@ -297,6 +298,34 @@ describe('Workbench', () => {
     const group = groupHolding('document:7')!
     expect(group.items).toEqual(['document:7'])
     expect(group.id).not.toBe('main')
+  })
+
+  it("shows extensions' marks on a document's tab, as in the explorer", () => {
+    render(<Workbench appInfo={null} />)
+    act(() => {
+      fileMarksStore.set([
+        {
+          extension: 'ferrite.git',
+          marks: [
+            {
+              path: '/w/main.rs',
+              badge: 'M',
+              color: null,
+              tooltip: 'Modified',
+              faded: false,
+              inherit: false,
+              propagate: true,
+              priority: 1,
+            },
+          ],
+        },
+      ])
+      documentsStore.set({ documents: [doc(1, '/w/main.rs')], activeId: 1 })
+    })
+    const tab = screen.getByRole('tab', { name: 'main.rs' })
+    expect(within(tab).getByText('M')).toHaveClass('dock-tab__badge')
+    expect(tab).toHaveAttribute('title', '/w/main.rs\nModified')
+    act(() => fileMarksStore.set([]))
   })
 
   it('moves between tabs with the arrow keys and closes them with Delete', async () => {

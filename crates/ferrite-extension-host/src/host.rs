@@ -39,8 +39,8 @@ use crate::storage::{Scope, Storage};
 use crate::usage::{ResourceUsage, Usage};
 use crate::webview::{self, Resource, WebviewInfo, WebviewRecord, WebviewTheme};
 use crate::worker::{
-  self, Budgets, Event, Failure, MAX_PENDING_CHANGE_BYTES, MAX_PENDING_PATHS, Payload, Queue,
-  Setup, Worker,
+  self, Budgets, Event, Failure, MAX_PENDING_CHANGE_BYTES, MAX_PENDING_PATHS, Payload,
+  ProvideRequest, Queue, Setup, Worker,
 };
 use crate::{
   CommandInfo, ConfiguredSetting, Embedder, ExtensionConfiguration, ExtensionDecoration,
@@ -236,6 +236,10 @@ struct State {
   marks: BTreeMap<String, Arc<Vec<FileMark>>>,
   /// The prompt showing, if any.
   prompt: Option<PendingPrompt>,
+  /// Answers to requests for provided text, by request id, until the
+  /// request reads them.
+  provided: HashMap<u64, Option<String>>,
+  next_request: u64,
   next_prompt: u64,
   watches: Vec<Watch>,
   next_watch: u64,
@@ -666,6 +670,20 @@ impl Shared {
       kind,
     }));
     id
+  }
+
+  /// Whether a loaded extension provides addresses with `scheme`.
+  pub fn provides(&self, scheme: &str) -> bool {
+    self
+      .lock()
+      .extensions
+      .iter()
+      .any(|entry| entry.manifest.contributions.text_provider(scheme).is_some())
+  }
+
+  /// Records the answer to request `id` for provided text.
+  pub fn provided(&self, id: u64, text: Option<String>) {
+    self.lock().provided.insert(id, text);
   }
 
   /// Runs a prompt's command with the user's reply.
@@ -1201,6 +1219,8 @@ impl ExtensionHost {
         marks: BTreeMap::new(),
         prompt: None,
         next_prompt: 0,
+        provided: HashMap::new(),
+        next_request: 0,
         watches: Vec::new(),
         next_watch: 0,
         next_generation: 0,
@@ -2259,6 +2279,117 @@ impl ExtensionHost {
         argument,
       }),
     )
+  }
+
+  /// The text at a provided address (`None` when there's nothing there),
+  /// from the extension declaring its scheme. Blocks until the provider's
+  /// command finishes, so call it off the UI thread.
+  pub fn provide_text(&self, uri: &str) -> Result<Option<String>, String> {
+    let scheme = crate::documents::scheme_of(uri)
+      .ok_or_else(|| format!("{uri} isn't an address an extension provides."))?;
+    let (command, id) = {
+      let mut state = self.shared.lock();
+      let command = state
+        .extensions
+        .iter()
+        .find_map(|entry| entry.manifest.contributions.text_provider(scheme))
+        .map(|provider| provider.command.clone())
+        .ok_or_else(|| format!("No extension provides {scheme}: addresses."))?;
+      state.next_request += 1;
+      (command, state.next_request)
+    };
+    let request = ProvideRequest {
+      id,
+      uri: uri.to_owned(),
+    };
+    let result = self
+      .run(&command, None, None, Payload::Provide(request))
+      .and_then(CommandTicket::wait);
+    let answer = self.shared.lock().provided.remove(&id);
+    result?;
+    answer.ok_or_else(|| format!("The extension provided nothing for {uri}."))
+  }
+
+  /// The original of the file at `path` (an absolute path), from the first
+  /// extension with `[quick_diff]` that names one: an address it provides.
+  /// Blocks while the extensions answer, so call it off the UI thread.
+  pub fn original_of(&self, path: &str) -> Option<String> {
+    let commands: Vec<String> = self
+      .shared
+      .lock()
+      .extensions
+      .iter()
+      .filter_map(|entry| entry.manifest.contributions.quick_diff.as_ref())
+      .map(|quick_diff| quick_diff.original.clone())
+      .collect();
+    commands.into_iter().find_map(|command| {
+      let id = {
+        let mut state = self.shared.lock();
+        state.next_request += 1;
+        state.next_request
+      };
+      let request = crate::quick_diff::OriginalRequest {
+        id,
+        path: path.to_owned(),
+      };
+      let result = self
+        .run(&command, None, None, Payload::Original(request))
+        .and_then(CommandTicket::wait);
+      let answer = self.shared.lock().provided.remove(&id);
+      if let Err(message) = result {
+        tracing::debug!(%command, %message, "asking for an original failed");
+      }
+      answer.flatten()
+    })
+  }
+
+  /// What applying changes to the original at `uri` is called (such as
+  /// "Stage"), if its extension can.
+  pub fn apply_title(&self, uri: &str) -> Option<String> {
+    let scheme = crate::documents::scheme_of(uri)?;
+    self
+      .shared
+      .lock()
+      .extensions
+      .iter()
+      .find(|entry| entry.manifest.contributions.text_provider(scheme).is_some())?
+      .manifest
+      .contributions
+      .quick_diff
+      .as_ref()?
+      .apply_title
+      .clone()
+  }
+
+  /// Makes the original at `uri` `text`, by the `apply` command of the
+  /// extension providing it. Blocks until the command finishes.
+  pub fn apply_to_original(&self, uri: &str, text: String) -> Result<(), String> {
+    crate::quick_diff::check_applied(&text)?;
+    let scheme = crate::documents::scheme_of(uri)
+      .ok_or_else(|| format!("{uri} isn't an address an extension provides."))?;
+    let command = self
+      .shared
+      .lock()
+      .extensions
+      .iter()
+      .find(|entry| entry.manifest.contributions.text_provider(scheme).is_some())
+      .and_then(|entry| {
+        entry
+          .manifest
+          .contributions
+          .quick_diff
+          .as_ref()?
+          .apply
+          .clone()
+      })
+      .ok_or_else(|| format!("No extension can change {uri}."))?;
+    let applied = crate::bindings::ferrite::extension::quick_diff::Applied {
+      uri: uri.to_owned(),
+      text,
+    };
+    self
+      .run(&command, None, None, Payload::Apply(applied))
+      .and_then(CommandTicket::wait)
   }
 
   /// The user changed the text in a view's text box. Extensions read it

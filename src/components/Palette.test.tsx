@@ -42,6 +42,7 @@ function mockEditor(): EditorController {
     peekReferences: vi.fn(),
     triggerSuggest: vi.fn(),
     showHover: vi.fn(),
+    showChange: vi.fn(),
     cursor: () => ({ line: 4, column: 2 }),
     previewLines: vi.fn(),
     scrollPosition: () => ({ top: 300, left: 0 }),

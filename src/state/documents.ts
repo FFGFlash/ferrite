@@ -165,6 +165,24 @@ export async function openPath(
   }
 }
 
+/**
+ * Opens (or switches to) the read-only document an extension provides at
+ * `uri`. Resolves to it, or `null` if it couldn't be opened (the error is
+ * reported).
+ */
+export async function openProvided(uri: string): Promise<DocumentSummary | null> {
+  try {
+    const summary = await ipc.openProvidedDocument(uri)
+    openRequests.add(summary.id)
+    upsert(summary, true)
+    openRequests.delete(summary.id)
+    return summary
+  } catch (error) {
+    reportError('Opening the document', error)
+    return null
+  }
+}
+
 /** Creates an untitled document, optionally containing `text`. */
 export async function newFile(text?: string): Promise<void> {
   try {
@@ -234,7 +252,13 @@ export async function save(id = activeId(), as = false): Promise<void> {
     await flush(id)
     const summary = await (as ? ipc.saveDocumentAs(id) : ipc.saveDocument(id))
     if (summary) {
-      upsert(summary, false)
+      // A document only a diff tab shows isn't listed; its editors show it's saved.
+      updateSummary(summary)
+      if (!documentsStore.get().documents.some(document => document.id === id)) {
+        for (const editor of editorsFor(id)) {
+          editor.refresh()
+        }
+      }
     }
   } catch (error) {
     reportError('Saving', error)
@@ -253,13 +277,22 @@ export async function saveAll(): Promise<void> {
   }
 }
 
+/** Whether a document stays open when its last tab closes (a diff tab shows it). */
+let keptOpen: (id: number) => boolean = () => false
+
+export function setKeptOpen(test: (id: number) => boolean): void {
+  keptOpen = test
+}
+
 export async function close(id = activeId()): Promise<void> {
   if (id === null) {
     return
   }
   try {
     await flush(id)
-    if (!(await ipc.closeDocument(id))) {
+    if (keptOpen(id)) {
+      await ipc.hideDocument(id)
+    } else if (!(await ipc.closeDocument(id))) {
       return
     }
   } catch (error) {

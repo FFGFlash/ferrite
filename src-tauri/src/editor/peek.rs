@@ -87,7 +87,23 @@ pub async fn editor_peek_lines(
   .map_err(CommandError::internal)?
 }
 
-fn lines_of(
+/// Lines `start..end` of open document `id` (clamped to it), for the
+/// removed lines an inline diff shows.
+#[tauri::command]
+pub fn editor_document_lines(
+  app: AppHandle,
+  id: u64,
+  start: usize,
+  end: usize,
+) -> Result<PeekLinesDto, CommandError> {
+  let state = app.state::<EditorState>();
+  let editor = state.lock();
+  let document = editor.document(ferrite_core::DocumentId::from_raw(id))?;
+  let tree = state.syntax.tree(&app, document);
+  Ok(lines_of(document.buffer(), tree.as_ref(), start, end))
+}
+
+pub(super) fn lines_of(
   buffer: &TextBuffer,
   tree: Option<&SyntaxTree>,
   start: usize,

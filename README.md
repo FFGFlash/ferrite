@@ -526,6 +526,7 @@ crates/
   ferrite-syntax/     Tree-sitter grammars, incremental parsing, highlighting
   ferrite-lsp/        Language server client: processes, JSON-RPC, positions, document sync
   ferrite-process/    Starting programs, and stopping them with everything they started
+  ferrite-diff/       Line and character diffs for diff tabs
   ferrite-text/       Rope-backed text buffer, change sets, positions, Unicode boundaries
   ferrite-workspace/  Files, explorer listings, Go to File index, find in files, watching
   ferrite-core/       Documents, selections, editing operations, undo, dirty state

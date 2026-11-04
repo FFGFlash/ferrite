@@ -1874,6 +1874,7 @@ fn git_extension() -> Option<(Setup, PathBuf)> {
     "git",
     "git",
     Some(&[
+      Permission::DocumentsRead,
       Permission::FilesRead,
       Permission::FilesWrite,
       Permission::Processes,
@@ -2087,6 +2088,187 @@ fn the_git_extension_stages_commits_and_lists_history() {
     ids.contains(&"staged:notes.txt".to_owned())
   });
   assert_eq!(s.host.view_content(changes).input, "Everything");
+}
+
+/// Waits for an `OpenDiff` notification and returns its sides and title.
+fn wait_for_diff(s: &Setup) -> (String, String, String) {
+  match s
+    .fake
+    .wait_for("a diff", |n| matches!(n, Notification::OpenDiff { .. }))
+  {
+    Notification::OpenDiff {
+      original,
+      modified,
+      title,
+    } => (original, modified, title),
+    _ => unreachable!(),
+  }
+}
+
+#[test]
+fn the_git_extension_shows_changes_in_diffs() {
+  let Some((s, repo)) = git_extension() else {
+    return;
+  };
+  let changes = "ferrite.git.changes";
+  let commits = "ferrite.git.commits";
+  std::fs::write(repo.join("src").join("main.rs"), "one\n").expect("write");
+  git(&repo, &["add", "."]);
+  git(&repo, &["commit", "-q", "-m", "first"]);
+  std::fs::write(repo.join("src").join("main.rs"), "two\n").expect("write");
+  *s.fake.folder.lock().unwrap_or_else(PoisonError::into_inner) = Some(repo.clone());
+  s.host.load();
+  wait_for_view(&s, changes, "the change", |ids| {
+    ids.contains(&"changes:src/main.rs".to_owned())
+  });
+
+  // A change not staged compares the index with the file.
+  let main = repo.join("src").join("main.rs").display().to_string();
+  s.host
+    .run_view_command(
+      "ferrite.git.openChange",
+      Some("src/main.rs".into()),
+      vec!["src/main.rs".into()],
+    )
+    .expect("runs")
+    .wait()
+    .expect("opens");
+  assert_eq!(
+    wait_for_diff(&s),
+    (
+      "git::src/main.rs".to_owned(),
+      main.clone(),
+      "main.rs (Working Tree)".to_owned()
+    )
+  );
+
+  // The extension provides the versions.
+  let text = |uri: &str| s.host.provide_text(uri).expect("provides");
+  assert_eq!(text("git::src/main.rs").as_deref(), Some("one\n"));
+  assert_eq!(text("git:HEAD:src/main.rs").as_deref(), Some("one\n"));
+  assert_eq!(text("git:~empty:src/main.rs").as_deref(), Some(""));
+  assert_eq!(text("git:HEAD:missing.rs"), None);
+  assert!(
+    s.host.provide_text("nope:x").is_err(),
+    "no one provides nope:"
+  );
+
+  // Staging changes the index: diffs showing it are told.
+  git(&repo, &["add", "."]);
+  s.host.files_changed(&[repo.join(".git").join("index")]);
+  let refreshed = s.fake.wait_for("provided texts changed", |n| {
+    matches!(n, Notification::ProvidedChanged(_))
+  });
+  assert_eq!(
+    refreshed,
+    Notification::ProvidedChanged(vec!["git::*".into(), "git:HEAD:*".into()])
+  );
+  assert_eq!(text("git::src/main.rs").as_deref(), Some("two\n"));
+  wait_for_view(&s, changes, "the staged change", |ids| {
+    ids.contains(&"staged:src/main.rs".to_owned())
+  });
+  s.host
+    .run_view_command(
+      "ferrite.git.openStagedChange",
+      Some("src/main.rs".into()),
+      vec!["src/main.rs".into()],
+    )
+    .expect("runs")
+    .wait()
+    .expect("opens");
+  let (original, modified, title) = wait_for_diff(&s);
+  assert_eq!(
+    (original.as_str(), modified.as_str(), title.as_str()),
+    (
+      "git:HEAD:src/main.rs",
+      "git::src/main.rs",
+      "main.rs (Index)"
+    )
+  );
+
+  // A commit's file compares the commit with its parent.
+  git(&repo, &["commit", "-q", "-m", "second"]);
+  let hash = git(&repo, &["rev-parse", "HEAD"])
+    .expect("git")
+    .trim()
+    .to_owned();
+  s.host.files_changed(&[repo.join(".git").join("HEAD")]);
+  wait_for_view(&s, commits, "the second commit", |ids| ids.len() == 2);
+  let file = format!("{hash}/src/main.rs");
+  s.host
+    .run_view_command(
+      "ferrite.git.openCommitChange",
+      Some(file.clone()),
+      vec![file],
+    )
+    .expect("runs")
+    .wait()
+    .expect("opens");
+  let (original, modified, title) = wait_for_diff(&s);
+  assert_eq!(original, format!("git:{hash}^:src/main.rs"));
+  assert_eq!(modified, format!("git:{hash}:src/main.rs"));
+  assert_eq!(title, format!("main.rs ({})", &hash[..7]));
+  assert_eq!(text(&original).as_deref(), Some("one\n"));
+  assert_eq!(text(&modified).as_deref(), Some("two\n"));
+}
+
+#[test]
+fn the_git_extension_names_originals_and_stages_changes() {
+  let Some((s, repo)) = git_extension() else {
+    return;
+  };
+  let changes = "ferrite.git.changes";
+  std::fs::write(repo.join("src").join("main.rs"), "a\nb\nc\n").expect("write");
+  git(&repo, &["add", "."]);
+  git(&repo, &["commit", "-q", "-m", "first"]);
+  std::fs::write(repo.join("src").join("main.rs"), "a\nB\nc\nd\n").expect("write");
+  std::fs::write(repo.join("notes.txt"), "notes").expect("write");
+  *s.fake.folder.lock().unwrap_or_else(PoisonError::into_inner) = Some(repo.clone());
+  s.host.load();
+  wait_for_view(&s, changes, "the changes", |ids| {
+    ids.contains(&"changes:src/main.rs".to_owned())
+  });
+
+  // A tracked file's original is its index version; an untracked one has none.
+  let main = repo.join("src").join("main.rs").display().to_string();
+  let notes = repo.join("notes.txt").display().to_string();
+  assert_eq!(
+    s.host.original_of(&main).as_deref(),
+    Some("git::src/main.rs")
+  );
+  assert_eq!(s.host.original_of(&notes), None);
+  assert_eq!(
+    s.host.apply_title("git::src/main.rs").as_deref(),
+    Some("Stage")
+  );
+  assert_eq!(s.host.apply_title("nope:x"), None);
+
+  // Staging one change: the index takes the text the editor made.
+  s.host
+    .apply_to_original("git::src/main.rs", "a\nB\nc\n".into())
+    .expect("stages");
+  assert_eq!(
+    git(&repo, &["show", ":src/main.rs"]).as_deref(),
+    Some("a\nB\nc\n")
+  );
+  s.fake.wait_for(
+    "originals changed",
+    |n| matches!(n, Notification::OriginalsChanged(paths) if paths.is_empty()),
+  );
+  wait_for_view(&s, changes, "a staged and an unstaged change", |ids| {
+    ids.contains(&"staged:src/main.rs".to_owned())
+      && ids.contains(&"changes:src/main.rs".to_owned())
+  });
+
+  // Only the index can be staged into.
+  s.host
+    .apply_to_original("git:HEAD:src/main.rs", "x\n".into())
+    .expect("runs");
+  s.fake.wait_for_message("Only changes to the index");
+  assert_eq!(
+    git(&repo, &["show", "HEAD:src/main.rs"]).as_deref(),
+    Some("a\nb\nc\n")
+  );
 }
 
 #[test]

@@ -45,6 +45,7 @@ Tauri, and nothing in Rust depends on the frontend.
 | `ferrite-core`           | `Editor` (open documents), `Document`, selections, `EditorOp`s (including find/replace), undo history, dirty state, reload from disk, incremental viewport updates. No I/O.                                                      | `ferrite-text`, `ferrite-workspace` (for `FileStamp`)                          |
 | `ferrite-syntax`         | The language registry of extensions' WebAssembly Tree-sitter grammars (none built in); language detection, incremental and interruptible parsing with injected layers, per-line highlight spans                                  | `ferrite-text`, `tree-sitter` (with `wasm`), grammar crates                    |
 | `ferrite-lsp`            | Language server processes and JSON-RPC over stdio, UTF-8/UTF-16 position conversion, incremental document changes from the edit log, server configuration and workspace roots, a scripted test server                            | `ferrite-process`, `ferrite-text`, `lsp-types`, `serde_json`                   |
+| `ferrite-diff`           | Line and character diffs of two texts for diff tabs: histogram line diff, then words within changed blocks, optionally ignoring whitespace at the ends of lines                                                                  | `imara-diff`                                                                   |
 | `ferrite-process`        | Starting programs (language servers, extensions' programs) in a process group with no console window, so stopping one stops what it started; finding programs on the `PATH`                                                      | `win32job` (Windows), `rustix` (Unix)                                          |
 | `ferrite-extension-api`  | The extension API: the WIT interface (`wit/extension.wit`) and the Rust bindings extensions build against (`Guest`, `export_extension!`). Standalone, so extensions outside the repository can use it                            | `wit-bindgen`                                                                  |
 | `ferrite-extension-host` | Extension discovery, manifest validation, permission decisions, a worker thread and bounded event queue per extension, Wasmtime with deadlines and memory limits, the host side of the API (validated reads, edits, diagnostics) | `ferrite-core`, `ferrite-text`, `wasmtime`, `wit-component`, `semver`, `toml`  |
@@ -714,6 +715,20 @@ connects it to the editor, settings, and frontend. The developer guide is
   view menus carry the selection (`Payload::Selection`), `on_expand` the item
   (`Payload::Expand`), and a prompt's command the answer (`Payload::Answer`). One prompt is
   pending at a time; a new one cancels it.
+- **Provided documents and diffs** (API 1.8, `documents.rs`;
+  [ADR 0028](adr/0028-diffs-and-provided-documents.md)). `ExtensionHost::provide_text` runs a
+  text provider's command with `Payload::Provide` and waits for its answer; the app opens the
+  result as a read-only core document (`src-tauri/src/editor/provided.rs`) and asks again on
+  `ProvidedChanged`. `OpenDiff` becomes a `diff:` dock item (`src/state/diffs.ts`), whose sides
+  open hidden and show in `DiffView`: editors with zones, line classes, and folds set by the diff
+  (`src/editor/diffLayout.ts`), compared by `diff_compute` (`ferrite-diff`).
+- **Quick diff** (API 1.9, `quick_diff.rs`;
+  [ADR 0029](adr/0029-quick-diff-and-tab-marks.md)). `ExtensionHost::original_of` asks
+  `[quick_diff]` extensions for a file's original (`Payload::Original`); the app keeps its text
+  (`src-tauri/src/editor/quick_diff.rs`), diffs each document version in the background, and puts
+  the changes on view lines as `changes` for the gutter. Reverting edits the document;
+  applying runs the extension's `apply` command with the original's new text
+  (`ExtensionHost::apply_to_original`, `Payload::Apply`), using `ferrite_diff::splice`.
 - **Workspace Trust** (`src-tauri/src/trust.rs`). The app decides whether the open folder is
   trusted (`OpenFolder::trusted`), asks the user, and gates language servers itself; trust
   changes restart language servers and run extensions' `on_folder_changed` commands.

@@ -183,8 +183,10 @@ impl Embedder for AppEmbedder {
         document_id: id.get(),
       },
       Notification::ExtensionsChanged => {
-        // Their languages and language servers may have changed.
+        // Their languages and language servers may have changed, and the
+        // originals of open files.
         languages::refresh(&self.app);
+        crate::editor::quick_diff::track_open(&self.app, &[]);
         AppEvent::ExtensionsChanged
       }
       Notification::ExtensionFailed { id, name, reason } => {
@@ -237,6 +239,25 @@ impl Embedder for AppEmbedder {
       Notification::Prompt(prompt) => AppEvent::ExtensionPrompt { prompt },
       Notification::PromptClosed(id) => AppEvent::ExtensionPromptClosed { id },
       Notification::TrustRequested { extension } => AppEvent::WorkspaceTrustRequested { extension },
+      Notification::ProvidedChanged(uris) => {
+        crate::editor::refresh_provided(&self.app, uris);
+        return;
+      }
+      Notification::OpenProvided(uri) => AppEvent::OpenProvided { uri },
+      Notification::OriginalsChanged(paths) => {
+        crate::editor::quick_diff::track_open(&self.app, &paths);
+        return;
+      }
+      Notification::ApplySelectedRanges => AppEvent::ApplySelectedRanges,
+      Notification::OpenDiff {
+        original,
+        modified,
+        title,
+      } => AppEvent::OpenDiff {
+        original,
+        modified,
+        title,
+      },
     };
     events::emit(&self.app, event);
   }

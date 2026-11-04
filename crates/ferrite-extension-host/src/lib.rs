@@ -26,6 +26,7 @@
 mod api;
 mod config;
 pub mod contributions;
+pub mod documents;
 mod files;
 mod host;
 pub mod icons;
@@ -36,6 +37,7 @@ mod permissions;
 pub mod preview;
 mod processes;
 pub mod prompts;
+mod quick_diff;
 mod readme;
 mod runtime;
 pub mod storage;
@@ -196,6 +198,23 @@ pub enum Notification {
   Prompt(Prompt),
   /// A prompt was withdrawn (its extension stopped).
   PromptClosed(u64),
+  /// The texts at these provided addresses may have changed; a trailing
+  /// `*` stands for every address starting with what's before it.
+  ProvidedChanged(Vec<String>),
+  /// An extension asked to open the document at a provided address.
+  OpenProvided(String),
+  /// An extension asked to open a tab comparing two documents, each a
+  /// file's absolute path or a provided address.
+  OpenDiff {
+    original: String,
+    modified: String,
+    title: String,
+  },
+  /// Open files' originals may be different ones now (all, when empty).
+  OriginalsChanged(Vec<String>),
+  /// An extension asked to apply the changes the active editor's
+  /// selections touch to its original.
+  ApplySelectedRanges,
 }
 
 /// What a status bar item shows.

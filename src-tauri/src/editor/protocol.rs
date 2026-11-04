@@ -232,7 +232,15 @@ pub enum OpDto {
   FoldLevel {
     level: usize,
   },
+  /// Folds exactly these regions (`[start, end]` line ranges, at most
+  /// [`MAX_SET_FOLDS`]), unfolding any others: a diff's unchanged lines.
+  SetFolds {
+    regions: Vec<[usize; 2]>,
+  },
 }
+
+/// Most regions one `setFolds` folds.
+pub const MAX_SET_FOLDS: usize = 10_000;
 
 /// What some operations need besides the document.
 #[derive(Debug, Default)]
@@ -373,6 +381,13 @@ impl OpDto {
         level: level.max(1),
         regions: context.folds.clone(),
       },
+      Self::SetFolds { regions } => EditorOp::SetFolds(
+        regions
+          .into_iter()
+          .take(MAX_SET_FOLDS)
+          .map(|[start, end]| start..end)
+          .collect(),
+      ),
     }
   }
 }
@@ -660,6 +675,27 @@ pub struct EditorView {
   pub language: Option<LanguageStatusDto>,
   /// Extension decorations on the view's lines.
   pub decorations: Vec<DecorationDto>,
+  /// Changes from the file's original touching the view's lines, for the
+  /// gutter (see `quick_diff.rs`).
+  pub changes: Vec<GutterChangeDto>,
+}
+
+/// Lines changed from a file's original: `start..end` (empty for lines
+/// removed before `start`).
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GutterChangeDto {
+  pub start: usize,
+  pub end: usize,
+  pub kind: GutterChangeKind,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum GutterChangeKind {
+  Added,
+  Modified,
+  Removed,
 }
 
 /// A range decorated by an extension.
@@ -752,6 +788,7 @@ impl EditorView {
       diagnostics: Vec::new(),
       language: None,
       decorations: Vec::new(),
+      changes: Vec::new(),
     }
   }
 }

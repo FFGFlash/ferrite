@@ -24,6 +24,7 @@ import {
   editorsFor,
   savedScroll,
   saveScroll,
+  setActiveOverride,
   setShownView,
   shownView,
 } from '../editor/activeEditor'
@@ -36,6 +37,7 @@ import {
   openPath,
   takeOpenRequest,
 } from '../state/documents'
+import { diffsStore, releaseDiff, setDiffTabHandler } from '../state/diffs'
 import { layoutStore, updateLayout } from '../state/layout'
 import { notify, reportError } from '../state/notifications'
 import { openFolder } from '../state/workspace'
@@ -305,7 +307,8 @@ function placementFor(layout: DockLayout, item: ItemId): { target: DropTarget; s
   switch (itemKind(item)) {
     case 'document':
     case 'viewer':
-    case 'page': {
+    case 'page':
+    case 'diff': {
       const group = findGroup(layout, documentGroup) ?? findGroup(layout, layout.main)!
       return { target: appendTo(group, true), size: 0.5 }
     }
@@ -577,7 +580,7 @@ export function serializeDock(layout: DockLayout = dockStore.get()): DockLayout 
   return result
 }
 
-const SAVED_ITEM = /^(file:.+|copy:\d+:.+|view:.+|terminal:\d+|page:.+|viewer:[^:]*:.+)$/s
+const SAVED_ITEM = /^(file:.+|copy:\d+:.+|view:.+|terminal:\d+|page:.+|viewer:[^:]*:.+|diff:.+)$/s
 
 /**
  * Restores the saved layout (or the default, honouring the side bar
@@ -673,6 +676,16 @@ export function focusItem(item: ItemId): void {
       )
       return
     }
+    case 'diff':
+      // The modified side, which can be edited.
+      requestAnimationFrame(() => {
+        const group = groupOf(dockStore.get(), item)
+        const content = group && contentElement(group.id)
+        content
+          ?.querySelector<HTMLElement>('[data-side="modified"] [data-editor-input]')
+          ?.focus({ preventScroll: true })
+      })
+      return
     default:
       requestAnimationFrame(() => {
         const group = groupOf(dockStore.get(), item)
@@ -717,6 +730,7 @@ export function showView(id: string, focus = true): void {
 
 setViewHandler(showView)
 setPageHandler(id => showItem(pageItem(id)))
+setDiffTabHandler(item => showItem(item))
 
 /**
  * Shows a preview its extension asked to show. One opened beside its
@@ -842,6 +856,8 @@ setDropFallback(drag => {
 
 /** Records the item as the one in use, for the stores that care. */
 function noteActive(item: ItemId): void {
+  // A diff tab's editors make themselves active as they're focused.
+  setActiveOverride(null)
   const document = documentOf(item)
   if (document !== null) {
     noteDocumentTab(item)
@@ -1057,6 +1073,15 @@ async function closeTab(item: ItemId): Promise<boolean> {
       }
       setLayout(removeItem(dockStore.get(), item))
       break
+    case 'diff':
+      if (!(await releaseDiff(item))) {
+        return false
+      }
+      if (place) {
+        rememberClosed({ item, ...place })
+      }
+      setLayout(removeItem(dockStore.get(), item))
+      break
     default:
       if (place) {
         closedViews.set(item, place)
@@ -1112,11 +1137,22 @@ async function closeTabs(items: readonly ItemId[]): Promise<void> {
 /** Tabs that are editors: documents, viewers, previews, and pages, rather than views and terminals. */
 const isEditorTab = (item: ItemId) => {
   const kind = itemKind(item)
-  return kind === 'document' || kind === 'viewer' || kind === 'preview' || kind === 'page'
+  return (
+    kind === 'document' ||
+    kind === 'viewer' ||
+    kind === 'preview' ||
+    kind === 'page' ||
+    kind === 'diff'
+  )
 }
 
-const isDirty = (item: ItemId) =>
-  documentsStore.get().documents.some(d => d.id === documentOf(item) && d.dirty)
+const isDirty = (item: ItemId) => {
+  const diff = itemKind(item) === 'diff' ? diffsStore.get()[item] : undefined
+  return (
+    (diff?.status === 'ready' && diff.dirty) ||
+    documentsStore.get().documents.some(d => d.id === documentOf(item) && d.dirty)
+  )
+}
 
 /** Closes the current group's tabs, or those `keep` doesn't keep. */
 export function closeGroupTabs(keep: (item: ItemId) => boolean = () => false): Promise<void> {

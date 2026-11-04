@@ -26,6 +26,7 @@ function view(version: number, viewport: Viewport): WireView {
     diagnostics: [],
     language: null,
     decorations: [],
+    changes: [],
   }
 }
 

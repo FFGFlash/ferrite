@@ -76,6 +76,15 @@ pub enum AppEvent {
     /// Whether it should become the active tab.
     active: bool,
   },
+  /// An extension asked to open the document at a provided address.
+  OpenProvided { uri: String },
+  /// An extension asked to open a tab comparing two documents, each a
+  /// file's absolute path or a provided address.
+  OpenDiff {
+    original: String,
+    modified: String,
+    title: String,
+  },
   /// Progress of the Go to File index.
   IndexStatus {
     indexing: bool,
@@ -104,6 +113,11 @@ pub enum AppEvent {
   },
   /// An extension edited a document.
   DocumentEdited { document_id: u64 },
+  /// A document's changes from its original (the gutter's) are ready.
+  QuickDiffChanged { document_id: u64 },
+  /// An extension asked to apply the changes the active editor's selections
+  /// touch to its original ("Stage Selected Ranges").
+  ApplySelectedRanges,
   /// Extension status bar items changed.
   ExtensionStatusItemsChanged,
   /// The content of an extension view changed.

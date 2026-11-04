@@ -12,9 +12,10 @@ import { createStore } from '../state/store'
 /**
  * How an operation's cursor is scrolled into view: just enough (`nearest`,
  * as when typing), to the middle (`center`), or to the middle only when it
- * is off screen (`centerIfOutside`, as when navigating), as in VS Code.
+ * is off screen (`centerIfOutside`, as when navigating), as in VS Code; or
+ * not at all (`none`).
  */
-export type Reveal = 'nearest' | 'center' | 'centerIfOutside'
+export type Reveal = 'nearest' | 'center' | 'centerIfOutside' | 'none'
 
 /** Whole lines highlighted and scrolled to without moving the cursor. */
 export interface LinePreview {
@@ -57,6 +58,8 @@ export interface EditorController {
   triggerSuggest(): void
   /** Shows hover information for the symbol at the cursor. */
   showHover(): void
+  /** Shows the next (or previous) change from the file's original inline. */
+  showChange(backward: boolean): void
   /** The primary cursor, once the view has arrived. */
   cursor(): Position | null
   /** Highlights lines and scrolls to them (Go to Line and Go to Symbol), or stops. */
@@ -76,8 +79,14 @@ const mounted = new Map<string, EditorController>()
 const shownViews = new Map<number, number>()
 let activeDocument: number | null = null
 let lastUsed: EditorController | null = null
+/** The editor in use in a tab that isn't a document's, such as a diff's. */
+let override: EditorController | null = null
 
 function update(): void {
+  if (override && mounted.get(key(override.documentId, override.view)) === override) {
+    activeEditor.set(override)
+    return
+  }
   const active = activeDocument === null ? null : editorFor(activeDocument)
   activeEditor.set(
     active ??
@@ -157,6 +166,24 @@ export function saveScroll(
   } else {
     scrollPositions.delete(key(documentId, view))
   }
+}
+
+/**
+ * Makes `editor` the active one while its tab (a diff's) is in use, whatever
+ * the active document; `null` when another tab is.
+ */
+export function setActiveOverride(editor: EditorController | null): void {
+  if (override !== editor) {
+    override = editor
+    update()
+  }
+}
+
+/** The editor `setActiveOverride` set, while it's mounted. */
+export function activeOverride(): EditorController | null {
+  return override && mounted.get(key(override.documentId, override.view)) === override
+    ? override
+    : null
 }
 
 /** Called when the active document changes. */

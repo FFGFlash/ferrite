@@ -31,6 +31,7 @@ function wire(
     diagnostics: [],
     language: null,
     decorations: [],
+    changes: [],
   }
 }
 

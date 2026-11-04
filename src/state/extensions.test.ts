@@ -62,6 +62,8 @@ function extension(overrides: Partial<ExtensionStatus> = {}): ExtensionStatus {
       programs: [],
       colors: [],
       viewContainers: [],
+      textProviders: [],
+      quickDiff: null,
     },
     storedBytes: 0,
     usage: {

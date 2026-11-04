@@ -245,6 +245,22 @@ export interface Contributions {
   programs: ProgramContribution[]
   colors: ColorContribution[]
   viewContainers: ViewContainerContribution[]
+  textProviders: TextProviderContribution[]
+  quickDiff: QuickDiffContribution | null
+}
+
+/** Read-only documents an extension provides at addresses with `scheme`. (1.8) */
+export interface TextProviderContribution {
+  scheme: string
+  command: string
+}
+
+/** Comparing files with their originals as they're edited. (1.9) */
+export interface QuickDiffContribution {
+  original: string
+  apply: string | null
+  /** What applying changes to the original is called, such as Stage. */
+  applyTitle: string | null
 }
 
 export interface StatusItem {

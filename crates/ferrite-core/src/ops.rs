@@ -162,6 +162,9 @@ pub enum EditorOp {
   },
   FoldAll(Vec<Range<usize>>),
   UnfoldAll,
+  /// Folds exactly these regions, unfolding any others: a diff's unchanged
+  /// lines, say.
+  SetFolds(Vec<Range<usize>>),
   /// Unfolds the folded regions among these.
   UnfoldRegions(Vec<Range<usize>>),
   /// Folds the innermost region around each cursor and the regions in it.
@@ -176,11 +179,42 @@ pub enum EditorOp {
   },
 }
 
+impl EditorOp {
+  /// Whether the operation may change the text (rather than only the
+  /// selections, folds, or view).
+  pub fn changes_text(&self) -> bool {
+    matches!(
+      self,
+      Self::Insert(_)
+        | Self::Paste { .. }
+        | Self::Newline
+        | Self::InsertLine(_)
+        | Self::Tab
+        | Self::Indent
+        | Self::Outdent
+        | Self::ToggleComment(_)
+        | Self::MoveLines(_)
+        | Self::CopyLines(_)
+        | Self::DeleteLines
+        | Self::Delete { .. }
+        | Self::DeleteSelection
+        | Self::Undo
+        | Self::Redo
+        | Self::Replace { .. }
+        | Self::ReplaceAll { .. }
+    )
+  }
+}
+
 impl Document {
   /// Applies an operation. Returns whether the text changed. Afterwards no
   /// selection is in a folded region's hidden lines: movement steps over
   /// them, and other operations unfold the regions selections end up in.
+  /// A read-only document ignores operations that would change its text.
   pub fn apply(&mut self, op: EditorOp) -> Result<bool, CoreError> {
+    if self.is_read_only() && op.changes_text() {
+      return Ok(false);
+    }
     let result = self.apply_op(op);
     self.sync_folds();
     result
@@ -297,6 +331,11 @@ impl Document {
       }
       EditorOp::UnfoldAll => {
         self.unfold_all();
+        Ok(false)
+      }
+      EditorOp::SetFolds(regions) => {
+        self.unfold_all();
+        self.fold_all(&regions);
         Ok(false)
       }
       EditorOp::UnfoldRegions(regions) => {

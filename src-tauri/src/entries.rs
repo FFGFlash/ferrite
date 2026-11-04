@@ -82,6 +82,16 @@ async fn blocking<T: Send + 'static>(
 }
 
 /// Points the documents of a renamed or moved file (or of the files in a
+/// The files of documents `ids`.
+fn moved_paths(app: &AppHandle, ids: &[ferrite_core::DocumentId]) -> Vec<String> {
+  let state = app.state::<EditorState>();
+  let editor = state.lock();
+  ids
+    .iter()
+    .filter_map(|id| Some(editor.document(*id).ok()?.path()?.display().to_string()))
+    .collect()
+}
+
 /// folder) at their new paths, and tells their language servers,
 /// extensions, and the frontend.
 fn follow(app: &AppHandle, from: &Path, to: &Path) {
@@ -105,6 +115,10 @@ fn follow(app: &AppHandle, from: &Path, to: &Path) {
   };
   if !moved.is_empty() {
     ui_state::record_open_files(app);
+    let paths: Vec<String> = moved_paths(app, &moved);
+    if !paths.is_empty() {
+      crate::editor::quick_diff::track_open(app, &paths);
+    }
   }
 }
 

@@ -54,7 +54,51 @@
 }
 
 .editor-view__line-number {
+  position: relative;
   height: var(--editor-line-height);
+}
+
+/* Lines changed from the file's original: a bar at the gutter's edge, or a
+   wedge where lines were removed. Click one to see the change. */
+.editor-view__change {
+  position: absolute;
+  top: 0;
+  right: calc(-1 * var(--space-4) + 2px);
+  bottom: 0;
+  width: 3px;
+  cursor: pointer;
+}
+
+.editor-view__change[data-kind='added'] {
+  background: var(--color-editor-gutter-added);
+}
+
+.editor-view__change[data-kind='modified'] {
+  background: var(--color-editor-gutter-modified);
+}
+
+.editor-view__change[data-kind='removedBelow'],
+.editor-view__change[data-kind='removedAbove'] {
+  top: auto;
+  bottom: -4px;
+  width: 0;
+  height: 0;
+  border-top: 4px solid transparent;
+  border-bottom: 4px solid transparent;
+  border-left: 5px solid var(--color-editor-gutter-removed);
+  z-index: 1;
+}
+
+.editor-view__change[data-kind='removedAbove'] {
+  top: -4px;
+  bottom: auto;
+}
+
+/* The click target is wider than the bar. */
+.editor-view__change::after {
+  position: absolute;
+  inset: -2px -4px;
+  content: '';
 }
 
 .editor-view__line-number[data-active] {

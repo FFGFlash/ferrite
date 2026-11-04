@@ -165,6 +165,10 @@ pub struct Document {
   parked: BTreeMap<ViewId, ViewState>,
   /// The language chosen for the document, if any.
   language: Option<LanguageChoice>,
+  /// For a document an extension provides (such as a file as it was in a
+  /// commit), its address, e.g. `git:HEAD:src/main.rs`. Such documents are
+  /// read-only and never dirty.
+  pub(crate) provided: Option<String>,
 }
 
 impl Document {
@@ -202,7 +206,39 @@ impl Document {
       view: ViewId::default(),
       parked: BTreeMap::new(),
       language: None,
+      provided: None,
     }
+  }
+
+  /// The address of a document an extension provides; `None` for files
+  /// and untitled documents.
+  pub fn provided_uri(&self) -> Option<&str> {
+    self.provided.as_deref()
+  }
+
+  /// Whether the text can't be edited: a provided document's.
+  pub fn is_read_only(&self) -> bool {
+    self.provided.is_some()
+  }
+
+  /// The file name a provided document's address ends with (what its
+  /// language is found by), e.g. `main.rs` for `git:HEAD:src/main.rs`.
+  pub fn provided_name(&self) -> Option<&str> {
+    let uri = self.provided.as_deref()?;
+    let path = uri.split(['?', '#']).next().unwrap_or(uri);
+    path
+      .rsplit(['/', '\\', ':'])
+      .next()
+      .filter(|name| !name.is_empty())
+  }
+
+  /// Replaces a provided document's text with what its extension provides
+  /// now. It stays read-only and clean.
+  pub fn set_provided_text(&mut self, text: &str) -> Result<bool, CoreError> {
+    let changed = self.replace_text(text)?;
+    self.saved_state = self.history.current_state();
+    self.history.seal();
+    Ok(changed)
   }
 
   pub fn id(&self) -> DocumentId {
@@ -326,8 +362,12 @@ impl Document {
     self.language = choice;
   }
 
-  /// File name for file-backed documents, `Untitled-N` otherwise.
+  /// File name for file-backed and provided documents, `Untitled-N`
+  /// otherwise.
   pub fn title(&self) -> String {
+    if let Some(name) = self.provided_name() {
+      return name.to_owned();
+    }
     match self.path().and_then(Path::file_name) {
       Some(name) => name.to_string_lossy().into_owned(),
       None => format!("Untitled-{}", self.untitled_number),
@@ -440,6 +480,9 @@ impl Document {
   /// document's line ending; selections move with the text. Returns whether
   /// the text changed.
   pub fn apply_edits(&mut self, edits: Vec<Edit>) -> Result<bool, CoreError> {
+    if self.is_read_only() {
+      return Err(CoreError::ReadOnly(self.id));
+    }
     let edits = edits
       .into_iter()
       .map(|edit| {

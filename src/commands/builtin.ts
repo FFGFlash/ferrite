@@ -2,7 +2,9 @@
 import { openPalette, openQuickPick } from '../components/paletteState'
 import { togglePerfOverlay } from '../components/PerfOverlay'
 import { resetPerf } from '../state/perf'
-import { activeEditor } from '../editor/activeEditor'
+import { activeEditor, activeOverride } from '../editor/activeEditor'
+import { diffControls, revertSelectedRanges } from '../state/diffs'
+import type { DiffLayout } from '../state/layout'
 import { goToNextReference, peekStore } from '../editor/references'
 import {
   documentsStore,
@@ -89,6 +91,17 @@ import {
 const hasEditor = () => activeEditor.get() !== null
 const hasPeek = () => peekStore.get() !== null
 const hasDocument = () => documentsStore.get().activeId !== null
+
+/** The current tab, when it's a diff's. */
+function currentDiff(): string | null {
+  const tab = currentTab()
+  return tab && itemKind(tab) === 'diff' ? tab : null
+}
+
+const toggleDiff = (key: keyof DiffLayout) => () => {
+  const { diff } = layoutStore.get()
+  updateLayout({ diff: { ...diff, [key]: !diff[key] } })
+}
 
 /** The active document, if it has a file (and so an encoding to change). */
 function activeFileDocument() {
@@ -277,8 +290,9 @@ export const builtinCommands: Command[] = [
     category: 'File',
     title: 'Save',
     keybinding: 'mod+s',
-    enabled: hasDocument,
-    run: () => save(),
+    enabled: () => hasDocument() || activeOverride() !== null,
+    // In a diff tab, the side in use.
+    run: () => save(activeOverride()?.documentId),
   },
   {
     id: 'file.saveAs',
@@ -393,6 +407,63 @@ export const builtinCommands: Command[] = [
     category: 'View',
     title: 'Toggle Minimap',
     run: () => updateLayout({ minimapVisible: !layoutStore.get().minimapVisible }),
+  },
+  {
+    id: 'diff.nextChange',
+    category: 'Diff',
+    title: 'Go to Next Change',
+    keybinding: 'f7',
+    enabled: () => currentDiff() !== null,
+    run: () => diffControls(currentDiff()!)?.goToChange(false),
+  },
+  {
+    id: 'diff.previousChange',
+    category: 'Diff',
+    title: 'Go to Previous Change',
+    keybinding: 'shift+f7',
+    enabled: () => currentDiff() !== null,
+    run: () => diffControls(currentDiff()!)?.goToChange(true),
+  },
+  {
+    id: 'diff.toggleInline',
+    category: 'Diff',
+    title: 'Toggle Inline View',
+    run: toggleDiff('inline'),
+  },
+  {
+    id: 'diff.toggleWhitespace',
+    category: 'Diff',
+    title: 'Toggle Ignoring Leading and Trailing Whitespace',
+    run: toggleDiff('ignoreTrimWhitespace'),
+  },
+  {
+    id: 'diff.toggleUnchanged',
+    category: 'Diff',
+    title: 'Toggle Collapsing Unchanged Lines',
+    run: toggleDiff('hideUnchanged'),
+  },
+  {
+    id: 'diff.showNextChange',
+    category: 'Diff',
+    title: 'Show Next Change',
+    keybinding: 'alt+f3',
+    enabled: () => activeEditor.get() !== null,
+    run: () => activeEditor.get()?.showChange(false),
+  },
+  {
+    id: 'diff.showPreviousChange',
+    category: 'Diff',
+    title: 'Show Previous Change',
+    keybinding: 'shift+alt+f3',
+    enabled: () => activeEditor.get() !== null,
+    run: () => activeEditor.get()?.showChange(true),
+  },
+  {
+    id: 'diff.revertSelectedRanges',
+    category: 'Diff',
+    title: 'Revert Selected Ranges',
+    enabled: () => activeEditor.get() !== null,
+    run: () => revertSelectedRanges(),
   },
   {
     id: 'view.zoomIn',

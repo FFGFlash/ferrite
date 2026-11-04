@@ -50,6 +50,8 @@ const themes = {
     programs: [],
     colors: [],
     viewContainers: [],
+    textProviders: [],
+    quickDiff: null,
   },
   storedBytes: 0,
   usage: {

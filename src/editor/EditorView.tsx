@@ -10,15 +10,22 @@ import {
   type FormEvent,
   type KeyboardEvent,
   type MouseEvent as ReactMouseEvent,
+  type ReactNode,
 } from 'react'
 import {
+  quickDiffApply,
+  quickDiffHunk,
+  quickDiffRevert,
   type DisplayLine,
   type EditorOp,
   type EditorView as View,
+  type GutterChange,
+  type Hunk,
   type Position,
   type SearchQuery,
   type Viewport,
 } from '../ipc/editor'
+import { ChangePeek, changePeekLines } from './ChangePeek'
 import * as lsp from '../ipc/lsp'
 import { appearance } from '../state/appearance'
 import {
@@ -138,23 +145,87 @@ interface LinkState extends Word {
   version: number
 }
 
-/** The space a peek view takes between rows: below display row `row`, `height` pixels tall. */
-interface Zone {
+/**
+ * Space between rows, such as a diff's filler lines: below display row
+ * `row` (-1 for above the first), `lines` lines tall.
+ */
+export interface ViewZone {
+  key: string
   row: number
-  height: number
+  lines: number
+  className?: string
+  content?: ReactNode
 }
 
-/** The top of display row `row`, below a zone above it. */
-function rowTop(row: number, lineHeight: number, zone: Zone | null): number {
-  return row * lineHeight + (zone && row > zone.row ? zone.height : 0)
+/** Zones in row order, with the height of those before each (`before`, one longer). */
+interface Zones {
+  list: readonly ViewZone[]
+  /** `before[i]`: the height in pixels of the zones before the `i`th. */
+  before: readonly number[]
+  lineHeight: number
+}
+
+const NO_ZONES: readonly ViewZone[] = []
+
+function zonesOf(list: readonly ViewZone[], lineHeight: number): Zones {
+  const sorted = list.length > 1 ? [...list].sort((a, b) => a.row - b.row) : list
+  const before = [0]
+  for (const zone of sorted) {
+    before.push(before.at(-1)! + zone.lines * lineHeight)
+  }
+  return { list: sorted, before, lineHeight }
+}
+
+/** How many of the zones are below rows before `row`. */
+function zonesBefore(zones: Zones, row: number): number {
+  let low = 0
+  let high = zones.list.length
+  while (low < high) {
+    const middle = (low + high) >> 1
+    if (zones.list[middle]!.row < row) {
+      low = middle + 1
+    } else {
+      high = middle
+    }
+  }
+  return low
+}
+
+/** The height of the zones above display row `row`. */
+function zonesAbove(zones: Zones, row: number): number {
+  return zones.before[zonesBefore(zones, row)]!
+}
+
+/** The height of the zones right below display row `row`. */
+function zonesBelowRow(zones: Zones, row: number): number {
+  return zonesAbove(zones, row + 1) - zonesAbove(zones, row)
+}
+
+/** The top of display row `row`, below the zones above it. */
+function rowTop(row: number, lineHeight: number, zones: Zones): number {
+  return row * lineHeight + zonesAbove(zones, row)
 }
 
 /** The display row at `y` from the top of the rows; a zone counts as the row above it. */
-function rowAtY(y: number, lineHeight: number, zone: Zone | null): number {
-  if (zone && y >= (zone.row + 1) * lineHeight) {
-    return Math.max(zone.row, Math.floor((y - zone.height) / lineHeight))
+function rowAtY(y: number, lineHeight: number, zones: Zones): number {
+  // The zones that start at or above `y`.
+  let low = 0
+  let high = zones.list.length
+  while (low < high) {
+    const middle = (low + high) >> 1
+    if ((zones.list[middle]!.row + 1) * lineHeight + zones.before[middle]! <= y) {
+      low = middle + 1
+    } else {
+      high = middle
+    }
   }
-  return Math.floor(y / lineHeight)
+  if (low > 0) {
+    const zone = zones.list[low - 1]!
+    if (y < (zone.row + 1) * lineHeight + zones.before[low]!) {
+      return zone.row
+    }
+  }
+  return Math.floor((y - zones.before[low]!) / lineHeight)
 }
 
 /** Whether `event` holds the go-to-definition modifier (Ctrl, or ⌘ on macOS) alone. */
@@ -167,13 +238,53 @@ function definitionModifier(event: {
   return (isMac() ? event.metaKey : event.ctrlKey) && !event.shiftKey && !event.altKey
 }
 
+/** Characters drawn with a class of their own, such as a diff's changed words. */
+export interface MarkedRange {
+  start: Position
+  end: Position
+  className: string
+}
+
 interface EditorViewProps {
   documentId: number
   /** The document's view to show: each editor of a document has its own. */
   view?: number
   title: string
   transport?: EditorTransport
+  /** Space between rows, besides a peek's. */
+  zones?: readonly ViewZone[]
+  /** A class for a line and its line number, such as a diff's inserted lines. */
+  lineClass?: (line: number) => string | undefined
+  marks?: readonly MarkedRange[]
+  /** Whether the user can fold regions (the default). */
+  folding?: boolean
+  /** Whether the minimap shows, when it's turned on (the default). */
+  minimap?: boolean
+  /**
+   * Whether lines changed from the file's original are marked in the gutter
+   * (the default), each change opening inline when its marker is clicked.
+   */
+  quickDiff?: boolean
+  /** Called with each view as it arrives. */
+  onView?: (view: View) => void
+  /** Called as the editor scrolls. */
+  onScroll?: (scroller: HTMLElement) => void
 }
+
+/** Operations that fold or unfold, which editors without folding ignore. */
+const FOLD_OPS: ReadonlySet<EditorOp['type']> = new Set([
+  'fold',
+  'unfold',
+  'toggleFold',
+  'toggleFoldAt',
+  'foldAll',
+  'unfoldAll',
+  'foldAllRegions',
+  'unfoldAllRegions',
+  'foldRecursively',
+  'unfoldRecursively',
+  'foldLevel',
+])
 
 /**
  * Renders one document. Only lines near the visible area exist in the DOM;
@@ -185,6 +296,14 @@ export function EditorView({
   view: documentView = 0,
   title,
   transport = ipcTransport,
+  zones: extraZones = NO_ZONES,
+  lineClass,
+  marks,
+  folding = true,
+  minimap = true,
+  quickDiff = true,
+  onView,
+  onScroll: onScrolled,
 }: EditorViewProps) {
   const frameRef = useRef<HTMLDivElement>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
@@ -205,7 +324,13 @@ export function EditorView({
   const isActive = useStore(activeEditor) === controllerRef.current
 
   const { lineHeight } = useStore(appearance)
-  const { minimapVisible } = useStore(layoutStore)
+  const minimapVisible = useStore(layoutStore).minimapVisible && minimap
+  const onViewRef = useRef(onView)
+  onViewRef.current = onView
+  const onScrolledRef = useRef(onScrolled)
+  onScrolledRef.current = onScrolled
+  const foldingRef = useRef(folding)
+  foldingRef.current = folding
   /** Bumped when the view refreshes without an edit, for the minimap. */
   const [refreshTick, setRefreshTick] = useState(0)
   const lineHeightRef = useRef(lineHeight)
@@ -256,17 +381,42 @@ export function EditorView({
   const peekState = useStore(peekStore)
   const peek = peekState && peekIsIn(peekState, documentId, documentView) ? peekState : null
   useStore(peekLayout)
-  const zone: Zone | null =
-    peek && view
-      ? {
-          row: displayRow(view, peek.anchor.line),
-          height:
-            peekHeightInLines(Math.floor((scrollRef.current?.clientHeight ?? 0) / lineHeight)) *
-            lineHeight,
-        }
-      : null
-  const zoneRef = useRef(zone)
-  zoneRef.current = zone
+  const peekRow = peek && view ? displayRow(view, peek.anchor.line) : null
+  const peekLines =
+    peekRow === null
+      ? 0
+      : peekHeightInLines(Math.floor((scrollRef.current?.clientHeight ?? 0) / lineHeight))
+  // A change from the file's original, shown inline below its lines.
+  const [hunk, setHunk] = useState<Hunk | null>(null)
+  const hunkRef = useRef(hunk)
+  hunkRef.current = hunk
+  const hunkSeqRef = useRef(0)
+  const hunkRow = useMemo(() => {
+    if (!hunk || !view) {
+      return null
+    }
+    const [start, end] = hunk.modified
+    const below = end > start ? end - 1 : start - 1
+    return below < 0 ? -1 : displayRow(view, below)
+  }, [hunk, view])
+  const zones = useMemo(() => {
+    const all = [...extraZones]
+    if (peekRow !== null) {
+      all.push({ key: 'peek', row: peekRow, lines: peekLines })
+    }
+    if (hunk && hunkRow !== null) {
+      all.push({ key: 'change', row: hunkRow, lines: changePeekLines(hunk) })
+    }
+    return zonesOf(all, lineHeight)
+  }, [extraZones, peekRow, peekLines, hunk, hunkRow, lineHeight])
+  const zoneRef = useRef(zones)
+  zoneRef.current = zones
+  const peekShownRef = useRef(false)
+  peekShownRef.current = peekRow !== null || hunk !== null
+  /** The peek's place, if one shows. */
+  const zone = peekRow === null ? null : { row: peekRow, height: peekLines * lineHeight }
+  const peekZoneRef = useRef(zone)
+  peekZoneRef.current = zone
   /** The editor's visible width, which a peek spans. */
   const [scrollerWidth, setScrollerWidth] = useState(0)
 
@@ -275,9 +425,64 @@ export function EditorView({
 
   const dispatch = (op: EditorOp, reveal: Reveal = 'nearest') => {
     const session = sessionRef.current
-    if (session) {
+    if (session && (foldingRef.current || !FOLD_OPS.has(op.type))) {
       inputStartRef.current ??= performance.now()
-      revealRef.current = { mode: reveal, after: session.dispatch(op) }
+      const after = session.dispatch(op)
+      if (reveal !== 'none') {
+        revealRef.current = { mode: reveal, after }
+      }
+    }
+  }
+
+  /**
+   * Shows the change at `line` inline, or the next or previous one from it
+   * (moving the cursor there); closes it if there's none.
+   */
+  const showChange = async (line: number, direction: 'at' | 'next' | 'previous') => {
+    const seq = ++hunkSeqRef.current
+    let found: Hunk | null = null
+    try {
+      found = await quickDiffHunk(documentId, line, direction)
+    } catch (error) {
+      reportError('Showing the change', error)
+    }
+    if (seq !== hunkSeqRef.current) {
+      return
+    }
+    setHunk(found)
+    if (found && direction !== 'at') {
+      dispatch(
+        {
+          type: 'setCursor',
+          position: { line: found.modified[0], column: 0 },
+          extend: false,
+          add: false,
+        },
+        'centerIfOutside',
+      )
+    }
+  }
+
+  const closeChange = () => {
+    hunkSeqRef.current++
+    setHunk(null)
+  }
+
+  /** Reverts or applies the change shown, then closes it. */
+  const actOnChange = async (action: 'revert' | 'apply') => {
+    if (!hunk) {
+      return
+    }
+    const [start, end] = hunk.modified
+    const lines: [number, number][] = [[start, Math.max(start, end - 1)]]
+    closeChange()
+    focusInput()
+    try {
+      await (action === 'revert'
+        ? quickDiffRevert(documentId, documentView, lines)
+        : quickDiffApply(documentId, documentView, lines))
+    } catch (error) {
+      reportError(action === 'revert' ? 'Reverting the change' : 'Applying the change', error)
     }
   }
 
@@ -384,6 +589,11 @@ export function EditorView({
       peekReferences: () => void findReferences(true),
       triggerSuggest: () => requestCompletion(null, false),
       showHover: () => void showHoverAtCursor(),
+      showChange: backward =>
+        void showChange(
+          viewRef.current?.primary.position.line ?? 0,
+          backward ? 'previous' : 'next',
+        ),
       cursor: () => viewRef.current?.primary.position ?? null,
       previewLines: next => {
         setPreview(next)
@@ -432,6 +642,7 @@ export function EditorView({
     if (!view) {
       return
     }
+    onViewRef.current?.(view)
     setDirty(documentId, view.dirty)
     // Another editor of the document refreshes as that one is edited; the
     // status bar is the active editor's.
@@ -466,6 +677,9 @@ export function EditorView({
     if (!view || !lines || !scroller) {
       return
     }
+    const shownMarks = (marks ?? []).filter(
+      mark => mark.end.line >= view.startLine && mark.start.line < view.endLine,
+    )
     const measured = measureOverlay(
       lines,
       view.lineNumbers,
@@ -473,7 +687,16 @@ export function EditorView({
       view.search?.matches ?? [],
       lineHeight,
       view.diagnostics,
-      view.decorations,
+      shownMarks.length > 0
+        ? [
+            ...view.decorations,
+            ...shownMarks.map(({ start, end, className }) => ({
+              start,
+              end,
+              key: MARK_KEY + className,
+            })),
+          ]
+        : view.decorations,
     )
     setOverlay(measured)
     recordTiming('editor.render', performance.now() - receivedAtRef.current)
@@ -509,7 +732,7 @@ export function EditorView({
       )
     }
     return () => cancelAnimationFrame(frame)
-  }, [view, lineHeight, documentId])
+  }, [view, lineHeight, documentId, marks])
 
   const primarySelection = () => viewRef.current?.selections.find(s => s.primary)
 
@@ -580,12 +803,15 @@ export function EditorView({
     // The text moved under the pointer; the next pointer move looks again.
     clearLink()
     // Popups follow the text, and a peek's arrow its anchor.
-    if (completionRef.current || zoneRef.current) {
+    if (completionRef.current || peekShownRef.current) {
       setScrollTick(tick => tick + 1)
     }
     const scroller = scrollRef.current
     if (scroller && !covers(viewRef.current, scroller, lineHeight, zoneRef.current)) {
       sessionRef.current?.setViewport(viewportFor(scroller, lineHeight, zoneRef.current))
+    }
+    if (scroller) {
+      onScrolledRef.current?.(scroller)
     }
   }
 
@@ -635,6 +861,11 @@ export function EditorView({
     ) {
       event.preventDefault()
       closePeek()
+      return
+    }
+    if (event.key === 'Escape' && hunkRef.current) {
+      event.preventDefault()
+      closeChange()
       return
     }
     if (event.key === 'Escape' && findRef.current) {
@@ -1211,16 +1442,17 @@ export function EditorView({
   }
 
   const startRow = view?.startRow ?? 0
-  const zoneRow = zone?.row
-  const zoneHeight = zone?.height ?? 0
-  /** The overlay with rows below a peek moved down past it. */
+  /** The overlay with rows moved down past the zones above them. */
   const overlay = useMemo(() => {
-    if (zoneRow === undefined || zoneRow < startRow) {
+    const above = zonesAbove(zones, startRow)
+    if (zones.before.at(-1) === above) {
       return measuredOverlay
     }
-    const below = (zoneRow - startRow + 1) * lineHeight
     const shift = <T extends Rect>(rects: T[]) =>
-      rects.map(rect => (rect.top >= below ? { ...rect, top: rect.top + zoneHeight } : rect))
+      rects.map(rect => {
+        const by = zonesAbove(zones, startRow + Math.floor(rect.top / lineHeight)) - above
+        return by === 0 ? rect : { ...rect, top: rect.top + by }
+      })
     return {
       carets: shift(measuredOverlay.carets),
       selections: shift(measuredOverlay.selections),
@@ -1228,9 +1460,16 @@ export function EditorView({
       diagnostics: shift(measuredOverlay.diagnostics),
       decorations: shift(measuredOverlay.decorations),
     }
-  }, [measuredOverlay, zoneRow, zoneHeight, startRow, lineHeight])
+  }, [measuredOverlay, zones, startRow, lineHeight])
 
-  const hasPeek = peek !== null
+  // An edit closes a change shown inline: its lines may be different now.
+  const version = view?.version
+  useEffect(() => {
+    hunkSeqRef.current++
+    setHunk(null)
+  }, [version, documentId])
+
+  const hasPeek = peek !== null || hunk !== null
   useLayoutEffect(() => {
     const scroller = scrollRef.current
     if (!hasPeek || !scroller) {
@@ -1247,11 +1486,11 @@ export function EditorView({
   const peekRequest = peek && zone ? `${zone.row}:${peek.focusRequest}` : null
   useLayoutEffect(() => {
     const scroller = scrollRef.current
-    const current = zoneRef.current
+    const current = peekZoneRef.current
     if (!peekRequest || !scroller || !current) {
       return
     }
-    const anchorTop = current.row * lineHeight
+    const anchorTop = rowTop(current.row, lineHeight, zoneRef.current)
     const bottom = anchorTop + 2 * lineHeight + current.height
     if (bottom > scroller.scrollTop + scroller.clientHeight) {
       scroller.scrollTop = Math.min(anchorTop, bottom - scroller.clientHeight)
@@ -1261,10 +1500,10 @@ export function EditorView({
     }
   }, [peekRequest, lineHeight])
 
-  // The rows on screen change as a peek opens, closes, or is resized.
+  // The rows on screen change as zones (a peek) open, close, or are resized.
   useEffect(() => {
-    sessionRef.current?.setViewport(viewportFor(scrollRef.current, lineHeight, zoneRef.current))
-  }, [zoneRow, zoneHeight, lineHeight])
+    sessionRef.current?.setViewport(viewportFor(scrollRef.current, lineHeight, zones))
+  }, [zones, lineHeight])
 
   const primaryCaret: Rect | undefined = overlay.carets.find(c => c.primary)
   const cursorLine = view?.primary.position.line ?? 0
@@ -1292,8 +1531,33 @@ export function EditorView({
   const rowCount = view?.rowCount ?? 1
   const lineCount = view?.lineCount ?? 1
   const lineNumbers = view?.lineNumbers ?? NO_LINES
-  const foldedLines = useMemo(() => new Set(view?.folded), [view])
-  const foldableLines = useMemo(() => new Set(view?.foldable), [view])
+  const foldedLines = useMemo(() => new Set(folding ? view?.folded : NO_LINES), [view, folding])
+  /** Gutter markers of changes from the original, by line. */
+  const changeMarks = useMemo(() => {
+    const marks = new Map<number, ChangeMark>()
+    if (!quickDiff || !view) {
+      return marks
+    }
+    for (const change of view.changes) {
+      if (change.start === change.end) {
+        // Removed lines: below the line before them, or above the first.
+        marks.set(
+          Math.max(0, change.start - 1),
+          change.start === 0 ? 'removedAbove' : 'removedBelow',
+        )
+      } else {
+        for (let line = change.start; line < change.end; line++) {
+          marks.set(line, change.kind)
+        }
+      }
+    }
+    return marks
+  }, [view, quickDiff])
+  /** Classes for lines: the caller's, or the shown change's. */
+  const classOf = (line: number) =>
+    lineClass?.(line) ??
+    (hunk && line >= hunk.modified[0] && line < hunk.modified[1] ? 'diff-inserted' : undefined)
+  const foldableLines = useMemo(() => new Set(folding ? view?.foldable : NO_LINES), [view, folding])
   const extensions = useStore(extensionsStore)
   const kind = useStore(themeKind)
   const types = useMemo(() => decorationTypes(extensions), [extensions])
@@ -1312,9 +1576,18 @@ export function EditorView({
   )
   const primary = primaryCaret
   const activeLine = view?.primary.position.line
-  const layerStyle = { transform: `translateY(${rowTop(startRow, lineHeight, zone)}px)` }
-  /** Which of the view's lines a peek opens below, if one does. */
-  const zoneIndex = zone ? zone.row - startRow : -1
+  const layerStyle = { transform: `translateY(${rowTop(startRow, lineHeight, zones)}px)` }
+  /** The room below each of the view's rows for zones. */
+  const spacerAt = (index: number) => zonesBelowRow(zones, startRow + index)
+  /** The zones near the view's rows, which are drawn. */
+  const shownZones = zones.list.flatMap((shown, index) =>
+    shown.key !== 'peek' &&
+    (shown.content !== undefined || shown.className !== undefined) &&
+    shown.row >= startRow - 1 &&
+    shown.row < startRow + (view?.lines.length ?? 0)
+      ? [{ zone: shown, top: (shown.row + 1) * lineHeight + zones.before[index]! }]
+      : [],
+  )
   /** Where a peek's arrow points, from the editor's left edge. */
   let arrowLeft: number | null = null
   if (peek && view) {
@@ -1336,6 +1609,17 @@ export function EditorView({
     }
     event.preventDefault()
     focusInput()
+    const change = (event.target as Element).closest<HTMLElement>('[data-change-line]')
+    if (change?.dataset.changeLine !== undefined) {
+      const line = Number(change.dataset.changeLine)
+      if (hunk && line >= hunk.modified[0] - 1 && line <= hunk.modified[1]) {
+        closeChange()
+      } else {
+        // The marker of removed lines below a line is the change after it.
+        void showChange(change.dataset.kind === 'removedBelow' ? line + 1 : line, 'at')
+      }
+      return
+    }
     const marker = (event.target as Element).closest<HTMLElement>('[data-fold-line]')
     if (marker?.dataset.foldLine !== undefined) {
       dispatch({ type: 'toggleFoldAt', line: Number(marker.dataset.foldLine) })
@@ -1368,7 +1652,7 @@ export function EditorView({
         <div
           className="editor-view__sizer"
           style={{
-            minHeight: `max(${rowTop(rowCount, lineHeight, zone)}px, 100% + ${rowTop(rowCount - 1, lineHeight, zone)}px)`,
+            minHeight: `max(${rowTop(rowCount, lineHeight, zones)}px, 100% + ${rowTop(rowCount - 1, lineHeight, zones)}px)`,
           }}
         >
           <div
@@ -1382,14 +1666,27 @@ export function EditorView({
               {lineNumbers.map((line, index) => {
                 const folded = foldedLines.has(line)
                 const foldable = folded || foldableLines.has(line)
+                const spacer = spacerAt(index)
+                const extra = classOf(line)
+                const mark = changeMarks.get(line)
                 return (
                   <div
                     key={line}
-                    className="editor-view__line-number"
+                    className={
+                      extra ? `editor-view__line-number ${extra}` : 'editor-view__line-number'
+                    }
                     data-active={line === activeLine || undefined}
-                    style={index === zoneIndex ? { marginBottom: zoneHeight } : undefined}
+                    style={spacer ? { marginBottom: spacer } : undefined}
                   >
                     {line + 1}
+                    {mark && (
+                      <span
+                        className="editor-view__change"
+                        data-kind={mark}
+                        data-change-line={line}
+                        title="Show the change"
+                      />
+                    )}
                     <span
                       className="editor-view__fold"
                       data-fold-line={foldable ? line : undefined}
@@ -1432,8 +1729,8 @@ export function EditorView({
                           className="editor-view__range-highlight"
                           style={{
                             top:
-                              rowTop(startRow + index, lineHeight, zone) -
-                              rowTop(startRow, lineHeight, zone),
+                              rowTop(startRow + index, lineHeight, zones) -
+                              rowTop(startRow, lineHeight, zones),
                           }}
                         />
                       ),
@@ -1447,6 +1744,15 @@ export function EditorView({
                   />
                 ))}
                 {overlay.decorations.map((rect, index) => {
+                  if (rect.key.startsWith(MARK_KEY)) {
+                    return (
+                      <div
+                        key={`x${index}`}
+                        className={`editor-view__mark ${rect.key.slice(MARK_KEY.length)}`}
+                        style={{ top: rect.top, left: rect.left, width: rect.width }}
+                      />
+                    )
+                  }
                   const type = types.get(rect.key)
                   return (
                     type && (
@@ -1492,7 +1798,8 @@ export function EditorView({
                       }
                       overlays={lineOverlays.get(lineNumber) ?? NO_OVERLAYS}
                       folded={foldedLines.has(lineNumber)}
-                      spacer={index === zoneIndex ? zoneHeight : 0}
+                      spacer={spacerAt(index)}
+                      className={classOf(lineNumber)}
                     />
                   )
                 })}
@@ -1516,8 +1823,8 @@ export function EditorView({
                   mirror.line >= 0
                     ? {
                         top:
-                          rowTop(startRow + rowOf(lineNumbers, mirror.line), lineHeight, zone) -
-                          rowTop(startRow, lineHeight, zone),
+                          rowTop(startRow + rowOf(lineNumbers, mirror.line), lineHeight, zones) -
+                          rowTop(startRow, lineHeight, zones),
                         left: 0,
                         width: '100%',
                         height: mirror.value.split('\n').length * lineHeight,
@@ -1541,10 +1848,49 @@ export function EditorView({
               />
             </div>
           </div>
+          {shownZones.map(({ zone: shown, top }) => (
+            <div
+              key={shown.key}
+              className={
+                shown.className ? `editor-view__zone ${shown.className}` : 'editor-view__zone'
+              }
+              style={{ top, height: shown.lines * lineHeight }}
+            >
+              {shown.content}
+            </div>
+          ))}
+          {hunk && hunkRow !== null && (
+            <div
+              className="editor-view__zone editor-view__zone--change"
+              style={{
+                top: rowTop(hunkRow + 1, lineHeight, zones) - changePeekLines(hunk) * lineHeight,
+                height: changePeekLines(hunk) * lineHeight,
+              }}
+            >
+              <ChangePeek
+                hunk={hunk}
+                width={peekWidth}
+                lineHeight={lineHeight}
+                numberWidth={String(lineCount).length}
+                onApply={() => void actOnChange('apply')}
+                onRevert={() => void actOnChange('revert')}
+                onMove={backward =>
+                  void showChange(hunk.modified[0], backward ? 'previous' : 'next')
+                }
+                onClose={() => {
+                  closeChange()
+                  focusInput()
+                }}
+              />
+            </div>
+          )}
           {peek && zone && (
             <div
               className="editor-view__zone"
-              style={{ top: (zone.row + 1) * lineHeight, height: zone.height }}
+              style={{
+                top: rowTop(zone.row + 1, lineHeight, zones) - zone.height,
+                height: zone.height,
+              }}
             >
               <div className="editor-view__zone-content" style={{ width: peekWidth }}>
                 <PeekView
@@ -1589,7 +1935,12 @@ function earlier(a: Position, b: Position): Position {
   return a.line < b.line || (a.line === b.line && a.column <= b.column) ? a : b
 }
 
+/** A gutter marker: lines added or modified, or lines removed below or above a line. */
+type ChangeMark = GutterChange['kind'] | 'removedAbove' | 'removedBelow'
+
 const NO_OVERLAYS: readonly TextOverlay[] = []
+/** Marks are measured as decorations with keys starting with this. */
+const MARK_KEY = 'mark:'
 const NO_LINES: readonly number[] = []
 
 /** The input's content when nothing is mirrored: empty, at the caret. */
@@ -1616,16 +1967,17 @@ function showMirror(input: HTMLTextAreaElement, mirror: InputMirror): void {
 
 interface LineProps {
   line: DisplayLine
+  className?: string
   link: Word | null
   /** Decoration styles on this line. */
   overlays: readonly TextOverlay[]
   /** Whether the region starting on this line is folded. */
   folded: boolean
-  /** Room below the line for a peek, in pixels. */
+  /** Room below the line for zones, in pixels. */
   spacer: number
 }
 
-const Line = memo(function Line({ line, link, overlays, folded, spacer }: LineProps) {
+const Line = memo(function Line({ line, className, link, overlays, folded, spacer }: LineProps) {
   const all = link
     ? [...overlays, { from: link.from, to: link.to, className: LINK_CLASS }]
     : overlays
@@ -1639,9 +1991,10 @@ const Line = memo(function Line({ line, link, overlays, folded, spacer }: LinePr
     </span>
   )
   const style = spacer ? { marginBottom: spacer } : undefined
+  const lineClassName = className ? `editor-view__line ${className}` : 'editor-view__line'
   if (line.fullLength === null) {
     return (
-      <div className="editor-view__line" style={style}>
+      <div className={lineClassName} style={style}>
         {text}
         {marker}
       </div>
@@ -1649,7 +2002,7 @@ const Line = memo(function Line({ line, link, overlays, folded, spacer }: LinePr
   }
   // A very long line shortened for display; the document keeps all of it.
   return (
-    <div className="editor-view__line" style={style}>
+    <div className={lineClassName} style={style}>
       {text}
       <span
         className="editor-view__cut"
@@ -1674,21 +2027,13 @@ function samePosition(a: Position, b: Position): boolean {
   return a.line === b.line && a.column === b.column
 }
 
-function visibleRange(
-  scroller: HTMLElement,
-  lineHeight: number,
-  zone: Zone | null,
-): [number, number] {
+function visibleRange(scroller: HTMLElement, lineHeight: number, zone: Zones): [number, number] {
   const first = rowAtY(scroller.scrollTop, lineHeight, zone)
   const last = rowAtY(scroller.scrollTop + scroller.clientHeight, lineHeight, zone)
   return [first, last + 2]
 }
 
-function viewportFor(
-  scroller: HTMLElement | null,
-  lineHeight: number,
-  zone: Zone | null,
-): Viewport {
+function viewportFor(scroller: HTMLElement | null, lineHeight: number, zone: Zones): Viewport {
   if (!scroller) {
     return { startRow: 0, endRow: OVERSCAN * 2 }
   }
@@ -1701,7 +2046,7 @@ function covers(
   view: View | null,
   scroller: HTMLElement,
   lineHeight: number,
-  zone: Zone | null,
+  zone: Zones,
 ): boolean {
   if (!view) {
     return false

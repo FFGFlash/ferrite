@@ -86,7 +86,11 @@ pub fn language_of<'r>(registry: &'r Registry, document: &Document) -> Option<&'
   match document.language_choice() {
     Some(LanguageChoice::PlainText) => None,
     Some(LanguageChoice::Language(id)) => registry.get(id),
-    None => document.path().and_then(|path| registry.for_path(path)),
+    // A provided document goes by the name at the end of its address.
+    None => document
+      .path()
+      .or_else(|| document.provided_name().map(Path::new))
+      .and_then(|path| registry.for_path(path)),
   }
 }
 

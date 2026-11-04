@@ -41,6 +41,7 @@ const view = {
   diagnostics: [],
   language: null,
   decorations: [],
+  changes: [],
 } as WireView
 
 describe('accessibility (axe)', () => {
@@ -94,6 +95,8 @@ describe('accessibility (axe)', () => {
           programs: [],
           colors: [],
           viewContainers: [],
+          textProviders: [],
+          quickDiff: null,
         },
         storedBytes: 0,
         usage: {

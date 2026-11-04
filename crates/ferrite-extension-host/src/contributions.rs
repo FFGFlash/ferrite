@@ -228,6 +228,51 @@ pub struct ViewInput {
   pub command: Option<String>,
 }
 
+/// Read-only documents the extension provides for addresses with its
+/// scheme, such as `git:HEAD:src/main.rs`. (1.8)
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TextProviderContribution {
+  pub scheme: String,
+  /// Run to provide the text at an address (`documents::requested`).
+  pub command: String,
+}
+
+/// Comparing files with their originals as they're edited. (1.9)
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct QuickDiffContribution {
+  /// Run to find a file's original (`quick-diff::requested-file`).
+  pub original: String,
+  /// Run to apply changes to an original (`quick-diff::to-apply`).
+  pub apply: Option<String>,
+  /// What applying is called, such as "Stage".
+  pub apply_title: Option<String>,
+}
+
+/// Schemes no extension may provide: the editor's own, and the web's.
+const RESERVED_SCHEMES: &[&str] = &[
+  "file",
+  "untitled",
+  "http",
+  "https",
+  "data",
+  "blob",
+  "ferrite",
+  "ferrite-webview",
+];
+
+/// Whether `scheme` can name a text provider: 2 to 32 lowercase letters,
+/// digits, `+`, `-`, and `.`, starting with a letter, and not reserved.
+pub fn valid_scheme(scheme: &str) -> bool {
+  (2..=32).contains(&scheme.len())
+    && scheme.starts_with(|c: char| c.is_ascii_lowercase())
+    && scheme
+      .chars()
+      .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || matches!(c, '+' | '-' | '.'))
+    && !RESERVED_SCHEMES.contains(&scheme)
+}
+
 /// An activity bar entry whose views are shown as sections. (1.7)
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -474,6 +519,8 @@ pub struct Contributions {
   pub programs: Vec<ProgramContribution>,
   pub colors: Vec<ColorContribution>,
   pub view_containers: Vec<ViewContainerContribution>,
+  pub text_providers: Vec<TextProviderContribution>,
+  pub quick_diff: Option<QuickDiffContribution>,
 }
 
 impl Contributions {
@@ -485,6 +532,8 @@ impl Contributions {
       && self.views.is_empty()
       && self.decorations.is_empty()
       && self.previews.is_empty()
+      && self.text_providers.is_empty()
+      && self.quick_diff.is_none()
       && self.viewers.iter().all(|viewer| {
         viewer.command.is_none()
           && viewer
@@ -523,6 +572,13 @@ impl Contributions {
       .decorations
       .iter()
       .find(|decoration| decoration.name == name)
+  }
+
+  pub fn text_provider(&self, scheme: &str) -> Option<&TextProviderContribution> {
+    self
+      .text_providers
+      .iter()
+      .find(|provider| provider.scheme == scheme)
   }
 
   pub fn program(&self, name: &str) -> Option<&ProgramContribution> {
@@ -603,6 +659,21 @@ pub struct RawView {
 pub struct RawViewInput {
   placeholder: Option<String>,
   command: Option<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RawQuickDiff {
+  original: String,
+  apply: Option<String>,
+  apply_title: Option<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RawTextProvider {
+  scheme: String,
+  command: String,
 }
 
 #[derive(Deserialize)]
@@ -746,6 +817,8 @@ pub struct RawContributions {
   pub programs: Vec<RawProgram>,
   pub colors: BTreeMap<String, RawColor>,
   pub view_containers: Vec<RawViewContainer>,
+  pub text_providers: Vec<RawTextProvider>,
+  pub quick_diff: Option<RawQuickDiff>,
 }
 
 /// A view menu's `when`: a flag name, or `!` and one.
@@ -800,6 +873,7 @@ pub fn parse(
   limit("language_servers", raw.language_servers.len(), 10)?;
   limit("programs", raw.programs.len(), 10)?;
   limit("view_containers", raw.view_containers.len(), 5)?;
+  limit("text_providers", raw.text_providers.len(), 5)?;
   limit("colors", raw.colors.len(), 50)?;
 
   let mut contributions = Contributions::default();
@@ -1415,6 +1489,48 @@ pub fn parse(
         languages: server.languages,
         root_markers: server.root_markers,
       });
+  }
+
+  for provider in raw.text_providers {
+    if !valid_scheme(&provider.scheme) {
+      return Err(invalid(format!(
+        "text_providers: scheme {:?} must be 2 to 32 lowercase letters, digits, '+', '-', or '.', start with a letter, and not be reserved",
+        provider.scheme
+      )));
+    }
+    unique(
+      "text_providers",
+      contributions.text_providers.iter().map(|p| &p.scheme),
+      &provider.scheme,
+    )?;
+    let section = format!("text_providers.{}", provider.scheme);
+    contributions.text_providers.push(TextProviderContribution {
+      command: declared(&section, &provider.command)?,
+      scheme: provider.scheme,
+    });
+  }
+
+  if let Some(quick_diff) = raw.quick_diff {
+    if quick_diff.apply.is_none() != quick_diff.apply_title.is_none() {
+      return Err(invalid(
+        "quick_diff: apply and apply_title go together".to_owned(),
+      ));
+    }
+    if let Some(title) = &quick_diff.apply_title
+      && !(1..=30).contains(&title.trim().chars().count())
+    {
+      return Err(invalid(
+        "quick_diff: apply_title is 1 to 30 characters".to_owned(),
+      ));
+    }
+    contributions.quick_diff = Some(QuickDiffContribution {
+      original: declared("quick_diff", &quick_diff.original)?,
+      apply: quick_diff
+        .apply
+        .map(|command| declared("quick_diff", &command))
+        .transpose()?,
+      apply_title: quick_diff.apply_title.map(|title| title.trim().to_owned()),
+    });
   }
 
   for program in raw.programs {

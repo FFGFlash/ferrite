@@ -47,6 +47,7 @@ function makeView(): View {
     diagnostics: [],
     language: null,
     decorations: [],
+    changes: [],
   } as View
 }
 

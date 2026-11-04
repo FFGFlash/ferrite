@@ -113,6 +113,17 @@
   font-style: italic;
 }
 
+/* An extension's mark on the tab's file, as in the explorer. */
+.dock-tab__badge {
+  flex: none;
+  margin-left: var(--space-1);
+  font-size: var(--font-size-ui-small);
+}
+
+.dock-tab[data-faded] .dock-tab__title {
+  opacity: 0.6;
+}
+
 .dock-tab[data-drop='before'] {
   box-shadow: inset 2px 0 0 var(--color-focus-ring);
 }
