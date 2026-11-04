@@ -381,4 +381,40 @@ describe('ExtensionViewPanel', () => {
       layoutStore.set(DEFAULT_LAYOUT)
     }
   })
+
+  it('resizes only the two sections either side of a boundary', async () => {
+    const changes = view('sectionA', { title: 'Changes', container: 'example.git.scm' })
+    const commits = view('sectionB', { title: 'Commits', container: 'example.git.scm' })
+    const stashes = view('sectionC', { title: 'Stashes', container: 'example.git.scm' })
+    contribute([changes, commits, stashes])
+    vi.mocked(ipc.getViewContent).mockResolvedValue(content({ items: [] }))
+    // Measured heights needn't match shares (they include borders, say):
+    // every section measures 200 pixels, but Stashes has half the height.
+    const measured = vi
+      .spyOn(HTMLElement.prototype, 'getBoundingClientRect')
+      .mockReturnValue({ height: 200 } as DOMRect)
+    layoutStore.set({
+      ...DEFAULT_LAYOUT,
+      sections: {
+        'example.git.scm': {
+          collapsed: [],
+          sizes: { [changes.fullId]: 1, [commits.fullId]: 1, [stashes.fullId]: 2 },
+        },
+      },
+    })
+    try {
+      render(<ExtensionContainerPanel container="example.git.scm" />)
+      const sash = await screen.findByRole('separator', { name: 'Resize Commits' })
+      fireEvent.keyDown(sash, { key: 'ArrowUp' })
+      // Scaled to pixels, Stashes keeps half.
+      expect(layoutStore.get().sections['example.git.scm']?.sizes).toEqual({
+        [changes.fullId]: 184,
+        [commits.fullId]: 216,
+        [stashes.fullId]: 400,
+      })
+    } finally {
+      measured.mockRestore()
+      layoutStore.set(DEFAULT_LAYOUT)
+    }
+  })
 })

@@ -200,15 +200,22 @@ export function ExtensionContainerPanel({ container }: { container: string }) {
         : [...current.collapsed, section],
     }))
 
-  /** Moves the boundary above `section`, between it and the open section before it. */
+  /**
+   * Moves the boundary above `section`, between it and the open section
+   * before it. Only those two change: the shares are scaled to the pair's
+   * pixels (which keeps every section's height), and the pair splits its
+   * total. Taking the others' measured heights as their shares instead would
+   * shrink them a little on every move, as heights include borders that
+   * shares don't.
+   */
   const resize = (section: string, above: string, height: number) => {
     const total = (heights.get(section) ?? 0) + (heights.get(above) ?? 0)
+    const scale = total / (share(section) + share(above))
     updateSections(container, current => ({
       ...current,
-      // The sections' heights now, as their shares.
       sizes: {
         ...current.sizes,
-        ...Object.fromEntries(open.map(view => [view, heights.get(view) ?? share(view)])),
+        ...Object.fromEntries(open.map(view => [view, share(view) * scale])),
         [section]: height,
         [above]: total - height,
       },
