@@ -54,9 +54,12 @@ pub fn files_in(
   let (root, filter) = (root.to_path_buf(), exclude.clone());
   let mut files = Vec::new();
   let mut truncated = false;
+  // Walked in order, so which files are left out doesn't depend on the
+  // order the file system lists folders in (sorted only on Windows).
   let walker = WalkBuilder::new(folder)
     .hidden(false)
     .filter_entry(move |entry| !filter.is_excluded(&root, entry.path()))
+    .sort_by_file_name(|a, b| a.cmp(b))
     .build();
   for entry in walker.filter_map(Result::ok) {
     if entry.file_type().is_some_and(|kind| kind.is_file()) {

@@ -263,6 +263,17 @@ fn limits() -> Limits {
   }
 }
 
+/// [`limits`], but with the editor's command deadline: the example
+/// extensions run programs (such as several `git`s) within a command, which
+/// takes long on a loaded CI machine. Only the misbehaving fixture, whose
+/// tests time out commands on purpose, has the short one.
+fn example_limits() -> Limits {
+  Limits {
+    command_time: Limits::default().command_time,
+    ..limits()
+  }
+}
+
 /// A host with one extension installed as a development extension.
 /// `grant` lists the permissions granted up front (`None`: undecided).
 fn setup(
@@ -286,7 +297,11 @@ fn setup(
       permissions_file: Some(permissions_file),
       settings,
       programs: BTreeMap::new(),
-      limits: limits(),
+      limits: if crate_name == "misbehaving" {
+        limits()
+      } else {
+        example_limits()
+      },
       storage_dir: None,
     },
   );
@@ -2448,12 +2463,13 @@ fn the_git_extension_works_with_branches_and_remotes() {
     confirm.id,
     ferrite_extension_host::PromptReply::Button { index: 0 },
   );
+  // Git writes the pulled files before it moves HEAD.
   let deadline = Instant::now() + Duration::from_secs(30);
-  while !repo.join("notes.txt").exists() {
+  while head(&repo, "HEAD") != head(&remote, "main") {
     assert!(Instant::now() < deadline, "not pulled");
     std::thread::sleep(Duration::from_millis(50));
   }
-  assert_eq!(head(&repo, "HEAD"), head(&remote, "main"));
+  assert!(repo.join("notes.txt").exists());
 }
 
 /// Waits for the git extension's prompt and answers it.
