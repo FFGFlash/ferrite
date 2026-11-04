@@ -13,17 +13,21 @@ use std::collections::HashSet;
 use crate::api::ApiContext;
 use crate::bindings::ferrite::extension::types::ApiError;
 use crate::bindings::ferrite::extension::views::{
-  ExpandingItem, Expansion as WitExpansion, Host, ItemIcon as WitIcon, TreeItem,
-  Welcome as WitWelcome,
+  ExpandingItem, Expansion as WitExpansion, GraphRow as WitGraphRow, Host, ItemIcon as WitIcon,
+  TreeItem, Welcome as WitWelcome,
 };
 use crate::contributions::ACTION_ICONS;
 use crate::runtime::StoreState;
 use crate::worker::Payload;
-use crate::{ItemIcon, ItemMark, ViewContent, ViewEntry, Welcome, WelcomeButton};
+use crate::{
+  GraphLane, GraphRow, ItemIcon, ItemMark, ViewContent, ViewEntry, Welcome, WelcomeButton,
+};
 
 /// Most items in a view, loaded children included.
 pub const MAX_ITEMS: usize = 10_000;
 const MAX_FLAGS: usize = 32;
+/// Most lanes at a graph row's top or bottom.
+const MAX_LANES: usize = 64;
 const MAX_INPUT_BYTES: usize = 64 * 1024;
 
 fn invalid(message: String) -> ApiError {
@@ -242,6 +246,57 @@ impl Host for StoreState {
     self
       .api
       .change_view(&view, |content| content.welcome = welcome)
+  }
+
+  fn set_graph(&mut self, view: String, rows: Vec<WitGraphRow>) -> Result<(), ApiError> {
+    if rows.len() > MAX_ITEMS {
+      return Err(ApiError::TooLarge(format!(
+        "at most {MAX_ITEMS} graph rows"
+      )));
+    }
+    let id = |id: &str| -> Result<(), ApiError> {
+      if id.is_empty() || id.len() > 200 {
+        Err(invalid("graph ids are 1 to 200 bytes".into()))
+      } else {
+        Ok(())
+      }
+    };
+    let mut graph = Vec::with_capacity(rows.len());
+    for row in rows {
+      if row.inputs.len() > MAX_LANES
+        || row.outputs.len() > MAX_LANES
+        || row.parents.len() > MAX_LANES
+      {
+        return Err(ApiError::TooLarge(format!(
+          "at most {MAX_LANES} lanes in a graph row"
+        )));
+      }
+      id(&row.item)?;
+      id(&row.node)?;
+      let lanes = |lanes: Vec<crate::bindings::ferrite::extension::views::GraphLane>| {
+        lanes
+          .into_iter()
+          .map(|lane| {
+            id(&lane.id)?;
+            Ok(GraphLane {
+              id: lane.id,
+              color: lane.color % 5,
+            })
+          })
+          .collect::<Result<Vec<_>, ApiError>>()
+      };
+      for parent in &row.parents {
+        id(parent)?;
+      }
+      graph.push(GraphRow {
+        item: row.item,
+        node: row.node,
+        parents: row.parents,
+        inputs: lanes(row.inputs)?,
+        outputs: lanes(row.outputs)?,
+      });
+    }
+    self.api.change_view(&view, |content| content.graph = graph)
   }
 
   fn set_badge(&mut self, view: String, count: u32) -> Result<(), ApiError> {

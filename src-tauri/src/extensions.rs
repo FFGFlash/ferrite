@@ -241,6 +241,9 @@ impl Embedder for AppEmbedder {
         path: path.display().to_string(),
         active: true,
       },
+      Notification::OpenFolder { path } => AppEvent::OpenFolder {
+        path: path.display().to_string(),
+      },
       Notification::Prompt(prompt) => AppEvent::ExtensionPrompt { prompt },
       Notification::PromptClosed(id) => AppEvent::ExtensionPromptClosed { id },
       Notification::TrustRequested { extension } => AppEvent::WorkspaceTrustRequested { extension },
@@ -468,6 +471,14 @@ pub fn extension_view_badges(state: State<'_, ExtensionsState>) -> BTreeMap<Stri
 pub fn extension_prompt_answer(state: State<'_, ExtensionsState>, id: u64, reply: PromptReply) {
   if let Some(host) = state.host() {
     host.prompt_answered(id, reply);
+  }
+}
+
+/// The workbench's editor in use shows this file now (`None`: none).
+#[tauri::command]
+pub fn extension_active_file(state: State<'_, ExtensionsState>, path: Option<String>) {
+  if let Some(host) = state.host() {
+    host.active_file_changed(path.map(|path| crate::paths::normalize(Path::new(&path))));
   }
 }
 

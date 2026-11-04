@@ -320,6 +320,26 @@ export interface ViewContent {
   input: string
   message: string | null
   items: ViewEntry[]
+  /** A history graph beside the items, by item. (1.11) */
+  graph: GraphRow[]
+}
+
+/** A lane of a history graph: what it leads to, and its color (0 to 4). */
+export interface GraphLane {
+  id: string
+  color: number
+}
+
+/**
+ * A row of a history graph beside an item: its node, what that leads to,
+ * and the lanes at its top and bottom.
+ */
+export interface GraphRow {
+  item: string
+  node: string
+  parents: string[]
+  inputs: GraphLane[]
+  outputs: GraphLane[]
 }
 
 /** A question an extension asks the user. */
@@ -337,6 +357,8 @@ export type Prompt = { id: number; extension: string } & (
       /** What's typed is hidden: a program asking for a password or passphrase. */
       password: boolean
     }
+  /** A folder, in the system's dialog; answered with its path as text. */
+  | { type: 'folder'; title: string }
   | {
       type: 'confirm'
       message: string
@@ -509,6 +531,11 @@ export const runExtensionCommand = (
 export const getIconTheme = (id: string) => call<IconTheme | null>('extensions_icon_theme', { id })
 export const listStatusItems = () => call<StatusItem[]>('extension_status_items')
 export const listFileMarks = () => call<ExtensionMarks[]>('extension_file_marks')
+/** Tells extensions which file the editor in use shows (`null`: none). */
+export const setActiveFile = (path: string | null) => call<void>('extension_active_file', { path })
+/** Asks for a folder in the system's dialog, without opening it; `null` if cancelled. */
+export const pickFolderDialog = (title: string) =>
+  call<string | null>('dialog_pick_folder', { title })
 /** Runs a command from a view's menu or button for the selected items' arguments. */
 export const runViewCommand = (command: string, argument: string | null, selection: string[]) =>
   call<void>('extension_run_view_command', { command, argument, selection })

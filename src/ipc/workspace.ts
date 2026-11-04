@@ -168,6 +168,8 @@ export type AppEvent =
   | { type: 'quickDiffChanged'; documentId: number }
   /** An extension asked to apply the changes the active editor's selections touch to the original. */
   | { type: 'applySelectedRanges' }
+  /** An extension asked to open a folder in place of the open one. */
+  | { type: 'openFolder'; path: string }
   /** An extension asked to open the document at an address it provides. */
   | { type: 'openProvided'; uri: string }
   /** An extension asked to open a tab comparing two documents (paths or provided addresses). */

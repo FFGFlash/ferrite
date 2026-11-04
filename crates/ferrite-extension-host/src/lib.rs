@@ -202,6 +202,8 @@ pub enum Notification {
   },
   /// An extension asked to open a file in the editor.
   OpenFile { path: PathBuf },
+  /// An extension asked to open a folder in place of the open one.
+  OpenFolder { path: PathBuf },
   /// An extension asks the user something; it replaces any prompt showing.
   Prompt(Prompt),
   /// A prompt was withdrawn (its extension stopped).
@@ -324,6 +326,27 @@ pub struct ViewContent {
   pub input: String,
   pub message: Option<String>,
   pub items: Vec<ViewEntry>,
+  /// A history graph beside its items, by item. (1.11)
+  pub graph: Vec<GraphRow>,
+}
+
+/// A row of a view's history graph. (1.11)
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GraphRow {
+  pub item: String,
+  pub node: String,
+  pub parents: Vec<String>,
+  pub inputs: Vec<GraphLane>,
+  pub outputs: Vec<GraphLane>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GraphLane {
+  pub id: String,
+  /// 0 to 4.
+  pub color: u32,
 }
 
 /// A range decorated by an extension, in the current text.

@@ -236,6 +236,8 @@ pub fn run() {
       extensions::extension_run_command,
       extensions::extension_status_items,
       extensions::extension_file_marks,
+      extensions::extension_active_file,
+      dialogs::dialog_pick_folder,
       extensions::extension_run_view_command,
       extensions::extension_view_expand,
       extensions::extension_view_input,

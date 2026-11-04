@@ -2453,6 +2453,193 @@ fn the_git_extension_works_with_branches_and_remotes() {
   assert_eq!(head(&repo, "HEAD"), head(&remote, "main"));
 }
 
+/// Waits for the git extension's prompt and answers it.
+fn answer(s: &Setup, reply: ferrite_extension_host::PromptReply) -> ferrite_extension_host::Prompt {
+  let prompt = wait_for_prompt(s);
+  s.host.prompt_answered(prompt.id, reply);
+  prompt
+}
+
+fn text(text: &str) -> ferrite_extension_host::PromptReply {
+  ferrite_extension_host::PromptReply::Text { text: text.into() }
+}
+
+/// Waits for `wanted` to hold, checking every 50 ms for 30 s.
+fn eventually(what: &str, wanted: impl Fn() -> bool) {
+  let deadline = Instant::now() + Duration::from_secs(30);
+  while !wanted() {
+    assert!(Instant::now() < deadline, "timed out waiting for {what}");
+    std::thread::sleep(Duration::from_millis(50));
+  }
+}
+
+#[test]
+fn the_git_extension_graphs_stashes_and_follows_history() {
+  let Some((s, repo)) = git_extension() else {
+    return;
+  };
+  let commits = "ferrite.git.commits";
+  let stashes = "ferrite.git.stashes";
+  let history = "ferrite.git.file-history";
+  let file = repo.join("a.txt");
+  let commit = |message: &str| git(&repo, &["commit", "-q", "-am", message]);
+  std::fs::write(&file, "one\n").expect("write");
+  git(&repo, &["add", "."]);
+  commit("first");
+  // A side branch merged back: the graph forks and joins.
+  git(&repo, &["checkout", "-q", "-b", "side"]);
+  std::fs::write(repo.join("side.txt"), "side\n").expect("write");
+  git(&repo, &["add", "."]);
+  commit("on the side");
+  git(&repo, &["checkout", "-q", "main"]);
+  std::fs::write(&file, "one\ntwo\n").expect("write");
+  commit("second");
+  git(
+    &repo,
+    &[
+      "-c",
+      "user.name=T",
+      "merge",
+      "-q",
+      "--no-ff",
+      "-m",
+      "merge side",
+      "side",
+    ],
+  );
+  *s.fake.folder.lock().unwrap_or_else(PoisonError::into_inner) = Some(repo.clone());
+  s.host.load();
+
+  wait_for_view(&s, commits, "the commits", |ids| ids.len() == 4);
+  let content = s.host.view_content(commits);
+  assert_eq!(content.graph.len(), 4, "a graph row per commit");
+  let merge = &content.graph[0];
+  assert_eq!(merge.parents.len(), 2);
+  assert_eq!(merge.outputs.len(), 2, "the merge opens a second lane");
+  assert_eq!(
+    content.graph[3].outputs.len(),
+    0,
+    "the first commit ends them"
+  );
+
+  // Stash a change, and pop it back.
+  std::fs::write(&file, "one\ntwo\nthree\n").expect("write");
+  s.host
+    .run_command("ferrite.git.stash", None, None)
+    .expect("runs")
+    .wait()
+    .expect("asks");
+  answer(&s, text("wip"));
+  wait_for_view(&s, stashes, "the stash", |ids| ids.len() == 1);
+  assert_eq!(s.host.view_content(stashes).items[0].label, "On main: wip");
+  assert_eq!(
+    std::fs::read_to_string(&file)
+      .expect("read")
+      .replace("\r\n", "\n"),
+    "one\ntwo\n"
+  );
+  s.host
+    .run_view_command(
+      "ferrite.git.stashPop",
+      Some("stash@{0}".into()),
+      vec!["stash@{0}".into()],
+    )
+    .expect("runs")
+    .wait()
+    .expect("pops");
+  wait_for_view(&s, stashes, "no stashes", |ids| ids.is_empty());
+  assert!(
+    std::fs::read_to_string(&file)
+      .expect("read")
+      .contains("three")
+  );
+
+  // The file's history follows the editor in use.
+  s.host.files_changed(std::slice::from_ref(&file));
+  wait_for_view(&s, "ferrite.git.changes", "the change", |ids| {
+    ids.contains(&"changes:a.txt".to_owned())
+  });
+  s.host
+    .active_file_changed(Some(ferrite_workspace::normalize_path(&file)));
+  wait_for_view(&s, history, "the file's history", |ids| ids.len() == 3);
+  let entries = s.host.view_content(history).items;
+  assert_eq!(entries[0].label, "Uncommitted Changes");
+  assert_eq!(entries[1].label, "second");
+  assert_eq!(entries[2].label, "first");
+
+  // Tag the first commit.
+  let first = view_ids(&s, commits)[3].clone();
+  s.host
+    .run_view_command(
+      "ferrite.git.createTagAt",
+      Some(first.clone()),
+      vec![first.clone()],
+    )
+    .expect("runs")
+    .wait()
+    .expect("asks");
+  answer(&s, text("v1"));
+  answer(&s, text(""));
+  eventually("the tag", || {
+    git(&repo, &["tag", "--list"]).expect("git").trim() == "v1"
+  });
+  assert_eq!(git(&repo, &["rev-parse", "v1"]).expect("git").trim(), first);
+
+  // Ignore a folder.
+  std::fs::create_dir_all(repo.join("build")).expect("mkdir");
+  let build = repo.join("build").display().to_string();
+  s.host
+    .run_command("ferrite.git.addToGitignore", None, Some(build))
+    .expect("runs")
+    .wait()
+    .expect("adds");
+  assert_eq!(
+    std::fs::read_to_string(repo.join(".gitignore")).expect("read"),
+    "build\n"
+  );
+
+  // Clone the repository into another folder, and offer to open the clone.
+  let clones = repo.parent().expect("a parent").join("clones");
+  std::fs::create_dir_all(&clones).expect("mkdir");
+  let parent = clones.display().to_string();
+  s.host
+    .run_command("ferrite.git.clone", None, None)
+    .expect("runs")
+    .wait()
+    .expect("asks");
+  answer(&s, text(&repo.display().to_string()));
+  let folder = answer(&s, text(&parent));
+  assert!(matches!(
+    folder.kind,
+    ferrite_extension_host::PromptKind::Folder { .. }
+  ));
+  let open = wait_for_prompt(&s);
+  assert!(matches!(
+    &open.kind,
+    ferrite_extension_host::PromptKind::Confirm { message, .. } if message.contains("Open the cloned")
+  ));
+  s.host.prompt_answered(
+    open.id,
+    ferrite_extension_host::PromptReply::Button { index: 0 },
+  );
+  let opened = s.fake.wait_for("the clone opened", |n| {
+    matches!(n, Notification::OpenFolder { .. })
+  });
+  let clone = ferrite_workspace::normalize_path(&clones.join("repo"));
+  assert_eq!(
+    opened,
+    Notification::OpenFolder {
+      path: clone.clone()
+    }
+  );
+  assert_eq!(
+    git(&clone, &["log", "--format=%s", "-n1"])
+      .expect("git")
+      .trim(),
+    "merge side"
+  );
+}
+
 #[test]
 fn the_git_extension_discards_changes_and_initializes_repositories() {
   let Some((s, repo)) = git_extension() else {

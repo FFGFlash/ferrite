@@ -94,6 +94,8 @@ pub struct Manifest {
   pub contributions: Contributions,
   /// Run when the open folder, or whether it's trusted, changes. (1.6)
   pub on_folder_changed: Option<String>,
+  /// Run when the file of the editor in use changes (1.11).
+  pub on_active_file_changed: Option<String>,
 }
 
 impl Manifest {
@@ -174,6 +176,7 @@ struct RawManifest {
   text_providers: Vec<contributions::RawTextProvider>,
   quick_diff: Option<contributions::RawQuickDiff>,
   on_folder_changed: Option<String>,
+  on_active_file_changed: Option<String>,
 }
 
 #[derive(Deserialize, Default)]
@@ -441,12 +444,17 @@ pub fn parse(
       "permissions.processes must be requested exactly when programs are declared",
     ));
   }
-  if let Some(command) = &raw.on_folder_changed
-    && !commands.iter().any(|c| &c.id == command)
-  {
-    return Err(invalid(format!(
-      "on_folder_changed: command {command:?} is not one of this extension's commands"
-    )));
+  for (field, command) in [
+    ("on_folder_changed", &raw.on_folder_changed),
+    ("on_active_file_changed", &raw.on_active_file_changed),
+  ] {
+    if let Some(command) = command
+      && !commands.iter().any(|c| &c.id == command)
+    {
+      return Err(invalid(format!(
+        "{field}: command {command:?} is not one of this extension's commands"
+      )));
+    }
   }
 
   let mut configuration = BTreeMap::new();
@@ -524,6 +532,7 @@ pub fn parse(
     configuration,
     contributions,
     on_folder_changed: raw.on_folder_changed,
+    on_active_file_changed: raw.on_active_file_changed,
   })
 }
 

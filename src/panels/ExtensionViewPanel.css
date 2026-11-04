@@ -29,6 +29,77 @@
   white-space: nowrap;
 }
 
+/* Rows beside a history graph, which sits at their left edge. */
+.extension-view__row[data-graph] {
+  position: relative;
+}
+
+.extension-view__graph {
+  position: absolute;
+  top: 0;
+  left: 8px;
+  overflow: visible;
+  fill: none;
+  stroke-width: 1.5;
+}
+
+.extension-view__graph circle {
+  stroke: var(--color-sidebar-background);
+  stroke-width: 1.5;
+}
+
+.extension-view__graph circle[data-merge] {
+  fill: var(--color-sidebar-background);
+  stroke-width: 2;
+}
+
+.extension-view__graph [data-lane='0'] {
+  stroke: var(--color-graph-lane-1);
+}
+.extension-view__graph [data-lane='1'] {
+  stroke: var(--color-graph-lane-2);
+}
+.extension-view__graph [data-lane='2'] {
+  stroke: var(--color-graph-lane-3);
+}
+.extension-view__graph [data-lane='3'] {
+  stroke: var(--color-graph-lane-4);
+}
+.extension-view__graph [data-lane='4'] {
+  stroke: var(--color-graph-lane-5);
+}
+.extension-view__graph circle[data-lane='0']:not([data-merge]) {
+  fill: var(--color-graph-lane-1);
+}
+.extension-view__graph circle[data-lane='1']:not([data-merge]) {
+  fill: var(--color-graph-lane-2);
+}
+.extension-view__graph circle[data-lane='2']:not([data-merge]) {
+  fill: var(--color-graph-lane-3);
+}
+.extension-view__graph circle[data-lane='3']:not([data-merge]) {
+  fill: var(--color-graph-lane-4);
+}
+.extension-view__graph circle[data-lane='4']:not([data-merge]) {
+  fill: var(--color-graph-lane-5);
+}
+
+.extension-view__graph circle[data-merge][data-lane='0'] {
+  stroke: var(--color-graph-lane-1);
+}
+.extension-view__graph circle[data-merge][data-lane='1'] {
+  stroke: var(--color-graph-lane-2);
+}
+.extension-view__graph circle[data-merge][data-lane='2'] {
+  stroke: var(--color-graph-lane-3);
+}
+.extension-view__graph circle[data-merge][data-lane='3'] {
+  stroke: var(--color-graph-lane-4);
+}
+.extension-view__graph circle[data-merge][data-lane='4'] {
+  stroke: var(--color-graph-lane-5);
+}
+
 .extension-view__row:hover {
   background: var(--color-list-hover-background);
 }

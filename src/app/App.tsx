@@ -19,6 +19,7 @@ import { loadWorkspace } from '../state/workspace'
 import { restoreTerminals } from '../terminal/terminals'
 import { documentsRestored, restoreDock, terminalsRestored } from '../dock/dock'
 import { Workbench } from './Workbench'
+import { followActiveFile } from '../dock/activeFile'
 
 /**
  * Reattaches to terminals still running (after a window reload), or starts
@@ -50,6 +51,7 @@ async function restoreSession(): Promise<void> {
   // An invalid settings.toml at startup is only logged by the backend.
   void refreshSettingsProblem()
   followFileProblems()
+  followActiveFile()
   let activeFile: string | null = null
   try {
     activeFile = await restoreLayout()

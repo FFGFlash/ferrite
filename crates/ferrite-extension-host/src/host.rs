@@ -247,6 +247,8 @@ struct State {
   /// request reads them.
   provided: HashMap<u64, Option<String>>,
   next_request: u64,
+  /// The file of the editor in use, as the workbench last said.
+  active_file: Option<PathBuf>,
   /// Extensions' timers waiting to run.
   timers: Vec<crate::timers::Timer>,
   next_timer: u64,
@@ -824,6 +826,11 @@ impl Shared {
     }
   }
 
+  /// The file of the editor in use, as the workbench last said.
+  pub fn active_file(&self) -> Option<PathBuf> {
+    self.lock().active_file.clone()
+  }
+
   /// Whether a loaded extension provides addresses with `scheme`.
   pub fn provides(&self, scheme: &str) -> bool {
     self
@@ -1376,6 +1383,7 @@ impl ExtensionHost {
         next_prompt: 0,
         provided: HashMap::new(),
         next_request: 0,
+        active_file: None,
         timers: Vec::new(),
         next_timer: 0,
         watches: Vec::new(),
@@ -2611,6 +2619,25 @@ impl ExtensionHost {
     for entry in &state.extensions {
       if let (Some(command), Run::Running { worker, .. }) =
         (&entry.manifest.on_folder_changed, &entry.run)
+      {
+        worker
+          .queue
+          .push_background(Event::background(command.clone(), None, Payload::None));
+      }
+    }
+  }
+
+  /// The file of the editor in use changed (`None`: none shows a file):
+  /// runs running extensions' `on_active_file_changed` commands.
+  pub fn active_file_changed(&self, path: Option<PathBuf>) {
+    let mut state = self.shared.lock();
+    if state.active_file == path {
+      return;
+    }
+    state.active_file = path;
+    for entry in &state.extensions {
+      if let (Some(command), Run::Running { worker, .. }) =
+        (&entry.manifest.on_active_file_changed, &entry.run)
       {
         worker
           .queue

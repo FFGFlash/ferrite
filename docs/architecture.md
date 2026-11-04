@@ -722,6 +722,11 @@ connects it to the editor, settings, and frontend. The developer guide is
   `ProvidedChanged`. `OpenDiff` becomes a `diff:` dock item (`src/state/diffs.ts`), whose sides
   open hidden and show in `DiffView`: editors with zones, line classes, and folds set by the diff
   (`src/editor/diffLayout.ts`), compared by `diff_compute` (`ferrite-diff`).
+- **History graphs and the active file** (API 1.11; [ADR 0031](adr/0031-graph-stashes-and-file-history.md)).
+  `views::set-graph` keeps graph rows in a view's content, drawn by `src/panels/viewGraph.tsx`.
+  The workbench reports the file of the editor in use (`src/dock/activeFile.ts`,
+  `extension_active_file`); `ExtensionHost::active_file_changed` runs `on_active_file_changed`
+  commands. `prompts::pick-folder` is a prompt the frontend answers from the system's dialog.
 - **Signing in and timers** (`askpass.rs`, `timers.rs`;
   [ADR 0030](adr/0030-branches-remotes-and-signing-in.md)). Programs declared with `askpass` run
   with `GIT_ASKPASS`/`SSH_ASKPASS` naming the app's own executable, which, finding

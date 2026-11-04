@@ -94,6 +94,12 @@
   --color-diff-removed-line: rgb(255 0 0 / 0.12);
   --color-diff-removed-text: rgb(255 0 0 / 0.28);
   --color-diff-filler: rgb(204 204 204 / 0.12);
+  /* Lanes of history graphs, by turns. */
+  --color-graph-lane-1: #ffb000;
+  --color-graph-lane-2: #dc267f;
+  --color-graph-lane-3: #994f00;
+  --color-graph-lane-4: #40b0a6;
+  --color-graph-lane-5: #b66dff;
   /* Beside lines changed from a file's original (Git's index, say). */
   --color-editor-gutter-added: #2ea043;
   --color-editor-gutter-modified: #1b81a8;
@@ -217,6 +223,11 @@
   --color-diff-removed-line: rgb(255 0 0 / 0.1);
   --color-diff-removed-text: rgb(255 0 0 / 0.22);
   --color-diff-filler: rgb(34 34 34 / 0.1);
+  --color-graph-lane-1: #c98a00;
+  --color-graph-lane-2: #c2185b;
+  --color-graph-lane-3: #8a4500;
+  --color-graph-lane-4: #2f8f86;
+  --color-graph-lane-5: #8e44d6;
   --color-editor-gutter-added: #48985d;
   --color-editor-gutter-modified: #2090d3;
   --color-editor-gutter-removed: #e51400;

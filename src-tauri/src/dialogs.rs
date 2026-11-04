@@ -31,6 +31,18 @@ pub async fn pick_folder(window: &WebviewWindow) -> Option<PathBuf> {
     .and_then(|path| path.into_path().ok())
 }
 
+/// Asks for a folder without opening it (an extension's prompt, say), with
+/// `title` as the dialog's. `None` if cancelled.
+#[tauri::command]
+pub async fn dialog_pick_folder(window: WebviewWindow, title: String) -> Option<String> {
+  let dialog = window.dialog().file().set_parent(&window).set_title(title);
+  run_blocking(move || dialog.blocking_pick_folder())
+    .await
+    .flatten()
+    .and_then(|path| path.into_path().ok())
+    .map(|path| crate::paths::normalize(&path).display().to_string())
+}
+
 pub async fn pick_save_path(
   window: &WebviewWindow,
   current: Option<&Path>,

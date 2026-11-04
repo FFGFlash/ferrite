@@ -8,7 +8,7 @@
 /// It can call only the functions it imports here; there is no other
 /// filesystem, network, environment, clock, or process access. See
 /// `docs/extensions.md`.
-package ferrite:extension@1.10.0;
+package ferrite:extension@1.11.0;
 
 /// Types shared by the host functions and the extension's exports.
 interface types {
@@ -397,6 +397,11 @@ interface workbench {
 
   /// Closes a preview, if it's open. (1.2)
   close-preview: func(preview: string, key: string) -> result<_, api-error>;
+
+  /// The file of the editor in use, if it shows one: a document's, a
+  /// viewer's, or a diff's modified file. The manifest's
+  /// `on_active_file_changed` command runs when it changes. (1.11)
+  active-file: func() -> option<string>;
 }
 
 /// Files in the folder open in the editor, e.g. to format every file in a
@@ -599,6 +604,10 @@ interface workspace {
   /// The changes the running command was run for, when it's a watch's
   /// command; `none` otherwise.
   changes: func() -> option<file-changes>;
+
+  /// Opens a folder in the editor in place of the open one, as if the user
+  /// chose it (they're asked whether to trust it, as usual). (1.11)
+  open-folder: func(path: string) -> result<_, file-error>;
 }
 
 /// Programs the manifest declares in `[[programs]]`, which run on the
@@ -818,6 +827,33 @@ interface views {
   /// The item the running command was run to load children for, when it's
   /// a view's `on_expand` command; `none` otherwise.
   expanding: func() -> option<expanding-item>;
+
+  /// A lane of a history graph: what it leads to (a commit, say), and its
+  /// color, 0 to 4 by turns. (1.11)
+  record graph-lane {
+    id: string,
+    color: u32,
+  }
+
+  /// A row of a history graph, beside a view item. (1.11)
+  record graph-row {
+    /// The item it's beside.
+    item: string,
+    /// What its node is: the lanes coming in for it end at the node.
+    node: string,
+    /// What the node leads to: a lane leaves it for each.
+    parents: list<string>,
+    /// The lanes at the row's top and bottom, left to right. A lane at the
+    /// top for something else carries on to the bottom lane for the same.
+    inputs: list<graph-lane>,
+    outputs: list<graph-lane>,
+  }
+
+  /// Draws a history graph beside a view's items, in VS Code's style: one
+  /// row per item it names (at most 10,000, with 64 lanes each). Rows of
+  /// items it doesn't name (an opened commit's files) carry the lanes on.
+  /// It replaces the view's graph; an empty list removes it. (1.11)
+  set-graph: func(view: string, rows: list<graph-row>) -> result<_, api-error>;
 }
 
 /// Asking the user something: choosing from a list, typing text, or
@@ -882,6 +918,10 @@ interface prompts {
 
   /// The answer the running command was run for; `none` otherwise.
   answer: func() -> option<prompt-answer>;
+
+  /// Asks for a folder, in the system's dialog. The answer is
+  /// `text(path)`, an absolute path. (1.11)
+  pick-folder: func(title: string, command: string) -> result<u64, api-error>;
 }
 
 /// Read-only documents the extension provides for addresses of its own,

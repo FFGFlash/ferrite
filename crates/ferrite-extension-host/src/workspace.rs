@@ -63,6 +63,29 @@ impl Host for StoreState {
     Ok(())
   }
 
+  fn open_folder(&mut self, path: String) -> Result<(), FileError> {
+    let given = Path::new(&path);
+    if !given.is_absolute() {
+      return Err(FileError::Failed(format!(
+        "{path:?} is not an absolute path"
+      )));
+    }
+    if given.is_file() {
+      return Err(FileError::WrongKind);
+    }
+    if !given.is_dir() {
+      return Err(FileError::NotFound);
+    }
+    let shared = self
+      .api
+      .shared()
+      .map_err(|_| FileError::Failed("the editor is closing".into()))?;
+    shared.embedder.notify(Notification::OpenFolder {
+      path: normalize_path(given),
+    });
+    Ok(())
+  }
+
   fn watch(&mut self, path: String, command: String) -> Result<u64, FileError> {
     let api = &self.api;
     if !api.manifest().declares_command(&command) {

@@ -340,6 +340,12 @@ The `workspace` interface (API 1.6) tells an extension about the open folder:
   anyway.
 - `open-file(path)` (API 1.7) opens a file in the editor and shows it, as if the user opened it
   (in its viewer, if one is the default for it). It needs no permission.
+- `open-folder(path)` (API 1.11) opens a folder in place of the open one, as if the user chose
+  it: they're asked whether to trust it as usual. Git opens a repository it cloned this way.
+- `workbench::active-file()` (API 1.11) returns the file of the editor in use: a document's, a
+  viewer's, or a diff's modified file. `on_active_file_changed = "<command>"` in the manifest
+  names a command that runs when it changes. Moving to a side bar view keeps it, so a view can
+  follow the file being edited, as Git's File History does.
 
 **Workspace Trust.** Programs that work on a folder may run code from it: a language server
 builds the project, and Git runs hooks and the programs its configuration names. So until the
@@ -766,6 +772,18 @@ when = "!tree"                    # optional: only while the view hasn't the fla
 - **A badge**, **`views::set-badge(view, count)`**, shows a number on the view's header and on
   its activity bar entry (a container's adds up its sections'). 0 shows none.
 
+#### History graph
+
+**`views::set-graph(view, rows)`** (API 1.11) draws a history graph beside a view's items, as VS
+Code's Source Control Graph does: one row per item it names. A row has its `node`, the
+`parents` the node leads to, and the lanes at its top (`inputs`) and bottom (`outputs`), each an
+`id` (what the lane leads to) and a `color` (0 to 4, by turns). Lanes at the top for the node
+end at it; others carry on to the bottom lane with the same `id`; and a lane leaves the node for
+each parent. Rows of items it doesn't name, such as an opened commit's files, carry the lanes
+straight on. Going down the commits, the extension makes each row's `outputs` from its `inputs`:
+the node's lane goes on to its first parent, and other parents get lanes of their own. Git's
+Commits view does this; see `extensions/git/src/graph.rs`.
+
 ### Decorations
 
 ```toml
@@ -1038,6 +1056,8 @@ returns the id and the value:
 - **`confirm(options, command)`** asks in a dialog: a message, optional detail, and 1 to 4
   buttons, the first being the main one (shown last, and in red when `destructive`); Cancel is
   added. The answer is `button(index)`.
+- **`pick-folder(title, command)`** (API 1.11) asks for a folder in the system's dialog. The
+  answer is `text(path)`, an absolute path.
 
 Closing a prompt without answering, or another prompt replacing it (one shows at a time), answers
 `cancelled`. A prompt goes away when its extension stops.
@@ -1511,14 +1531,15 @@ message saying so. Rust on `wasm32-unknown-unknown` is the supported path for no
 
 ## Versioning
 
-The WIT package is versioned: `ferrite:extension@1.10.0`, `api_version = "1"`.
+The WIT package is versioned: `ferrite:extension@1.11.0`, `api_version = "1"`.
 
 - **Additions.** New host functions arrive as minor versions of the package. Version 1.1 added the
   `workbench` interface, 1.2 added previews to it, 1.3 added the `files` interface, 1.4 the
   `viewers` interface, 1.5 the `webviews` and `storage` interfaces, 1.6 the `workspace`, `processes`, and `explorer`
   interfaces, 1.7 the `views` and `prompts` interfaces, with `files::delete`,
   `workspace::open-file`, and `host::set-configuration`, 1.8 the `documents` interface, and 1.9 the
-  `quick-diff` interface, and 1.10 the `timers` interface.
+  `quick-diff` interface, 1.10 the `timers` interface, and 1.11 `views::set-graph`,
+  `prompts::pick-folder`, `workspace::open-folder`, and `workbench::active-file`.
   Wasmtime
   links components built against an older minor version: the host's tests load Tidy builds made
   against 1.0 and 1.2 and a TODOs build made against 1.1.

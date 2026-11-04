@@ -30,7 +30,13 @@ import { refreshFileMarks } from './fileMarks'
 import { containerOf, refreshViewBadges } from './views'
 import { promptClosed, showPrompt } from './prompts'
 import { trustRequested } from './trust'
-import { refreshDirectories, setIndexing, setWorkspace, setWorkspaceTrustInfo } from './workspace'
+import {
+  openFolder,
+  refreshDirectories,
+  setIndexing,
+  setWorkspace,
+  setWorkspaceTrustInfo,
+} from './workspace'
 
 export function handleEvent(event: AppEvent): void {
   switch (event.type) {
@@ -112,6 +118,9 @@ export function handleEvent(event: AppEvent): void {
       break
     case 'applySelectedRanges':
       void applySelectedRanges()
+      break
+    case 'openFolder':
+      void openFolder(event.path)
       break
     case 'openProvided':
       void openProvided(event.uri)

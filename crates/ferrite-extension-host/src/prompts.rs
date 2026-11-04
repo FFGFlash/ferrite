@@ -54,6 +54,10 @@ pub enum PromptKind {
     buttons: Vec<String>,
     destructive: bool,
   },
+  /// A folder, in the system's dialog; answered with its path as text.
+  Folder {
+    title: String,
+  },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -161,6 +165,13 @@ impl Host for StoreState {
       value: options.value,
       placeholder: optional("placeholder", options.placeholder, 200)?,
       password: false,
+    };
+    self.show_prompt(command, kind)
+  }
+
+  fn pick_folder(&mut self, title: String, command: String) -> Result<u64, ApiError> {
+    let kind = PromptKind::Folder {
+      title: text("title", &title, 200)?,
     };
     self.show_prompt(command, kind)
   }

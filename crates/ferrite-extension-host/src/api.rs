@@ -817,6 +817,11 @@ impl WorkbenchHost for StoreState {
     self.api.argument.clone()
   }
 
+  fn active_file(&mut self) -> Option<String> {
+    let path = self.api.shared().ok()?.active_file()?;
+    Some(path.display().to_string())
+  }
+
   fn show_preview(
     &mut self,
     preview: String,

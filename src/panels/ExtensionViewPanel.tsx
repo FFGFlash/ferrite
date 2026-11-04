@@ -16,6 +16,7 @@ import { FileIcon } from '../components/FileIcon'
 import { Icon, isActionIcon } from '../components/Icon'
 import { isMac } from '../editor/keymap'
 import {
+  type GraphRow,
   expandViewItem,
   runViewCommand,
   setViewInput,
@@ -40,6 +41,7 @@ import {
   type ViewMenuItem,
 } from '../state/views'
 import { themeKind } from '../themes/theme'
+import { GraphCell, graphShape, LANE_WIDTH, passingShape, type GraphShape } from './viewGraph'
 import './ExtensionViewPanel.css'
 
 interface Row {
@@ -379,7 +381,14 @@ function ViewBody({ view }: { view: string }) {
           ))}
         </div>
       )}
-      {!empty && <ViewTree view={view} items={content.items} flags={content.flags} />}
+      {!empty && (
+        <ViewTree
+          view={view}
+          items={content.items}
+          flags={content.flags}
+          graph={content.graph ?? NO_GRAPH}
+        />
+      )}
     </>
   )
 }
@@ -470,14 +479,18 @@ function ItemIconView({ icon, open }: { icon: ItemIcon; open: boolean }) {
   )
 }
 
+const NO_GRAPH: readonly GraphRow[] = []
+
 function ViewTree({
   view,
   items,
   flags,
+  graph,
 }: {
   view: string
   items: readonly ViewEntry[]
   flags: readonly string[]
+  graph: readonly GraphRow[]
 }) {
   const extensions = useStore(extensionsStore)
   const color = useColorResolver()
@@ -508,6 +521,27 @@ function ViewTree({
     [items, toggled],
   )
   const current = Math.min(focused, rows.length - 1)
+
+  // A history graph beside the rows: its rows' shapes, and lanes carried
+  // through the rows under an opened item.
+  const shapes = useMemo(() => {
+    if (graph.length === 0) {
+      return null
+    }
+    const byItem = new Map(graph.map(row => [row.item, row]))
+    let last: GraphRow | null = null
+    const result = rows.map((row): GraphShape | null => {
+      const own = byItem.get(row.item.id)
+      if (own) {
+        last = own
+        return graphShape(own)
+      }
+      return last && row.depth > 0 ? passingShape(last.outputs) : null
+    })
+    const lanes = Math.max(0, ...result.map(shape => shape?.lanes ?? 0))
+    return { result, width: lanes * LANE_WIDTH }
+  }, [graph, rows])
+  const graphWidth = shapes?.width ?? 0
 
   // Opened items whose children aren't listed: ask for them.
   useEffect(() => {
@@ -701,7 +735,7 @@ function ViewTree({
               aria-level={row.depth + 1}
               aria-selected={false}
               className="extension-view__row extension-view__row--pending"
-              style={{ paddingLeft: 8 + row.depth * 12 + 16 }}
+              style={{ paddingLeft: 8 + graphWidth + row.depth * 12 + 16 }}
             >
               {done ? 'No items' : 'Loading…'}
             </li>
@@ -723,9 +757,10 @@ function ViewTree({
             className="extension-view__row"
             data-focused={index === current || undefined}
             data-faded={mark?.faded || undefined}
+            data-graph={graphWidth > 0 || undefined}
             style={
               {
-                paddingLeft: 8 + row.depth * 12,
+                paddingLeft: 8 + graphWidth + row.depth * 12,
                 ...(markColor && { '--view-mark-color': markColor }),
               } as CSSProperties
             }
@@ -747,6 +782,7 @@ function ViewTree({
               openMenu(row, index, event.clientX, event.clientY)
             }}
           >
+            {shapes?.result[index] && <GraphCell shape={shapes.result[index]} width={graphWidth} />}
             <span
               className="extension-view__chevron"
               onClick={event => {

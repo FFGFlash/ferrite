@@ -52,6 +52,7 @@ const content = (overrides: Partial<ViewContent>): ViewContent => ({
   input: '',
   message: null,
   items: [],
+  graph: [],
   ...overrides,
 })
 
@@ -215,6 +216,42 @@ describe('ExtensionViewPanel', () => {
     await user.click(screen.getByRole('button', { name: 'More Actions…' }))
     expect(contextMenuStore.get()?.entries.map(item => item?.label)).toEqual(['commitAll'])
     act(() => contextMenuStore.set(null))
+  })
+
+  it('draws a history graph beside the items, carried through opened ones', async () => {
+    const user = userEvent.setup()
+    // A view of its own: views' content is kept by id.
+    const commits = view('graph')
+    contribute([commits])
+    const lane = (id: string, color = 0) => ({ id, color })
+    vi.mocked(ipc.getViewContent).mockResolvedValue(
+      content({
+        items: [
+          entry('m', null, { label: 'Merge', expanded: true }),
+          entry('m/a.rs', 'm', { label: 'a.rs' }),
+          entry('b', null, { label: 'Base' }),
+        ],
+        graph: [
+          {
+            item: 'm',
+            node: 'm',
+            parents: ['b', 's'],
+            inputs: [],
+            outputs: [lane('b'), lane('s', 1)],
+          },
+          { item: 'b', node: 'b', parents: [], inputs: [lane('b'), lane('s', 1)], outputs: [] },
+        ],
+      }),
+    )
+    render(<ExtensionViewPanel view={commits.fullId} />)
+    const merge = (await screen.findByText('Merge')).closest('[role=treeitem]')!
+    const file = screen.getByText('a.rs').closest('[role=treeitem]')!
+    // Two lanes wide; the merge's node is hollow; its file row carries both lanes.
+    expect(merge.querySelector('svg')).toHaveAttribute('width', '22')
+    expect(merge.querySelector('circle')).toHaveAttribute('data-merge', 'true')
+    expect(file.querySelectorAll('svg path')).toHaveLength(2)
+    expect(file.querySelector('circle')).toBeNull()
+    await user.click(screen.getByText('Base'))
   })
 
   it('asks for the children of an item opened without any', async () => {

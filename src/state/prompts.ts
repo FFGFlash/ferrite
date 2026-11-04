@@ -4,7 +4,7 @@
  * without one, goes back to the extension, which runs a command for it.
  */
 import { closePalette, openQuickPick, paletteStore } from '../components/paletteState'
-import { answerPrompt, type Prompt, type PromptReply } from '../ipc/extensions'
+import { answerPrompt, pickFolderDialog, type Prompt, type PromptReply } from '../ipc/extensions'
 import { reportError } from './notifications'
 import { createStore } from './store'
 
@@ -55,6 +55,16 @@ export function showPrompt(prompt: Prompt): void {
         },
         onCancel: cancel,
       })
+      break
+    case 'folder':
+      pickFolderDialog(prompt.title)
+        .then(path =>
+          reply(prompt.id, path === null ? { type: 'cancelled' } : { type: 'text', text: path }),
+        )
+        .catch((error: unknown) => {
+          reportError('Choosing a folder', error)
+          cancel()
+        })
       break
     case 'confirm':
       if (inPalette !== null && paletteStore.get().open) {

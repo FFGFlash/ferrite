@@ -76,6 +76,8 @@ pub enum AppEvent {
     /// Whether it should become the active tab.
     active: bool,
   },
+  /// An extension asked to open a folder in place of the open one.
+  OpenFolder { path: String },
   /// An extension asked to open the document at a provided address.
   OpenProvided { uri: String },
   /// An extension asked to open a tab comparing two documents, each a
