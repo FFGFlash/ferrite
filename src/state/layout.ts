@@ -10,6 +10,8 @@ import { createStore } from './store'
 
 const SAVE_DELAY_MS = 500
 const MAX_EXPANDED = 200
+const MAX_CONTAINERS = 50
+const MAX_SECTIONS = 50
 export const MIN_ZOOM = 0.5
 export const MAX_ZOOM = 3
 
@@ -24,6 +26,20 @@ export interface Layout {
    * before the dock hold `{ sidebarVisible, activeView }` here instead.
    */
   dock: unknown
+  /** Extension view containers' sections, by container id. */
+  sections: Readonly<Record<string, SectionLayout>>
+}
+
+/** How a view container's sections are laid out. */
+export interface SectionLayout {
+  /** Sections the user collapsed (full view ids). */
+  collapsed: readonly string[]
+  /**
+   * Open sections' shares of the height, by full view id: in proportion to
+   * one another, so they keep their split when the side bar's height
+   * changes. A section without one gets the others' average.
+   */
+  sizes: Readonly<Record<string, number>>
 }
 
 export const DEFAULT_LAYOUT: Layout = {
@@ -31,6 +47,7 @@ export const DEFAULT_LAYOUT: Layout = {
   minimapVisible: true,
   zoom: 1,
   dock: null,
+  sections: {},
 }
 
 export const layoutStore = createStore<Layout>(DEFAULT_LAYOUT)
@@ -59,6 +76,7 @@ export function parseLayout(input: unknown): Layout {
       typeof saved.zoom === 'number' && saved.zoom >= MIN_ZOOM && saved.zoom <= MAX_ZOOM
         ? saved.zoom
         : DEFAULT_LAYOUT.zoom,
+    sections: parseSections(saved.sections),
     dock:
       saved.dock ??
       // Before the dock: the side bar's state seeds the default layout.
@@ -66,6 +84,51 @@ export function parseLayout(input: unknown): Layout {
         ? { sidebarVisible: saved.sidebarVisible, activeView: saved.activeView }
         : null),
   }
+}
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === 'object' && value !== null && !Array.isArray(value)
+
+/** Validates saved section layouts, dropping what doesn't fit. */
+function parseSections(input: unknown): Record<string, SectionLayout> {
+  if (!isRecord(input)) {
+    return {}
+  }
+  const sections: Record<string, SectionLayout> = {}
+  for (const [container, saved] of Object.entries(input).slice(0, MAX_CONTAINERS)) {
+    if (!isRecord(saved)) {
+      continue
+    }
+    const collapsed = Array.isArray(saved.collapsed)
+      ? saved.collapsed
+          .filter((view): view is string => typeof view === 'string')
+          .slice(0, MAX_SECTIONS)
+      : []
+    const sizes = Object.fromEntries(
+      Object.entries(isRecord(saved.sizes) ? saved.sizes : {})
+        .filter(
+          (entry): entry is [string, number] =>
+            typeof entry[1] === 'number' && Number.isFinite(entry[1]) && entry[1] > 0,
+        )
+        .slice(0, MAX_SECTIONS),
+    )
+    sections[container] = { collapsed, sizes }
+  }
+  return sections
+}
+
+/** Changes how a view container's sections are laid out. */
+export function updateSections(
+  container: string,
+  change: (current: SectionLayout) => SectionLayout,
+): void {
+  layoutStore.update(layout => ({
+    ...layout,
+    sections: {
+      ...layout.sections,
+      [container]: change(layout.sections[container] ?? { collapsed: [], sizes: {} }),
+    },
+  }))
 }
 
 /**

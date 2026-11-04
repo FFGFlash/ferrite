@@ -21,6 +21,7 @@ vi.mock('../ipc/extensions', () => ({
 const ipc = await import('../ipc/extensions')
 const { extensionsStore, viewChanged } = await import('../state/extensions')
 const { contextMenuStore } = await import('../components/contextMenuState')
+const { DEFAULT_LAYOUT, layoutStore } = await import('../state/layout')
 const { ExtensionContainerPanel, ExtensionViewActions, ExtensionViewPanel } =
   await import('./ExtensionViewPanel')
 
@@ -298,12 +299,49 @@ describe('ExtensionViewPanel', () => {
           : { items: [entry('y', null, { label: 'First commit' })] },
       ),
     )
-    render(<ExtensionContainerPanel container="example.git.scm" />)
-    const toggle = await screen.findByRole('button', { name: 'Changes 3' })
-    expect(toggle).toHaveAttribute('aria-expanded', 'true')
-    expect(await screen.findByText('First commit')).toBeInTheDocument()
-    await user.click(screen.getByRole('button', { name: 'Commits' }))
-    expect(screen.queryByText('First commit')).toBeNull()
-    expect(screen.getByText('x.rs')).toBeInTheDocument()
+    // jsdom lays nothing out: every open section measures 200 pixels.
+    const measured = vi
+      .spyOn(HTMLElement.prototype, 'getBoundingClientRect')
+      .mockReturnValue({ height: 200 } as DOMRect)
+    layoutStore.set(DEFAULT_LAYOUT)
+    try {
+      const { unmount } = render(<ExtensionContainerPanel container="example.git.scm" />)
+      const toggle = await screen.findByRole('button', { name: 'Changes 3' })
+      expect(toggle).toHaveAttribute('aria-expanded', 'true')
+      expect(await screen.findByText('First commit')).toBeInTheDocument()
+
+      // The boundary between two open sections moves, and the split is kept
+      // as their shares.
+      const sash = screen.getByRole('separator', { name: 'Resize Commits' })
+      expect(sash).toHaveAttribute('aria-valuenow', '200')
+      fireEvent.keyDown(sash, { key: 'ArrowUp' })
+      expect(layoutStore.get().sections['example.git.scm']?.sizes).toEqual({
+        [changes.fullId]: 184,
+        [commits.fullId]: 216,
+      })
+      const section = (name: string) => screen.getByRole('region', { name })
+      expect(section('Commits').style.flexGrow).toBe('216')
+
+      // Collapsing is remembered too.
+      await user.click(screen.getByRole('button', { name: 'Commits' }))
+      expect(screen.queryByText('First commit')).toBeNull()
+      expect(screen.getByText('x.rs')).toBeInTheDocument()
+      expect(screen.queryByRole('separator')).toBeNull()
+      expect(layoutStore.get().sections['example.git.scm']?.collapsed).toEqual([commits.fullId])
+
+      // Shown again (as in the next session), it's as it was left.
+      unmount()
+      render(<ExtensionContainerPanel container="example.git.scm" />)
+      expect(await screen.findByRole('button', { name: 'Commits' })).toHaveAttribute(
+        'aria-expanded',
+        'false',
+      )
+      await user.click(screen.getByRole('button', { name: 'Commits' }))
+      expect(section('Commits').style.flexGrow).toBe('216')
+      expect(section('Changes').style.flexGrow).toBe('184')
+    } finally {
+      measured.mockRestore()
+      layoutStore.set(DEFAULT_LAYOUT)
+    }
   })
 })

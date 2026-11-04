@@ -690,7 +690,8 @@ on_expand = "ferrite.git.expandCommit"
 ```
 
 A container needs at least one view. A view in a container has no activity bar entry of its
-own; showing it (`show-view`) shows its container.
+own; showing it (`show-view`) shows its container. Users collapse sections and resize them by dragging the
+boundary between two; Ferrite remembers both for the next session.
 
 #### Tree items
 

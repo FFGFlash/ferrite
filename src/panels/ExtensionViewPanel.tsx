@@ -1,13 +1,16 @@
 import {
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
   type CSSProperties,
   type KeyboardEvent,
   type MouseEvent,
+  type RefObject,
 } from 'react'
 import { openContextMenu, type MenuEntry } from '../components/contextMenuState'
+import { Sash } from '../components/Sash'
 import { entryIcon } from '../components/fileIcons'
 import { FileIcon } from '../components/FileIcon'
 import { Icon, isActionIcon } from '../components/Icon'
@@ -24,6 +27,7 @@ import {
 import { extensionsStore, runContributed } from '../state/extensions'
 import { useColorResolver } from '../state/fileMarks'
 import { iconThemeStore } from '../state/iconTheme'
+import { layoutStore, updateSections } from '../state/layout'
 import { reportError } from '../state/notifications'
 import { useStore } from '../state/store'
 import {
@@ -173,35 +177,79 @@ export function ExtensionContainerPanel({ container }: { container: string }) {
   const extensions = useStore(extensionsStore)
   const views = useContributedViews()
   const sections = useMemo(() => sectionsOf(container, extensions), [container, extensions])
-  const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(new Set())
+  const saved = useStore(layoutStore).sections[container]
+  const collapsed = useMemo(() => new Set(saved?.collapsed ?? []), [saved])
+  const open = sections.filter(section => !collapsed.has(section))
+  const root = useRef<HTMLDivElement>(null)
+  const heights = useSectionHeights(root, sections, open)
+
+  // Open sections share the height in proportion to their saved sizes; one
+  // without a size gets the others' average.
+  const savedSizes = saved?.sizes ?? {}
+  const known = open.map(section => savedSizes[section]).filter(size => size !== undefined)
+  const average = known.length > 0 ? known.reduce((a, b) => a + b, 0) / known.length : 1
+  const share = (section: string) => savedSizes[section] ?? average
+
+  const toggle = (section: string) =>
+    updateSections(container, current => ({
+      ...current,
+      collapsed: collapsed.has(section)
+        ? current.collapsed.filter(view => view !== section)
+        : [...current.collapsed, section],
+    }))
+
+  /** Moves the boundary above `section`, between it and the open section before it. */
+  const resize = (section: string, above: string, height: number) => {
+    const total = (heights.get(section) ?? 0) + (heights.get(above) ?? 0)
+    updateSections(container, current => ({
+      ...current,
+      // The sections' heights now, as their shares.
+      sizes: {
+        ...current.sizes,
+        ...Object.fromEntries(open.map(view => [view, heights.get(view) ?? share(view)])),
+        [section]: height,
+        [above]: total - height,
+      },
+    }))
+  }
+
   return (
-    <div className="extension-container">
+    <div ref={root} className="extension-container">
       {sections.map(section => {
-        const open = !collapsed.has(section)
+        const isOpen = !collapsed.has(section)
+        const index = open.indexOf(section)
+        const above = index > 0 ? open[index - 1] : undefined
+        const height = heights.get(section) ?? 0
+        const title = views.get(section)?.title ?? section
         return (
           <section
             key={section}
             className="extension-section"
-            data-open={open || undefined}
-            aria-label={views.get(section)?.title}
+            data-open={isOpen || undefined}
+            data-section={section}
+            aria-label={title}
+            style={isOpen ? { flexGrow: share(section) } : undefined}
           >
+            {above !== undefined && height > 0 && (
+              <Sash
+                label={`Resize ${title}`}
+                orientation="horizontal"
+                value={height}
+                min={MIN_SECTION_HEIGHT}
+                max={Math.max(
+                  MIN_SECTION_HEIGHT,
+                  height + (heights.get(above) ?? 0) - MIN_SECTION_HEIGHT,
+                )}
+                onChange={next => resize(section, above, next)}
+              />
+            )}
             <SectionHeader
               view={section}
-              title={views.get(section)?.title ?? section}
-              open={open}
-              toggle={() =>
-                setCollapsed(current => {
-                  const next = new Set(current)
-                  if (open) {
-                    next.add(section)
-                  } else {
-                    next.delete(section)
-                  }
-                  return next
-                })
-              }
+              title={title}
+              open={isOpen}
+              toggle={() => toggle(section)}
             />
-            {open && (
+            {isOpen && (
               <div className="extension-view extension-section__body">
                 <ViewBody view={section} />
               </div>
@@ -211,6 +259,45 @@ export function ExtensionContainerPanel({ container }: { container: string }) {
       })}
     </div>
   )
+}
+
+/** The smallest an open section gets by resizing: its header and two rows. */
+const MIN_SECTION_HEIGHT = 66
+
+/** The heights of a container's open sections (in `root`), measured as they change. */
+function useSectionHeights(
+  root: RefObject<HTMLDivElement | null>,
+  sections: readonly string[],
+  open: readonly string[],
+): ReadonlyMap<string, number> {
+  const [heights, setHeights] = useState<ReadonlyMap<string, number>>(new Map())
+  const key = open.join('\n')
+  useLayoutEffect(() => {
+    const elements = [
+      ...(root.current?.querySelectorAll<HTMLElement>(':scope > [data-section]') ?? []),
+    ]
+    const measure = () =>
+      setHeights(current => {
+        const next = new Map<string, number>()
+        for (const element of elements) {
+          const section = element.dataset.section
+          if (section && element.dataset.open !== undefined) {
+            next.set(section, element.getBoundingClientRect().height)
+          }
+        }
+        const same =
+          next.size === current.size &&
+          [...next].every(([view, height]) => current.get(view) === height)
+        return same ? current : next
+      })
+    measure()
+    const observer = new ResizeObserver(measure)
+    for (const element of elements) {
+      observer.observe(element)
+    }
+    return () => observer.disconnect()
+  }, [root, sections, key])
+  return heights
 }
 
 function SectionHeader({

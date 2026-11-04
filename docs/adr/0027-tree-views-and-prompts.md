@@ -45,9 +45,15 @@ in place would break components built against older versions.
 ### View containers hold views as sections
 
 `[[view_containers]]` declares an activity bar entry. Views with `container` are its sections:
-each has a header with its title, badge, and buttons, collapses, and scrolls on its own. Open
-sections share the height equally; resizing them is left for later. A container's badge adds
-up its sections'. Showing a section shows its container.
+each has a header with its title, badge, and buttons, collapses, and scrolls on its own. A
+container's badge adds up its sections'. Showing a section shows its container.
+
+The user resizes open sections by dragging the boundary between two of them (or with the
+keyboard on it, as other sashes in Ferrite). Which sections are collapsed, and the open ones'
+sizes, are saved with the layout (`state.json`) per container, so they're as the user left
+them in the next session. Sizes are kept as proportions rather than pixels: the sections keep
+their split when the side bar or window changes height. A section the layout has no size for
+gets the others' average; none is smaller than its header and two rows.
 
 ### Prompts
 
@@ -89,6 +95,5 @@ before they're committed.
   load results when a suite is opened.
 - `when` is a single flag. Richer conditions would need a small expression language; none is
   needed yet.
-- Sections can't be resized, and a collapsed section's state isn't saved between sessions.
 - Clicking a changed file opens it. When the diff editor arrives (stage 3), it opens the
   changes instead.

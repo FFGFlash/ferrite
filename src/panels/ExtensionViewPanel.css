@@ -201,6 +201,7 @@
 }
 
 .extension-section {
+  position: relative;
   display: flex;
   flex-direction: column;
   flex: none;
@@ -212,8 +213,10 @@
   border-top: none;
 }
 
+/* Open sections share the height; their flex-grow is their saved share. */
 .extension-section[data-open] {
   flex: 1 1 0;
+  min-height: 44px;
 }
 
 .extension-section__header {
