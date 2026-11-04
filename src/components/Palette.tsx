@@ -200,6 +200,8 @@ function PaletteDialog({ initial, pick }: { initial: string; pick: QuickPick | n
           aria-label={pick ? pick.placeholder : PLACEHOLDER}
           placeholder={pick ? pick.placeholder : PLACEHOLDER}
           value={value}
+          type={pick?.input?.password ? 'password' : 'text'}
+          autoComplete="off"
           spellCheck={false}
           onChange={event => setValue(event.target.value)}
           onKeyDown={onKeyDown}

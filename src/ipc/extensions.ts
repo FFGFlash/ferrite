@@ -329,7 +329,14 @@ export type Prompt = { id: number; extension: string } & (
       title: string
       items: { label: string; description: string | null; value: string }[]
     }
-  | { type: 'input'; title: string; value: string; placeholder: string | null }
+  | {
+      type: 'input'
+      title: string
+      value: string
+      placeholder: string | null
+      /** What's typed is hidden: a program asking for a password or passphrase. */
+      password: boolean
+    }
   | {
       type: 'confirm'
       message: string

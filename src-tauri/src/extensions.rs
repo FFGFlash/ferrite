@@ -150,6 +150,11 @@ impl Embedder for AppEmbedder {
     crate::editor::save_quietly(&self.app, document)
   }
 
+  fn askpass_program(&self) -> Option<PathBuf> {
+    // This executable, which answers as the helper (see `main.rs`).
+    std::env::current_exe().ok()
+  }
+
   fn set_setting(
     &self,
     extension: &str,

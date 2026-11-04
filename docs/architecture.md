@@ -722,6 +722,13 @@ connects it to the editor, settings, and frontend. The developer guide is
   `ProvidedChanged`. `OpenDiff` becomes a `diff:` dock item (`src/state/diffs.ts`), whose sides
   open hidden and show in `DiffView`: editors with zones, line classes, and folds set by the diff
   (`src/editor/diffLayout.ts`), compared by `diff_compute` (`ferrite-diff`).
+- **Signing in and timers** (`askpass.rs`, `timers.rs`;
+  [ADR 0030](adr/0030-branches-remotes-and-signing-in.md)). Programs declared with `askpass` run
+  with `GIT_ASKPASS`/`SSH_ASKPASS` naming the app's own executable, which, finding
+  `FERRITE_ASKPASS_*` in its environment, sends the question over a local connection to the host
+  (`askpass::client_main`, first in `main`). The host asks with a prompt answered to the waiting
+  thread (`Shared::ask_user`). Timers wait on threads of their own and run their command with
+  `Payload::Timer`.
 - **Quick diff** (API 1.9, `quick_diff.rs`;
   [ADR 0029](adr/0029-quick-diff-and-tab-marks.md)). `ExtensionHost::original_of` asks
   `[quick_diff]` extensions for a file's original (`Payload::Original`); the app keeps its text

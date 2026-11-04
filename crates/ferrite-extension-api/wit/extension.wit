@@ -8,7 +8,7 @@
 /// It can call only the functions it imports here; there is no other
 /// filesystem, network, environment, clock, or process access. See
 /// `docs/extensions.md`.
-package ferrite:extension@1.9.0;
+package ferrite:extension@1.10.0;
 
 /// Types shared by the host functions and the extension's exports.
 interface types {
@@ -963,6 +963,23 @@ interface quick-diff {
   apply-selected-ranges: func() -> result<_, api-error>;
 }
 
+/// Running one of the extension's commands later (1.10), as for fetching
+/// in the background every few minutes.
+interface timers {
+  use types.{api-error};
+
+  /// Runs `command` (one of the extension's own) once, after `delay-ms`
+  /// (1 second to 1 day). Returns the timer's id. At most 16 wait at once;
+  /// they're dropped when the extension stops.
+  set-timer: func(delay-ms: u32, command: string) -> result<u64, api-error>;
+
+  /// Cancels a timer. Returns false if it had run or been cancelled.
+  clear-timer: func(id: u64) -> bool;
+
+  /// The timer the running command was run for; `none` otherwise.
+  fired: func() -> option<u64>;
+}
+
 world extension {
   use types.{activation, command-context, document-change, document-id, document-info};
 
@@ -979,6 +996,7 @@ world extension {
   import prompts;
   import documents;
   import quick-diff;
+  import timers;
 
   /// Called once before any other export. An error fails the extension.
   export activate: func(context: activation) -> result<_, string>;

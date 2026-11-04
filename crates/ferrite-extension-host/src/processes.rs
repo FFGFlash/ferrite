@@ -336,11 +336,15 @@ impl ApiContext {
         ))
       })?
     };
+    let mut env = options.env;
+    if declared.askpass {
+      env.extend(shared.askpass_env(self.extension_id()));
+    }
     Ok(Request {
       program,
       args,
       cwd,
-      env: options.env,
+      env,
       stdin: options.stdin,
     })
   }

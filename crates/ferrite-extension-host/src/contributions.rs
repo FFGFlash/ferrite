@@ -485,6 +485,9 @@ pub struct ProgramContribution {
   /// A path inside the open folder, such as `node_modules/.bin/prettier`,
   /// run instead when the folder has it and is trusted.
   pub workspace: Option<String>,
+  /// It can ask the user to sign in (a password, a passphrase), which
+  /// Ferrite asks (see `askpass.rs`).
+  pub askpass: bool,
 }
 
 /// A color the extension's explorer marks use, which themes and the user's
@@ -789,6 +792,8 @@ pub struct RawProgram {
   name: String,
   command: Option<String>,
   workspace: Option<String>,
+  #[serde(default)]
+  askpass: bool,
 }
 
 #[derive(Deserialize)]
@@ -863,7 +868,7 @@ pub fn parse(
   limit("themes", raw.themes.len(), 20)?;
   limit("icon_themes", raw.icon_themes.len(), 5)?;
   limit("keybindings", raw.keybindings.len(), 100)?;
-  limit("menus", raw.menus.len(), 50)?;
+  limit("menus", raw.menus.len(), 100)?;
   limit("status_items", raw.status_items.len(), 20)?;
   limit("views", raw.views.len(), 10)?;
   limit("decorations", raw.decorations.len(), 20)?;
@@ -1559,6 +1564,7 @@ pub fn parse(
       name: program.name,
       command,
       workspace: program.workspace,
+      askpass: program.askpass,
     });
   }
 

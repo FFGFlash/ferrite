@@ -45,6 +45,8 @@ pub enum PromptKind {
     title: String,
     value: String,
     placeholder: Option<String>,
+    /// What's typed is hidden, as for a password.
+    password: bool,
   },
   Confirm {
     message: String,
@@ -158,6 +160,7 @@ impl Host for StoreState {
       title: text("title", &options.title, 200)?,
       value: options.value,
       placeholder: optional("placeholder", options.placeholder, 200)?,
+      password: false,
     };
     self.show_prompt(command, kind)
   }

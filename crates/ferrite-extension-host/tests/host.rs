@@ -2271,6 +2271,188 @@ fn the_git_extension_names_originals_and_stages_changes() {
   );
 }
 
+/// The text of one of the git extension's status bar items, if it shows.
+fn status_text(s: &Setup, id: &str) -> Option<String> {
+  s.host
+    .status_items()
+    .into_iter()
+    .find(|item| item.id == format!("ferrite.git.{id}"))
+    .map(|item| item.content.text)
+}
+
+/// Waits for a status bar item to show `text`.
+fn wait_for_status(s: &Setup, id: &str, text: &str) {
+  let deadline = Instant::now() + Duration::from_secs(30);
+  while status_text(s, id).as_deref() != Some(text) {
+    assert!(
+      Instant::now() < deadline,
+      "{id} shows {:?}, not {text:?}",
+      status_text(s, id)
+    );
+    std::thread::sleep(Duration::from_millis(50));
+  }
+}
+
+#[test]
+fn the_git_extension_works_with_branches_and_remotes() {
+  let Some((s, repo)) = git_extension() else {
+    return;
+  };
+  let remote = repo.parent().expect("a parent").join("remote.git");
+  git(
+    repo.parent().expect("a parent"),
+    &["init", "-q", "--bare", "-b", "main", "remote.git"],
+  );
+  std::fs::write(repo.join("src").join("main.rs"), "fn main() {}\n").expect("write");
+  git(&repo, &["add", "."]);
+  git(&repo, &["commit", "-q", "-m", "first"]);
+  git(
+    &repo,
+    &["remote", "add", "origin", &remote.display().to_string()],
+  );
+  git(&repo, &["push", "-q", "-u", "origin", "main"]);
+  *s.fake.folder.lock().unwrap_or_else(PoisonError::into_inner) = Some(repo.clone());
+  s.host.load();
+  let head = |dir: &Path, rev: &str| {
+    git(dir, &["rev-parse", rev])
+      .expect("git")
+      .trim()
+      .to_owned()
+  };
+  let on_branch = |name: &str| {
+    let deadline = Instant::now() + Duration::from_secs(30);
+    while git(&repo, &["rev-parse", "--abbrev-ref", "HEAD"])
+      .expect("git")
+      .trim()
+      != name
+    {
+      assert!(Instant::now() < deadline, "{name} isn't checked out");
+      std::thread::sleep(Duration::from_millis(50));
+    }
+  };
+
+  // The sync button: in step with origin/main, then a commit ahead.
+  wait_for_status(&s, "sync", "0↓ 0↑");
+  std::fs::write(repo.join("src").join("main.rs"), "fn main() { run(); }\n").expect("write");
+  git(&repo, &["commit", "-q", "-am", "second"]);
+  s.host.files_changed(&[repo.join(".git").join("HEAD")]);
+  wait_for_status(&s, "sync", "0↓ 1↑");
+  assert_eq!(status_text(&s, "branch").as_deref(), Some("main"));
+
+  // Push: the remote has the commit, and Ferrite offers to fetch in the
+  // background, once.
+  s.host
+    .run_command("ferrite.git.push", None, None)
+    .expect("runs")
+    .wait()
+    .expect("pushes");
+  let offer = wait_for_prompt(&s);
+  assert!(matches!(
+    &offer.kind,
+    ferrite_extension_host::PromptKind::Confirm { message, .. } if message.contains("git fetch")
+  ));
+  s.host.prompt_answered(
+    offer.id,
+    ferrite_extension_host::PromptReply::Button { index: 1 },
+  );
+  assert_eq!(head(&remote, "main"), head(&repo, "HEAD"));
+  s.host
+    .files_changed(&[repo.join(".git").join("refs").join("remotes")]);
+  wait_for_status(&s, "sync", "0↓ 0↑");
+
+  // A new branch, named in a prompt, follows nothing until it's published.
+  s.host
+    .run_command("ferrite.git.createBranch", None, None)
+    .expect("runs")
+    .wait()
+    .expect("asks");
+  let name = wait_for_prompt(&s);
+  s.host.prompt_answered(
+    name.id,
+    ferrite_extension_host::PromptReply::Text {
+      text: "my topic".into(),
+    },
+  );
+  on_branch("my-topic");
+  s.host.files_changed(&[repo.join(".git").join("HEAD")]);
+  wait_for_status(&s, "sync", "↑ Publish");
+  s.host
+    .run_command("ferrite.git.publish", None, None)
+    .expect("runs")
+    .wait()
+    .expect("publishes");
+  let deadline = Instant::now() + Duration::from_secs(30);
+  while git(&remote, &["branch", "--list", "my-topic"])
+    .expect("git")
+    .trim()
+    .is_empty()
+  {
+    assert!(Instant::now() < deadline, "not published");
+    std::thread::sleep(Duration::from_millis(50));
+  }
+
+  // The branch picker checks out main again.
+  s.host
+    .run_command("ferrite.git.checkout", None, None)
+    .expect("runs")
+    .wait()
+    .expect("asks");
+  let picker = wait_for_prompt(&s);
+  let ferrite_extension_host::PromptKind::Pick { items, .. } = &picker.kind else {
+    panic!("a pick: {picker:?}");
+  };
+  let labels: Vec<&str> = items.iter().map(|item| item.label.as_str()).collect();
+  assert!(labels.contains(&"+ Create New Branch…"), "{labels:?}");
+  assert!(
+    labels.contains(&"main") && labels.contains(&"origin/my-topic"),
+    "{labels:?}"
+  );
+  assert!(
+    !labels.contains(&"my-topic"),
+    "not the branch checked out: {labels:?}"
+  );
+  s.host.prompt_answered(
+    picker.id,
+    ferrite_extension_host::PromptReply::Picked {
+      value: "refs/heads/main".into(),
+    },
+  );
+  on_branch("main");
+
+  // Sync asks first, then pulls what another clone pushed, and pushes.
+  let other = repo.parent().expect("a parent").join("other");
+  git(
+    repo.parent().expect("a parent"),
+    &["clone", "-q", &remote.display().to_string(), "other"],
+  );
+  std::fs::write(other.join("notes.txt"), "notes").expect("write");
+  git(&other, &["add", "."]);
+  git(&other, &["commit", "-q", "-m", "elsewhere"]);
+  git(&other, &["push", "-q", "origin", "main"]);
+  s.host.files_changed(&[repo.join(".git").join("HEAD")]);
+  wait_for_status(&s, "sync", "0↓ 0↑");
+  s.host
+    .run_command("ferrite.git.sync", None, None)
+    .expect("runs")
+    .wait()
+    .expect("asks");
+  let confirm = wait_for_prompt(&s);
+  assert!(matches!(
+    &confirm.kind,
+    ferrite_extension_host::PromptKind::Confirm { message, .. } if message.contains("origin/main")
+  ));
+  s.host.prompt_answered(
+    confirm.id,
+    ferrite_extension_host::PromptReply::Button { index: 0 },
+  );
+  let deadline = Instant::now() + Duration::from_secs(30);
+  while !repo.join("notes.txt").exists() {
+    assert!(Instant::now() < deadline, "not pulled");
+    std::thread::sleep(Duration::from_millis(50));
+  }
+  assert_eq!(head(&repo, "HEAD"), head(&remote, "main"));
+}
+
 #[test]
 fn the_git_extension_discards_changes_and_initializes_repositories() {
   let Some((s, repo)) = git_extension() else {

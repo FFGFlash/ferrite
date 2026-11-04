@@ -48,7 +48,11 @@ export function showPrompt(prompt: Prompt): void {
       openQuickPick({
         placeholder: prompt.placeholder ? `${prompt.title} (${prompt.placeholder})` : prompt.title,
         items: [],
-        input: { value: prompt.value, accept: text => reply(prompt.id, { type: 'text', text }) },
+        input: {
+          value: prompt.value,
+          accept: text => reply(prompt.id, { type: 'text', text }),
+          password: prompt.password,
+        },
         onCancel: cancel,
       })
       break

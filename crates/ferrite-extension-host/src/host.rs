@@ -203,8 +203,15 @@ struct PendingPrompt {
   id: u64,
   extension: String,
   generation: u64,
-  /// Run with the answer.
-  command: String,
+  answer: PromptAnswerTo,
+}
+
+/// Where a prompt's answer goes.
+enum PromptAnswerTo {
+  /// An extension command, run with it.
+  Command(String),
+  /// A thread waiting for it (a program asking for a password).
+  Reply(mpsc::Sender<PromptReply>),
 }
 
 /// A path an extension watches (`workspace::watch`).
@@ -240,6 +247,9 @@ struct State {
   /// request reads them.
   provided: HashMap<u64, Option<String>>,
   next_request: u64,
+  /// Extensions' timers waiting to run.
+  timers: Vec<crate::timers::Timer>,
+  next_timer: u64,
   next_prompt: u64,
   watches: Vec<Watch>,
   next_watch: u64,
@@ -251,6 +261,8 @@ pub struct Shared {
   me: Weak<Shared>,
   pub embedder: Arc<dyn Embedder>,
   runtime: OnceLock<Result<Arc<Runtime>, String>>,
+  /// Where programs' sign-in questions come, started on first use.
+  askpass: OnceLock<Option<Arc<crate::askpass::Askpass>>>,
   /// Linear memory of all running extensions.
   memory: Arc<MemoryPool>,
   /// Extensions' stored values and webview tabs' states.
@@ -279,6 +291,23 @@ impl Outbox {
 impl Shared {
   fn lock(&self) -> MutexGuard<'_, State> {
     self.state.lock().unwrap_or_else(PoisonError::into_inner)
+  }
+
+  /// The environment that lets `extension`'s programs ask the user to sign
+  /// in, if the embedder can (see [`crate::askpass`]).
+  pub fn askpass_env(&self, extension: &str) -> Vec<(String, String)> {
+    let Some(program) = self.embedder.askpass_program() else {
+      return Vec::new();
+    };
+    let server = self.askpass.get_or_init(|| {
+      crate::askpass::Askpass::start(self.me.clone())
+        .inspect_err(|error| tracing::error!(%error, "can't listen for sign-in questions"))
+        .ok()
+    });
+    server
+      .as_ref()
+      .map(|server| server.env(extension, &program))
+      .unwrap_or_default()
   }
 
   pub fn memory_pool(&self) -> Arc<MemoryPool> {
@@ -391,6 +420,13 @@ impl Shared {
   /// watches stop.
   fn forget_output(state: &mut State, id: &str, outbox: &mut Outbox) {
     state.watches.retain(|watch| watch.extension != id);
+    state.timers.retain(|timer| {
+      let mine = timer.extension == id;
+      if mine {
+        timer.cancel();
+      }
+      !mine
+    });
     if state.marks.remove(id).is_some() {
       outbox.push(Notification::FileMarksChanged);
     }
@@ -644,6 +680,46 @@ impl Shared {
     command: String,
     kind: PromptKind,
   ) -> u64 {
+    self.show(
+      extension,
+      generation,
+      PromptAnswerTo::Command(command),
+      kind,
+    )
+  }
+
+  /// Asks the user something for an extension's program, cancelling the
+  /// prompt showing. Returns its id and where the reply arrives; the sender
+  /// is dropped if the prompt is withdrawn.
+  pub fn ask_user(&self, extension: &str, kind: PromptKind) -> (u64, mpsc::Receiver<PromptReply>) {
+    let (sender, receiver) = mpsc::channel();
+    // The reply goes to the receiver, not to a run of the extension.
+    let id = self.show(extension, 0, PromptAnswerTo::Reply(sender), kind);
+    (id, receiver)
+  }
+
+  /// Withdraws prompt `id` if it's still showing.
+  pub fn withdraw_prompt(&self, id: u64) {
+    let withdrawn = {
+      let mut state = self.lock();
+      if state.prompt.as_ref().is_some_and(|prompt| prompt.id == id) {
+        state.prompt.take()
+      } else {
+        None
+      }
+    };
+    if withdrawn.is_some() {
+      self.embedder.notify(Notification::PromptClosed(id));
+    }
+  }
+
+  fn show(
+    &self,
+    extension: &str,
+    generation: u64,
+    answer: PromptAnswerTo,
+    kind: PromptKind,
+  ) -> u64 {
     let (id, name, replaced) = {
       let mut state = self.lock();
       state.next_prompt += 1;
@@ -657,7 +733,7 @@ impl Shared {
         id,
         extension: extension.to_owned(),
         generation,
-        command,
+        answer,
       });
       (id, name, replaced)
     };
@@ -670,6 +746,82 @@ impl Shared {
       kind,
     }));
     id
+  }
+
+  /// Runs `command` of an extension after `delay`, unless the timer is
+  /// cleared or the extension stops first. `None` if the extension has as
+  /// many timers as it may.
+  pub fn set_timer(
+    &self,
+    extension: &str,
+    generation: u64,
+    delay: Duration,
+    command: String,
+  ) -> Option<u64> {
+    let (id, wait) = {
+      let mut state = self.lock();
+      let waiting = state
+        .timers
+        .iter()
+        .filter(|timer| timer.extension == extension)
+        .count();
+      if waiting >= crate::timers::MAX_TIMERS {
+        return None;
+      }
+      state.next_timer += 1;
+      let id = state.next_timer;
+      let timer = crate::timers::Timer::new(id, extension.to_owned());
+      let wait = timer.waiter(delay);
+      state.timers.push(timer);
+      (id, wait)
+    };
+    let shared = self.me.clone();
+    let extension = extension.to_owned();
+    let started = std::thread::Builder::new()
+      .name("extension-timer".into())
+      .spawn(move || {
+        if !wait() {
+          return;
+        }
+        let Some(shared) = shared.upgrade() else {
+          return;
+        };
+        let due = {
+          let mut state = shared.lock();
+          let before = state.timers.len();
+          state.timers.retain(|timer| timer.id != id);
+          state.timers.len() != before
+        };
+        if due {
+          shared.deliver(
+            &extension,
+            generation,
+            Event::background(command, None, Payload::Timer(id)),
+          );
+        }
+      });
+    if let Err(error) = started {
+      tracing::error!(%error, "could not start a timer's thread");
+      self.lock().timers.retain(|timer| timer.id != id);
+      return None;
+    }
+    Some(id)
+  }
+
+  /// Cancels an extension's timer; false if it had run or was cancelled.
+  pub fn clear_timer(&self, extension: &str, id: u64) -> bool {
+    let mut state = self.lock();
+    match state
+      .timers
+      .iter()
+      .position(|timer| timer.id == id && timer.extension == extension)
+    {
+      Some(index) => {
+        state.timers.remove(index).cancel();
+        true
+      }
+      None => false,
+    }
   }
 
   /// Whether a loaded extension provides addresses with `scheme`.
@@ -686,17 +838,19 @@ impl Shared {
     self.lock().provided.insert(id, text);
   }
 
-  /// Runs a prompt's command with the user's reply.
+  /// Runs a prompt's command with the user's reply, or hands the reply to
+  /// the thread waiting for it.
   fn answer_prompt(&self, prompt: PendingPrompt, reply: PromptReply) {
-    self.deliver(
-      &prompt.extension,
-      prompt.generation,
-      Event::background(
-        prompt.command,
-        None,
-        Payload::Answer(reply.into_answer(prompt.id)),
+    match prompt.answer {
+      PromptAnswerTo::Command(command) => self.deliver(
+        &prompt.extension,
+        prompt.generation,
+        Event::background(command, None, Payload::Answer(reply.into_answer(prompt.id))),
       ),
-    );
+      PromptAnswerTo::Reply(sender) => {
+        let _ = sender.send(reply);
+      }
+    }
   }
 
   /// Opens a preview, or updates its title, and asks to show it. A webview
@@ -1204,6 +1358,7 @@ impl ExtensionHost {
       me: me.clone(),
       embedder,
       runtime: OnceLock::new(),
+      askpass: OnceLock::new(),
       memory,
       storage: Storage::new(options.storage_dir.clone()),
       webview_theme: RwLock::new(WebviewTheme::default()),
@@ -1221,6 +1376,8 @@ impl ExtensionHost {
         next_prompt: 0,
         provided: HashMap::new(),
         next_request: 0,
+        timers: Vec::new(),
+        next_timer: 0,
         watches: Vec::new(),
         next_watch: 0,
         next_generation: 0,
@@ -2416,6 +2573,11 @@ impl ExtensionHost {
       .filter(|(_, content)| content.badge > 0)
       .map(|(id, content)| (id.clone(), content.badge))
       .collect()
+  }
+
+  #[cfg(test)]
+  pub(crate) fn shared(&self) -> &Arc<Shared> {
+    &self.shared
   }
 
   /// The user answered a prompt (or closed it): runs its command. Answers

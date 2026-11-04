@@ -389,6 +389,7 @@ processes = true
 
 [[programs]]
 name = "git"                      # what the code calls it; also the command by default
+askpass = true                    # optional: it may ask the user to sign in (see below)
 
 [[programs]]
 name = "prettier"
@@ -419,6 +420,13 @@ Users can set where a program is in `settings.toml`, by `<extension id>.<name>`:
   `failed`.
 
 Programs run as the user, with Ferrite's environment, in a process group with no console window.
+
+**Signing in.** A program declared with `askpass = true` runs with `GIT_ASKPASS` and
+`SSH_ASKPASS` set to Ferrite's own executable (and `SSH_ASKPASS_REQUIRE=force`). When Git needs
+a username or password, or SSH a key's passphrase, it runs that executable with the question,
+which Ferrite asks the user in the command palette, hiding what's typed for passwords,
+passphrases, PINs, and tokens. The answer goes back to the program, never to the extension.
+Credential helpers (Git Credential Manager, an SSH agent) still answer first when they can.
 They are stopped when the extension stops. Their input is empty unless `stdin` is given, so a
 program never waits for typing. Some still wait for an answer in other ways: Git, for example,
 needs `GIT_TERMINAL_PROMPT=0` so that it fails rather than waits for a password.
@@ -1099,6 +1107,13 @@ Shift+F7) and choose side by side or inline, whether whitespace at the ends of l
 whether unchanged lines collapse; the choices are remembered. Narrower than 900 pixels, a diff
 shows inline. Files with more than 500,000 lines aren't compared.
 
+### Timers
+
+The `timers` interface (API 1.10) runs one of the extension's commands later: **`set-timer(delay-ms,
+command)`** waits 1 second to 1 day and returns the timer's id, which **`timers::fired()`**
+returns while the command runs; **`clear-timer(id)`** cancels it. At most 16 wait at once, and
+they're dropped when the extension stops. Git fetches in the background this way.
+
 ### Quick diff
 
 The `quick-diff` interface (API 1.9) compares open files with originals the extension names,
@@ -1187,6 +1202,8 @@ light = "#895503"                    # optional; the dark color otherwise
 | View items                         | 5,000 per view; 10,000 with `views`     |
 | View containers                    | 5 per extension                         |
 | Text providers / provided text     | 5 per extension / 32 MiB                |
+| Timers                             | 16 waiting per extension; 1 s to 1 day  |
+| Menus                              | 100 per extension                       |
 | Pick items / confirm buttons       | 1,000 / 4                               |
 | Decorated ranges                   | 10,000 per type and document            |
 | Programs / colors                  | 10 / 50 per extension                   |
@@ -1487,20 +1504,21 @@ component must import nothing but the Ferrite interfaces (`ferrite:extension/hos
 `ferrite:extension/workbench`, `ferrite:extension/files`, `ferrite:extension/viewers`,
 `ferrite:extension/webviews`, `ferrite:extension/storage`, `ferrite:extension/workspace`,
 `ferrite:extension/processes`, `ferrite:extension/explorer`, `ferrite:extension/views`,
-`ferrite:extension/prompts`, `ferrite:extension/documents`, and `ferrite:extension/quick-diff`). The host provides no WASI, so
+`ferrite:extension/prompts`, `ferrite:extension/documents`, `ferrite:extension/quick-diff`, and
+`ferrite:extension/timers`). The host provides no WASI, so
 a component that imports `wasi:*` interfaces (most toolchains' defaults) fails to start, with a
 message saying so. Rust on `wasm32-unknown-unknown` is the supported path for now.
 
 ## Versioning
 
-The WIT package is versioned: `ferrite:extension@1.9.0`, `api_version = "1"`.
+The WIT package is versioned: `ferrite:extension@1.10.0`, `api_version = "1"`.
 
 - **Additions.** New host functions arrive as minor versions of the package. Version 1.1 added the
   `workbench` interface, 1.2 added previews to it, 1.3 added the `files` interface, 1.4 the
   `viewers` interface, 1.5 the `webviews` and `storage` interfaces, 1.6 the `workspace`, `processes`, and `explorer`
   interfaces, 1.7 the `views` and `prompts` interfaces, with `files::delete`,
   `workspace::open-file`, and `host::set-configuration`, 1.8 the `documents` interface, and 1.9 the
-  `quick-diff` interface.
+  `quick-diff` interface, and 1.10 the `timers` interface.
   Wasmtime
   links components built against an older minor version: the host's tests load Tidy builds made
   against 1.0 and 1.2 and a TODOs build made against 1.1.

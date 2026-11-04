@@ -70,6 +70,8 @@ pub enum Payload {
   Original(crate::quick_diff::OriginalRequest),
   /// Changes to apply to an original; see `quick-diff::to-apply`.
   Apply(crate::bindings::ferrite::extension::quick_diff::Applied),
+  /// A timer ran out; see `timers::fired`.
+  Timer(u64),
 }
 
 /// A request for the text at an address, answered with

@@ -24,6 +24,7 @@
 //! to the editor core and to receive [`Notification`]s.
 
 mod api;
+pub mod askpass;
 mod config;
 pub mod contributions;
 pub mod documents;
@@ -41,6 +42,7 @@ mod quick_diff;
 mod readme;
 mod runtime;
 pub mod storage;
+mod timers;
 mod usage;
 mod views;
 pub mod webview;
@@ -85,6 +87,12 @@ pub trait Embedder: Send + Sync + 'static {
   fn notify(&self, notification: Notification);
   /// The folder open in the editor, for the `files` interface.
   fn open_folder(&self) -> Option<OpenFolder> {
+    None
+  }
+  /// The executable programs run to ask the user for a password (the
+  /// editor's own, which calls [`askpass::client_main`] first thing), for
+  /// programs declared with `askpass`. `None` leaves them to ask on their own.
+  fn askpass_program(&self) -> Option<PathBuf> {
     None
   }
   /// Saves an open document to its file, as the user's Save does but

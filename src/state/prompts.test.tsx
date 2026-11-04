@@ -54,6 +54,7 @@ describe('extension prompts', () => {
         title: 'Commit message',
         value: 'Fix',
         placeholder: null,
+        password: false,
       }),
     )
     const input = screen.getByRole('combobox', { name: 'Commit message' })
@@ -66,11 +67,16 @@ describe('extension prompts', () => {
         id: 3,
         extension: 'Git',
         type: 'input',
-        title: 'Branch name',
+        title: "Password for 'https://example.com'",
         value: '',
         placeholder: null,
+        password: true,
       }),
     )
+    // A program's password is hidden as it's typed.
+    expect(
+      screen.getByRole('combobox', { name: "Password for 'https://example.com'" }),
+    ).toHaveAttribute('type', 'password')
     await user.keyboard('{Escape}')
     expect(ipc.answerPrompt).toHaveBeenLastCalledWith(3, { type: 'cancelled' })
     expect(paletteStore.get().open).toBe(false)

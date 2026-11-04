@@ -14,7 +14,7 @@ export interface QuickPick {
   placeholder: string
   items: readonly QuickPickItem[]
   /** Asks for text instead of a choice: Enter accepts what's typed. */
-  input?: { value: string; accept: (text: string) => void }
+  input?: { value: string; accept: (text: string) => void; password?: boolean }
   /** Runs when the palette closes without a choice. */
   onCancel?: () => void
 }
