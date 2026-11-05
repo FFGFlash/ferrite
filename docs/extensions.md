@@ -50,7 +50,7 @@ It also refers to the official extensions (`flareite.*`), which have repositorie
 
 - **HTML & CSS** adds three languages (HTML, CSS and SVG), highlights CSS and JavaScript inside
   HTML and SVG, and declares language servers for HTML and CSS, also with no code. Flareite has
-  no languages of its own: Rust, TypeScript, JavaScript, JSON, TOML, XML, and Python are
+  no languages of its own: Rust, TypeScript & JavaScript, JSON, TOML, XML, and Python are
   extensions like it.
 - **Markdown** is a language too, and has code: a preview that renders the document as you type.
 - **Images** shows image files in a webview viewer: a page that draws the picture on a background
@@ -1297,8 +1297,8 @@ Every language Flareite knows comes from an extension: which files it is for, sy
 highlighting from a [Tree-sitter](https://tree-sitter.github.io/) grammar, highlighting of other
 languages embedded in it, and its language server. None of this needs code, so a language-only
 extension has no entrypoint. The official HTML & CSS extension is the example used below; the
-Rust, TypeScript (two languages, TS and TSX), JavaScript, JSON, TOML, XML, and Python extensions
-are simpler ones. Markdown uses two grammars, one for blocks and one for the inline text it
+Rust, TypeScript & JavaScript (three languages: TS, TSX, and JS with JSX), JSON, TOML, XML, and
+Python extensions are simpler ones. Markdown uses two grammars, one for blocks and one for the inline text it
 injects into them, with a language for each; the inline one has no files of its own.
 
 ```text
@@ -1439,7 +1439,7 @@ grammar and highlights over the outer language:
   text of a node captured as `@injection.language` (for example a Markdown code fence's info
   string). A name that isn't a language id is tried as a file extension, so a fence can say
   `rs` or `rust`. It may be the extension's own language or another extension's; an id no language
-  has is ignored (HTML's scripts are highlighted only if the JavaScript extension is loaded).
+  has is ignored (HTML's scripts are highlighted only if the TypeScript & JavaScript extension is loaded).
 - **`#set! injection.combined`** parses all of a pattern's matches together, as one document.
 - **Limits.** Injections are followed 4 levels deep (CSS in HTML in Markdown, say), and a
   document has at most 1,024 injected regions.
@@ -1472,8 +1472,9 @@ root_markers = ["package.json"]          # optional: files marking a project roo
   program the extension ships, inside its folder. Absolute paths aren't allowed. A server that
   isn't installed shows as failed in the status bar, with a hover explaining why.
 - **Names.** Extensions that declare a server with the same name and command share one
-  server for all their languages: the TypeScript and JavaScript extensions both declare
-  `typescript-language-server`. With a different command, the first declaration wins. Users can
+  server for all their languages: a Vue extension could declare `typescript-language-server`
+  too, and share the one TypeScript & JavaScript starts. With a different command, the first
+  declaration wins. Users can
   change an extension's server or turn it off by name, for example
   `[lsp.servers.rust-analyzer]` with `enabled = false` or another `command`.
 

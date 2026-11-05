@@ -1,5 +1,7 @@
-# A copy of the languages of the official flareite.javascript extension, for the
-# editor's tests, which need real grammars. Not kept in step with it.
+# A copy of the JavaScript language of the official flareite.typescript
+# extension, for the editor's tests, which need real grammars. Not kept in step
+# with it. Kept apart from the TypeScript copy, so the tests have two
+# extensions that declare the same server.
 id = "test.javascript"
 name = "JavaScript"
 version = "0.1.0"

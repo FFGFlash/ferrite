@@ -1286,7 +1286,7 @@ max_line_length = 80
     let contributed = vec![
       server("rust-analyzer", "rust-analyzer", &["rust"]),
       server("pyright", "pyright-langserver", &["python"]),
-      // The TypeScript and JavaScript extensions share one server.
+      // Two extensions that declare the same server share it.
       server("tsls", "typescript-language-server", &["typescript"]),
       server(
         "tsls",

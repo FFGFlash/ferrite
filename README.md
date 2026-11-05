@@ -154,17 +154,16 @@ extension brings a Tree-sitter grammar compiled to WebAssembly for highlighting,
 declares a language server. The official ones (`flareite.*`) each have a repository of their own;
 all but Markdown have no code to build:
 
-| Extension  | Languages                     | Language server                   | Install the server with                                |
-| ---------- | ----------------------------- | --------------------------------- | ------------------------------------------------------ |
-| Rust       | Rust                          | `rust-analyzer`                   | `rustup component add rust-analyzer`                   |
-| TypeScript | TypeScript, TSX               | `typescript-language-server`      | `npm install -g typescript-language-server typescript` |
-| JavaScript | JavaScript, JSX               | `typescript-language-server`      | as above                                               |
-| JSON       | JSON                          | —                                 |                                                        |
-| TOML       | TOML, `Cargo.lock`            | —                                 |                                                        |
-| Python     | Python                        | `pyright-langserver`              | `npm install -g pyright`                               |
-| HTML & CSS | HTML (with CSS, JS), CSS, SVG | `vscode-html/css-language-server` | `npm install -g vscode-langservers-extracted`          |
-| XML        | XML                           | —                                 |                                                        |
-| Markdown   | Markdown                      | —                                 |                                                        |
+| Extension               | Languages                        | Language server                   | Install the server with                                |
+| ----------------------- | -------------------------------- | --------------------------------- | ------------------------------------------------------ |
+| Rust                    | Rust                             | `rust-analyzer`                   | `rustup component add rust-analyzer`                   |
+| TypeScript & JavaScript | TypeScript, TSX, JavaScript, JSX | `typescript-language-server`      | `npm install -g typescript-language-server typescript` |
+| JSON                    | JSON                             | —                                 |                                                        |
+| TOML                    | TOML, `Cargo.lock`               | —                                 |                                                        |
+| Python                  | Python                           | `pyright-langserver`              | `npm install -g pyright`                               |
+| HTML & CSS              | HTML (with CSS, JS), CSS, SVG    | `vscode-html/css-language-server` | `npm install -g vscode-langservers-extracted`          |
+| XML                     | XML                              | —                                 |                                                        |
+| Markdown                | Markdown                         | —                                 |                                                        |
 
 Load one with **Extensions: Load Development Extension…** (choose its folder, such as a checkout
 of the Rust extension), or install it by copying its folder into the `extensions` folder next to
