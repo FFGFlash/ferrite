@@ -1,4 +1,4 @@
-//! TODOs: an example Ferrite extension that customizes the workbench.
+//! TODOs: an example Flareite extension that customizes the workbench.
 //!
 //! It finds TODO and FIXME markers in open documents and shows them with
 //! every kind of workbench contribution:
@@ -16,11 +16,11 @@
 use std::cell::RefCell;
 use std::collections::BTreeMap;
 
-use ferrite_extension_api::types::{
+use flareite_extension_api::types::{
   Activation, ApiError, CommandContext, ConfigValue, DocumentChange, DocumentId, DocumentInfo,
   LogLevel, Position, Range, StatusItem, TextEdit, ViewItem,
 };
-use ferrite_extension_api::{Guest, export_extension, host, workbench};
+use flareite_extension_api::{Guest, export_extension, host, workbench};
 
 const CHUNK_LINES: u32 = 2_000;
 /// Items listed per document in the view.
@@ -323,7 +323,7 @@ fn next(context: &CommandContext) -> Result<(), String> {
     }
     None => {
       host::show_message(
-        ferrite_extension_api::types::MessageLevel::Info,
+        flareite_extension_api::types::MessageLevel::Info,
         "No TODOs in this document.",
       );
       Ok(())

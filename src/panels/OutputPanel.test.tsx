@@ -6,7 +6,7 @@ import type { LogRecord, Logs } from '../ipc/logs'
 
 vi.mock('../ipc/logs', () => ({
   readLogs: vi.fn(),
-  logFilePath: vi.fn(async () => 'C:/logs/ferrite.2026-11-01.log'),
+  logFilePath: vi.fn(async () => 'C:/logs/flareite.2026-11-01.log'),
 }))
 vi.mock('../state/documents', () => ({ openPath: vi.fn(async () => {}) }))
 
@@ -21,7 +21,7 @@ const record = (seq: number, level: LogRecord['level'], message: string, fields 
   seq,
   time: Date.UTC(2026, 10, 1, 12, 0, 0, seq),
   level,
-  target: 'ferrite_app::workspace',
+  target: 'flareite_app::workspace',
   message,
   fields,
 })
@@ -41,7 +41,7 @@ const lines = () => [...document.querySelectorAll('.output__line')].map(line => 
 describe('OutputPanel', () => {
   beforeEach(() => {
     vi.clearAllMocks()
-    outputChannel.set('ferrite')
+    outputChannel.set('flareite')
     clearedAt.set({})
     extensionsStore.set([{ id: 'example.tidy', name: 'Tidy' } as ExtensionStatus])
   })
@@ -49,17 +49,17 @@ describe('OutputPanel', () => {
   it('shows a channel’s records, and switches channels', async () => {
     const user = userEvent.setup()
     serve({
-      'ferrite': [record(1, 'info', 'saved file', 'path=a.rs'), record(3, 'warn', 'slow')],
+      'flareite': [record(1, 'info', 'saved file', 'path=a.rs'), record(3, 'warn', 'slow')],
       'extension:example.tidy': [record(2, 'debug', 'checked 3 lines')],
       'server:rust-analyzer': [],
     })
     const { container } = render(<OutputPanel />)
     await waitFor(() => expect(lines()).toHaveLength(2))
-    expect(lines()[0]).toMatch(/INFO  ferrite_app::workspace: saved file path=a\.rs$/)
-    expect(screen.getByRole('log', { name: 'Ferrite log' })).toBeTruthy()
+    expect(lines()[0]).toMatch(/INFO  flareite_app::workspace: saved file path=a\.rs$/)
+    expect(screen.getByRole('log', { name: 'Flareite log' })).toBeTruthy()
     const picker = screen.getByRole('combobox', { name: 'Log' })
     expect([...(picker as HTMLSelectElement).options].map(o => o.textContent)).toEqual([
-      'Ferrite',
+      'Flareite',
       'Tidy',
       'Language Server: rust-analyzer',
     ])
@@ -74,7 +74,7 @@ describe('OutputPanel', () => {
   it('filters by level and text, and clears what was shown', async () => {
     const user = userEvent.setup()
     serve({
-      ferrite: [
+      flareite: [
         record(1, 'debug', 'noise'),
         record(2, 'info', 'opened folder'),
         record(3, 'error', 'oops'),
@@ -98,30 +98,30 @@ describe('OutputPanel', () => {
     expect(screen.getByText('No lines match.')).toBeTruthy()
 
     await user.click(screen.getByRole('button', { name: 'Open Log File' }))
-    expect(openPath).toHaveBeenCalledWith('C:/logs/ferrite.2026-11-01.log')
+    expect(openPath).toHaveBeenCalledWith('C:/logs/flareite.2026-11-01.log')
   })
 
   it('fetches new records while shown', async () => {
     vi.useFakeTimers()
     try {
-      const ferrite = [record(1, 'info', 'first')]
-      serve({ ferrite })
+      const flareite = [record(1, 'info', 'first')]
+      serve({ flareite })
       render(<OutputPanel />)
       await act(() => vi.advanceTimersByTimeAsync(0))
       expect(lines()).toHaveLength(1)
-      ferrite.push(record(2, 'info', 'second'))
+      flareite.push(record(2, 'info', 'second'))
       await act(async () => {
         await vi.advanceTimersByTimeAsync(1000)
       })
       expect(lines()).toHaveLength(2)
-      expect(ipc.readLogs).toHaveBeenLastCalledWith('ferrite', 1)
+      expect(ipc.readLogs).toHaveBeenLastCalledWith('flareite', 1)
     } finally {
       vi.useRealTimers()
     }
   })
 
   it('names channels', () => {
-    expect(channelLabel('ferrite', [])).toBe('Ferrite')
+    expect(channelLabel('flareite', [])).toBe('Flareite')
     expect(channelLabel('extension:example.gone', [])).toBe('example.gone')
     expect(channelLabel('server:pyright', [])).toBe('Language Server: pyright')
   })

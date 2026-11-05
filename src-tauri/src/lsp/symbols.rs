@@ -7,15 +7,15 @@
 use std::path::Path;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use ferrite_core::DocumentId;
-use ferrite_lsp::LspError;
-use ferrite_lsp::convert::{PositionEncoding, path_to_uri, to_offset, uri_to_path};
-use ferrite_lsp::lsp_types::request::{DocumentSymbolRequest, WorkspaceSymbolRequest};
-use ferrite_lsp::lsp_types::{
+use flareite_core::DocumentId;
+use flareite_lsp::LspError;
+use flareite_lsp::convert::{PositionEncoding, path_to_uri, to_offset, uri_to_path};
+use flareite_lsp::lsp_types::request::{DocumentSymbolRequest, WorkspaceSymbolRequest};
+use flareite_lsp::lsp_types::{
   DocumentSymbol, DocumentSymbolParams, DocumentSymbolResponse, OneOf, Range, SymbolKind,
   SymbolTag, TextDocumentIdentifier, Uri, WorkspaceSymbolParams, WorkspaceSymbolResponse,
 };
-use ferrite_text::{TextBuffer, map_offset_through};
+use flareite_text::{TextBuffer, map_offset_through};
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Manager};
 
@@ -374,7 +374,7 @@ fn kind_name(kind: SymbolKind) -> &'static str {
 
 #[cfg(test)]
 mod tests {
-  use ferrite_lsp::lsp_types::{
+  use flareite_lsp::lsp_types::{
     Location, Position as LspPosition, SymbolInformation, WorkspaceLocation, WorkspaceSymbol,
   };
 

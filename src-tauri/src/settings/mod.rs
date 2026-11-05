@@ -1,5 +1,5 @@
 //! User settings, stored as TOML in the platform config directory and edited
-//! in Ferrite itself, as a file or in the settings editor. Saving the file
+//! in Flareite itself, as a file or in the settings editor. Saving the file
 //! applies it; invalid files are reported and the previous settings stay in
 //! effect.
 
@@ -9,13 +9,13 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::{PoisonError, RwLock};
 
-use ferrite_core::EditorConfig;
-use ferrite_extension_host::contributions::check_theme_colors;
-use ferrite_extension_host::keys::normalize as normalize_key;
-use ferrite_lsp::{ServerCommand, ServerConfig};
-use ferrite_terminal::Shell;
-use ferrite_terminal::profiles::{self, Profile};
-use ferrite_workspace::ExcludeFilter;
+use flareite_core::EditorConfig;
+use flareite_extension_host::contributions::check_theme_colors;
+use flareite_extension_host::keys::normalize as normalize_key;
+use flareite_lsp::{ServerCommand, ServerConfig};
+use flareite_terminal::Shell;
+use flareite_terminal::profiles::{self, Profile};
+use flareite_workspace::ExcludeFilter;
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Manager, State};
 
@@ -29,7 +29,7 @@ const FILE_NAME: &str = "settings.toml";
 
 /// Written when the settings file does not exist yet. Every setting is shown
 /// with its default value, commented out.
-const TEMPLATE: &str = r##"# Ferrite settings. Uncomment a line to change it; save to apply.
+const TEMPLATE: &str = r##"# Flareite settings. Uncomment a line to change it; save to apply.
 
 [editor]
 # tab_size = 4
@@ -107,7 +107,7 @@ const TEMPLATE: &str = r##"# Ferrite settings. Uncomment a line to change it; sa
 #
 # Where to find programs extensions run, if not on the PATH:
 # [extensions.programs]
-# "ferrite.git.git" = "C:/Program Files/Git/cmd/git.exe"
+# "flareite.git.git" = "C:/Program Files/Git/cmd/git.exe"
 
 [security]
 # Ask whether you trust a folder's files before running programs on it
@@ -804,7 +804,7 @@ pub fn edit(
   Settings::parse(&text).map_err(|error| {
     CommandError::new("invalidSettings", format!("Settings not changed: {error}"))
   })?;
-  ferrite_workspace::write_file_atomically(&path, text.as_bytes())
+  flareite_workspace::write_file_atomically(&path, text.as_bytes())
     .map_err(|error| CommandError::new("settings", format!("Could not write settings: {error}")))?;
   reload_and_announce(app, false)
 }
@@ -943,8 +943,8 @@ pub async fn settings_schema(app: AppHandle) -> Result<SettingsSchemaDto, Comman
       for status in host.statuses() {
         if matches!(
           status.state,
-          ferrite_extension_host::ExtensionState::Disabled
-            | ferrite_extension_host::ExtensionState::Invalid
+          flareite_extension_host::ExtensionState::Disabled
+            | flareite_extension_host::ExtensionState::Invalid
         ) {
           continue;
         }

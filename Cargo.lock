@@ -1207,179 +1207,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "ferrite-app"
-version = "0.1.0"
-dependencies = [
- "ferrite-core",
- "ferrite-diff",
- "ferrite-extension-host",
- "ferrite-lsp",
- "ferrite-syntax",
- "ferrite-tasks",
- "ferrite-terminal",
- "ferrite-text",
- "ferrite-workspace",
- "memory-stats",
- "open",
- "semver",
- "serde",
- "serde_json",
- "sha2",
- "tauri",
- "tauri-build",
- "tauri-plugin-clipboard-manager",
- "tauri-plugin-dialog",
- "tempfile",
- "thiserror 2.0.21",
- "toml 1.1.8+spec-1.1.0",
- "toml_edit 0.25.17+spec-1.1.0",
- "tracing",
- "tracing-appender",
- "tracing-subscriber",
-]
-
-[[package]]
-name = "ferrite-benches"
-version = "0.1.0"
-dependencies = [
- "criterion",
- "ferrite-core",
- "ferrite-text",
- "ferrite-workspace",
- "tempfile",
-]
-
-[[package]]
-name = "ferrite-core"
-version = "0.1.0"
-dependencies = [
- "ferrite-text",
- "ferrite-workspace",
- "tempfile",
- "thiserror 2.0.21",
-]
-
-[[package]]
-name = "ferrite-diff"
-version = "0.1.0"
-dependencies = [
- "imara-diff",
-]
-
-[[package]]
-name = "ferrite-extension-api"
-version = "1.0.0"
-dependencies = [
- "wit-bindgen 0.63.0",
-]
-
-[[package]]
-name = "ferrite-extension-host"
-version = "0.1.0"
-dependencies = [
- "base64 0.23.1",
- "ferrite-core",
- "ferrite-process",
- "ferrite-text",
- "ferrite-workspace",
- "getrandom 0.4.3",
- "pulldown-cmark",
- "semver",
- "serde",
- "serde_json",
- "tempfile",
- "thiserror 2.0.21",
- "toml 1.1.8+spec-1.1.0",
- "tracing",
- "wasmtime",
- "wat",
- "wit-component 0.262.0",
-]
-
-[[package]]
-name = "ferrite-lsp"
-version = "0.1.0"
-dependencies = [
- "ferrite-process",
- "ferrite-text",
- "lsp-types",
- "serde",
- "serde_json",
- "tempfile",
- "thiserror 2.0.21",
- "tracing",
-]
-
-[[package]]
-name = "ferrite-process"
-version = "0.1.0"
-dependencies = [
- "rustix",
- "tracing",
- "win32job",
-]
-
-[[package]]
-name = "ferrite-syntax"
-version = "0.1.0"
-dependencies = [
- "ferrite-text",
- "streaming-iterator",
- "tempfile",
- "thiserror 2.0.21",
- "tracing",
- "tree-sitter",
-]
-
-[[package]]
-name = "ferrite-tasks"
-version = "0.1.0"
-dependencies = [
- "tracing",
-]
-
-[[package]]
-name = "ferrite-terminal"
-version = "0.1.0"
-dependencies = [
- "portable-pty",
- "thiserror 2.0.21",
- "tracing",
- "windows-version",
-]
-
-[[package]]
-name = "ferrite-text"
-version = "0.1.0"
-dependencies = [
- "regex-automata",
- "regex-cursor",
- "regex-syntax",
- "ropey",
- "thiserror 2.0.21",
- "unicode-segmentation",
-]
-
-[[package]]
-name = "ferrite-workspace"
-version = "0.1.0"
-dependencies = [
- "chardetng",
- "encoding_rs",
- "ferrite-text",
- "globset",
- "ignore",
- "notify-debouncer-mini",
- "nucleo-matcher",
- "serde",
- "serde_json",
- "tempfile",
- "thiserror 2.0.21",
- "tracing",
- "trash",
-]
-
-[[package]]
 name = "field-offset"
 version = "0.3.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1411,6 +1238,179 @@ name = "fixedbitset"
 version = "0.5.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1d674e81391d1e1ab681a28d99df07927c6d4aa5b027d7da16ba32d1d21ecd99"
+
+[[package]]
+name = "flareite-app"
+version = "0.1.0"
+dependencies = [
+ "flareite-core",
+ "flareite-diff",
+ "flareite-extension-host",
+ "flareite-lsp",
+ "flareite-syntax",
+ "flareite-tasks",
+ "flareite-terminal",
+ "flareite-text",
+ "flareite-workspace",
+ "memory-stats",
+ "open",
+ "semver",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tauri",
+ "tauri-build",
+ "tauri-plugin-clipboard-manager",
+ "tauri-plugin-dialog",
+ "tempfile",
+ "thiserror 2.0.21",
+ "toml 1.1.8+spec-1.1.0",
+ "toml_edit 0.25.17+spec-1.1.0",
+ "tracing",
+ "tracing-appender",
+ "tracing-subscriber",
+]
+
+[[package]]
+name = "flareite-benches"
+version = "0.1.0"
+dependencies = [
+ "criterion",
+ "flareite-core",
+ "flareite-text",
+ "flareite-workspace",
+ "tempfile",
+]
+
+[[package]]
+name = "flareite-core"
+version = "0.1.0"
+dependencies = [
+ "flareite-text",
+ "flareite-workspace",
+ "tempfile",
+ "thiserror 2.0.21",
+]
+
+[[package]]
+name = "flareite-diff"
+version = "0.1.0"
+dependencies = [
+ "imara-diff",
+]
+
+[[package]]
+name = "flareite-extension-api"
+version = "1.0.0"
+dependencies = [
+ "wit-bindgen 0.63.0",
+]
+
+[[package]]
+name = "flareite-extension-host"
+version = "0.1.0"
+dependencies = [
+ "base64 0.23.1",
+ "flareite-core",
+ "flareite-process",
+ "flareite-text",
+ "flareite-workspace",
+ "getrandom 0.4.3",
+ "pulldown-cmark",
+ "semver",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.21",
+ "toml 1.1.8+spec-1.1.0",
+ "tracing",
+ "wasmtime",
+ "wat",
+ "wit-component 0.262.0",
+]
+
+[[package]]
+name = "flareite-lsp"
+version = "0.1.0"
+dependencies = [
+ "flareite-process",
+ "flareite-text",
+ "lsp-types",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.21",
+ "tracing",
+]
+
+[[package]]
+name = "flareite-process"
+version = "0.1.0"
+dependencies = [
+ "rustix",
+ "tracing",
+ "win32job",
+]
+
+[[package]]
+name = "flareite-syntax"
+version = "0.1.0"
+dependencies = [
+ "flareite-text",
+ "streaming-iterator",
+ "tempfile",
+ "thiserror 2.0.21",
+ "tracing",
+ "tree-sitter",
+]
+
+[[package]]
+name = "flareite-tasks"
+version = "0.1.0"
+dependencies = [
+ "tracing",
+]
+
+[[package]]
+name = "flareite-terminal"
+version = "0.1.0"
+dependencies = [
+ "portable-pty",
+ "thiserror 2.0.21",
+ "tracing",
+ "windows-version",
+]
+
+[[package]]
+name = "flareite-text"
+version = "0.1.0"
+dependencies = [
+ "regex-automata",
+ "regex-cursor",
+ "regex-syntax",
+ "ropey",
+ "thiserror 2.0.21",
+ "unicode-segmentation",
+]
+
+[[package]]
+name = "flareite-workspace"
+version = "0.1.0"
+dependencies = [
+ "chardetng",
+ "encoding_rs",
+ "flareite-text",
+ "globset",
+ "ignore",
+ "notify-debouncer-mini",
+ "nucleo-matcher",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.21",
+ "tracing",
+ "trash",
+]
 
 [[package]]
 name = "flate2"

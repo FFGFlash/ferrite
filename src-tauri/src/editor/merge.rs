@@ -1,11 +1,11 @@
 //! Merge editors: the changes two versions of a file made to their common
 //! base, where each is in the result (a document being edited), and
-//! accepting a side's change into it. See `ferrite_diff::merge`.
+//! accepting a side's change into it. See `flareite_diff::merge`.
 
-use ferrite_core::{Document, DocumentId};
-use ferrite_diff::DiffError;
-use ferrite_diff::merge::{self, MergeRange, MergeTexts, RangeState};
-use ferrite_text::Edit;
+use flareite_core::{Document, DocumentId};
+use flareite_diff::DiffError;
+use flareite_diff::merge::{self, MergeRange, MergeTexts, RangeState};
+use flareite_text::Edit;
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Manager, State};
 
@@ -103,7 +103,7 @@ fn too_large(_: DiffError) -> CommandError {
     "tooLarge",
     format!(
       "Files with more than {} lines aren't merged.",
-      ferrite_diff::MAX_LINES
+      flareite_diff::MAX_LINES
     ),
   )
 }
@@ -200,7 +200,7 @@ fn replace_lines(
     at += with.len();
   }
   let source = source.strip_suffix('\n').unwrap_or(&source).to_owned();
-  let edits = ferrite_diff::splices(&text, &source, &pairs)
+  let edits = flareite_diff::splices(&text, &source, &pairs)
     .into_iter()
     .map(|splice| Edit::new(splice.range, splice.text))
     .collect();

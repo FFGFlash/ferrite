@@ -1,7 +1,7 @@
 # Writing extensions
 
-Ferrite extensions are WebAssembly components. They run in a sandbox inside the editor and can
-do only what the [extension API](../crates/ferrite-extension-api/wit/extension.wit) offers:
+Flareite extensions are WebAssembly components. They run in a sandbox inside the editor and can
+do only what the [extension API](../crates/flareite-extension-api/wit/extension.wit) offers:
 
 - register commands;
 - read open documents and get notified of changes;
@@ -34,7 +34,7 @@ There is no network, environment, or clock access, no file access beyond the ope
 (webview pages can reach the web only with the `network` permission), and no programs but those
 the manifest declares. A manifest declares the permissions an extension needs, and the user
 grants them before the extension starts.
-(Language servers an extension declares are started by Ferrite, not by the extension, and only
+(Language servers an extension declares are started by Flareite, not by the extension, and only
 once the user allows it.)
 
 This guide uses these examples:
@@ -46,10 +46,10 @@ This guide uses these examples:
   context menu item.
 - [Example Themes](../extensions/themes/) contributes two color themes and no code at all.
 
-It also refers to the official extensions (`ferrite.*`), which have repositories of their own:
+It also refers to the official extensions (`flareite.*`), which have repositories of their own:
 
 - **HTML & CSS** adds three languages (HTML, CSS and SVG), highlights CSS and JavaScript inside
-  HTML and SVG, and declares language servers for HTML and CSS, also with no code. Ferrite has
+  HTML and SVG, and declares language servers for HTML and CSS, also with no code. Flareite has
   no languages of its own: Rust, TypeScript, JavaScript, JSON, TOML, XML, and Python are
   extensions like it.
 - **Markdown** is a language too, and has code: a preview that renders the document as you type.
@@ -70,30 +70,30 @@ cd extensions
 cargo build --release          # builds every extension in the workspace
 ```
 
-To load the result in Ferrite:
+To load the result in Flareite:
 
 1. Run **Extensions: Load Development Extension…** from the command palette.
 2. Choose `extensions/tidy`. This adds the folder to `extensions.development` in your settings.
-3. Ferrite asks whether to allow the permissions Tidy requests.
+3. Flareite asks whether to allow the permissions Tidy requests.
 4. Open a file with trailing spaces: they are underlined, and **Tidy: Trim Trailing Whitespace**
    removes them.
 
 After rebuilding an extension, click **Restart** in the Extensions view (`Ctrl+Shift+X`) to load
 the new build. To pick up new or removed extensions, use **Extensions: Reload Extensions**.
-There's no need to rebuild or restart Ferrite.
+There's no need to rebuild or restart Flareite.
 
 ## Anatomy of an extension
 
 ```text
 my-extension/
   extension.toml          the manifest
-  Cargo.toml              crate-type = ["cdylib"], depends on ferrite-extension-api
+  Cargo.toml              crate-type = ["cdylib"], depends on flareite-extension-api
   src/lib.rs              implements `Guest` and calls `export_extension!`
 ```
 
 ```rust
-use ferrite_extension_api::types::*;
-use ferrite_extension_api::{Guest, export_extension, host};
+use flareite_extension_api::types::*;
+use flareite_extension_api::{Guest, export_extension, host};
 
 struct Hello;
 
@@ -115,7 +115,7 @@ export_extension!(Hello);
 ```
 
 Build it as a `cdylib` for `wasm32-unknown-unknown`. The output is a core module that already
-carries its interface description, embedded by wit-bindgen. Ferrite turns it into a component
+carries its interface description, embedded by wit-bindgen. Flareite turns it into a component
 when it loads it, so you need no other tools.
 
 ## The manifest
@@ -125,14 +125,14 @@ id = "example.tidy"               # publisher.name: lowercase letters, digits, '
 name = "Tidy"
 version = "0.1.0"                 # semantic version
 description = "Flags trailing whitespace and overlong lines."
-author = "Ferrite"                # optional; shown in the Extensions view
+author = "Flareite"                # optional; shown in the Extensions view
 icon = "icon.svg"                 # optional: a PNG or SVG file in its folder, at most 256 KiB
 api_version = "1"                 # the extension API version it was built for
 entrypoint = "tidy.wasm"          # relative to this file
 activation = ["on-startup"]       # see below; default: when one of its commands runs
 
 [engines]
-ferrite = ">=0.1.0"               # optional semver requirement on the editor
+flareite = ">=0.1.0"               # optional semver requirement on the editor
 
 [permissions]
 documents_read = true
@@ -157,23 +157,23 @@ default = "warning"
 choices = ["error", "warning", "information", "hint"]   # strings: optional
 ```
 
-Ferrite validates a manifest completely before loading anything. Any of these problems marks the
+Flareite validates a manifest completely before loading anything. Any of these problems marks the
 extension invalid in the Extensions view, with a message:
 
 - unknown fields;
-- an `api_version` other than `1`, or an unmet `engines.ferrite`;
+- an `api_version` other than `1`, or an unmet `engines.flareite`;
 - malformed ids, or command ids outside the extension's namespace;
 - an activation event naming an undeclared command;
 - a configuration default of the wrong type.
 
 **Activation events:**
 
-| Event              | When the extension starts                         |
-| ------------------ | ------------------------------------------------- |
-| `on-startup`       | When Ferrite starts (or the extension is loaded). |
-| `on-language:<id>` | When a document of that language is opened.       |
-| `on-command:<id>`  | When that command runs.                           |
-| `on-view:<id>`     | When one of its side bar views is shown.          |
+| Event              | When the extension starts                          |
+| ------------------ | -------------------------------------------------- |
+| `on-startup`       | When Flareite starts (or the extension is loaded). |
+| `on-language:<id>` | When a document of that language is opened.        |
+| `on-command:<id>`  | When that command runs.                            |
+| `on-view:<id>`     | When one of its side bar views is shown.           |
 
 Every extension also starts when one of its commands runs, so `on-command` is only
 documentation. Language ids are those extensions add (see [Languages](#languages)), such as
@@ -204,7 +204,7 @@ as its text. A README can be at most 1 MiB. Tidy and TODOs have both.
 | `documents_write`  | Editing open documents                                                           |
 | `files_read`       | Listing and reading [files](#files) in the open folder (API 1.3)                 |
 | `files_write`      | Changing and creating files in the open folder (API 1.3)                         |
-| `language_servers` | Ferrite running the extension's [language servers](#language-servers)            |
+| `language_servers` | Flareite running the extension's [language servers](#language-servers)           |
 | `network`          | Its [webview](#webviews) pages loading content and code from the web (API 1.5)   |
 | `processes`        | Running the [programs](#programs) it declares, in trusted folders (API 1.6)      |
 
@@ -212,7 +212,7 @@ Commands, settings, logging, messages, storage, languages, viewers, webviews, ex
 and the open folder's path need no permission.
 
 **Requesting a permission doesn't grant it.** When an extension requests permissions the user
-hasn't decided about, Ferrite asks before starting it. The user can allow or deny each
+hasn't decided about, Flareite asks before starting it. The user can allow or deny each
 permission, now or later in the Extensions view. Decisions are stored in
 `extension-permissions.json` next to `settings.toml`.
 
@@ -225,7 +225,7 @@ and `files_write`, which the API 1.0 `permission` type can't name: a call tells 
 ## The API
 
 The full interface, with comments, is
-[`extension.wit`](../crates/ferrite-extension-api/wit/extension.wit). Functions the extension
+[`extension.wit`](../crates/flareite-extension-api/wit/extension.wit). Functions the extension
 calls are in `host`, `workbench`, `files`, `viewers`, `webviews`, `storage`, `workspace`,
 `processes`, `explorer`, `views`, and `prompts`; the extension exports the rest.
 
@@ -367,7 +367,7 @@ Changes that arrive while the extension is busy are merged into one call. `unwat
 watch, and watches stop with the extension.
 
 - **Inside the open folder**, watching needs `files_read`, `.git` included, and lasts while the
-  folder is open. It uses the changes Ferrite watches for anyway.
+  folder is open. It uses the changes Flareite watches for anyway.
 - **Outside it** needs `processes`, whose programs could read the path anyway. Git uses this for
   the `.git` folder of a repository the open folder is inside.
 - At most 32 watches.
@@ -375,11 +375,11 @@ watch, and watches stop with the extension.
 ```rust
 fn run_command(command: String, _: CommandContext) -> Result<(), String> {
   match command.as_str() {
-    "ferrite.git.start" => {
+    "flareite.git.start" => {
       let folder = workspace::folder().ok_or("no folder is open")?;
-      workspace::watch(&folder.path, "ferrite.git.changed").map_err(|e| format!("{e:?}"))?;
+      workspace::watch(&folder.path, "flareite.git.changed").map_err(|e| format!("{e:?}"))?;
     }
-    "ferrite.git.changed" => {
+    "flareite.git.changed" => {
       let changes = workspace::changes().ok_or("not run for changes")?;
       // ... look again at changes.paths ...
     }
@@ -412,7 +412,7 @@ Users can set where a program is in `settings.toml`, by `<extension id>.<name>`:
 
 ```toml
 [extensions.programs]
-"ferrite.git.git" = "C:/Program Files/Git/cmd/git.exe"
+"flareite.git.git" = "C:/Program Files/Git/cmd/git.exe"
 ```
 
 - **`run(program, args, options)`** runs a program and waits for it. It returns its exit code, its
@@ -430,12 +430,12 @@ Users can set where a program is in `settings.toml`, by `<extension id>.<name>`:
   installed, with the reason), `timed-out`, `killed`, `too-large`, `invalid-argument`, or
   `failed`.
 
-Programs run as the user, with Ferrite's environment, in a process group with no console window.
+Programs run as the user, with Flareite's environment, in a process group with no console window.
 
 **Signing in.** A program declared with `askpass = true` runs with `GIT_ASKPASS` and
-`SSH_ASKPASS` set to Ferrite's own executable (and `SSH_ASKPASS_REQUIRE=force`). When Git needs
+`SSH_ASKPASS` set to Flareite's own executable (and `SSH_ASKPASS_REQUIRE=force`). When Git needs
 a username or password, or SSH a key's passphrase, it runs that executable with the question,
-which Ferrite asks the user in the command palette, hiding what's typed for passwords,
+which Flareite asks the user in the command palette, hiding what's typed for passwords,
 passphrases, PINs, and tokens. The answer goes back to the program, never to the extension.
 Credential helpers (Git Credential Manager, an SSH agent) still answer first when they can.
 They are stopped when the extension stops. Their input is empty unless `stdin` is given, so a
@@ -485,10 +485,10 @@ Users see how much an extension stores on its page in the Extensions view, and c
 
 **Logging and messages:**
 
-- `log(level, message)` writes to Ferrite's log, tagged with the extension's id. Messages are cut
+- `log(level, message)` writes to Flareite's log, tagged with the extension's id. Messages are cut
   at 4,000 characters, and at most 50 per second are kept, after a burst of 200. The extension's
   log in **View: Output** (or its **Log** button in the Extensions view) shows every level,
-  including `debug` and `trace`, while the log file follows `FERRITE_LOG` (`info` by default).
+  including `debug` and `trace`, while the log file follows `FLAREITE_LOG` (`info` by default).
 - `show-message(level, message)` shows a notification and logs it. Messages are cut at 1,000
   characters, and at most 1 per second is shown, after a burst of 10. Notifications disappear
   after a while; warnings and errors stay in **View: Problems**, under the extension's name,
@@ -515,7 +515,7 @@ kind = "dark"                     # the built-in theme it starts from: dark or l
 path = "themes/midnight.toml"     # inside the extension's folder
 ```
 
-The theme file sets Ferrite's color tokens; any token it leaves out keeps the base theme's
+The theme file sets Flareite's color tokens; any token it leaves out keeps the base theme's
 color:
 
 ```toml
@@ -588,7 +588,7 @@ file_extensions = { rs = "rust-dark-ink" }
 - **Matching.** Names and extensions are matched ignoring case. A leading dot starts a name, not
   an extension: `.eslintrc.json` matches the extension `json`.
 - **Fallback.** Anything the theme doesn't match uses its `file`, `folder`, and
-  `folder_expanded` icons. If it doesn't set those either, Ferrite's built-in icons are used, so
+  `folder_expanded` icons. If it doesn't set those either, Flareite's built-in icons are used, so
   a theme can change just a few file types.
 - **Icons.** Icons are SVG or PNG files, shown at 16 × 16 pixels. They are shown as images, so
   they can't use theme colors. Provide light variants under `[light]` if an icon needs one.
@@ -703,20 +703,20 @@ icon = "source-control"           # as for views
 id = "changes"
 title = "Changes"
 container = "scm"
-input = { placeholder = "Message (Ctrl+Enter to commit)", command = "ferrite.git.commit" }
+input = { placeholder = "Message (Ctrl+Enter to commit)", command = "flareite.git.commit" }
 
 [[views]]
 id = "commits"
 title = "Commits"
 container = "scm"
-on_expand = "ferrite.git.expandCommit"
+on_expand = "flareite.git.expandCommit"
 ```
 
 A container needs at least one view. A view in a container has no activity bar entry of its
 own; showing it (`show-view`) shows its container. A section with `hidden = true` (API 1.13)
 doesn't show until the extension calls **`views::set-visible(view, true)`**, which also hides
 one again; Git shows its Repositories section only when there's more than one repository. Users collapse sections and resize them by dragging the
-boundary between two; Ferrite remembers both for the next session.
+boundary between two; Flareite remembers both for the next session.
 
 #### Tree items
 
@@ -746,14 +746,14 @@ Shift+arrows, Ctrl+A). Clicking an item runs its command, if it has one.
 location = "view/item"            # an item's button or right-click menu
 view = "changes"
 contexts = ["changed", "untracked"]   # optional: items with these contexts; default every item
-command = "ferrite.git.stage"
+command = "flareite.git.stage"
 inline = true                     # a button on the row (shown on hover, focus, or selection)
 icon = "add"                      # one of the named icons; buttons need one
 
 [[menus]]
 location = "view/title"           # the view's header
 view = "changes"
-command = "ferrite.git.viewAsTree"
+command = "flareite.git.viewAsTree"
 group = "3_view"                  # entries are grouped, then sorted by title
 when = "!tree"                    # optional: only while the view hasn't the flag "tree"
 ```
@@ -901,9 +901,9 @@ The top level holds blocks and inline nodes. Anything out of place is rejected w
   files the content names. Web pictures aren't
   loaded, so opening a preview sends no requests; their description is shown instead.
 - **Code blocks** name their language by id or file extension (`rust` or `rs`). Code in a
-  language Ferrite has is highlighted with the editor's colors.
+  language Flareite has is highlighted with the editor's colors.
 - **Lifetime.** A preview closes with its document, and when its extension stops. Previews
-  aren't restored when Ferrite restarts: their extension opens them again.
+  aren't restored when Flareite restarts: their extension opens them again.
 - **Updates.** Unchanged content sends no event, and the tab loads at most one update at a time,
   so an extension can render on every change. Markdown does.
 
@@ -958,7 +958,7 @@ you can zoom, on a background you choose. Webviews are API 1.5
 
 ```toml
 [[commands]]
-id = "ferrite.images.details"
+id = "flareite.images.details"
 title = "Image Details"
 hidden = true
 
@@ -967,7 +967,7 @@ id = "svg"
 title = "Image Viewer"
 patterns = ["*.svg"]
 webview = "media/viewer.html"          # a page in the extension's folder; or `true`, and set it from code
-on_message = "ferrite.images.details"  # optional: run when the page sends a message
+on_message = "flareite.images.details"  # optional: run when the page sends a message
 retain_when_hidden = false             # optional: keep the page loaded while its tab is hidden
 priority = "option"
 
@@ -975,7 +975,7 @@ priority = "option"
 id = "fit"
 title = "Fit"
 icon = "fit"                           # a named icon, or an SVG or PNG file in the folder
-# command = "ferrite.images.fit"       # optional: run with the tab as argument, instead of telling the page
+# command = "flareite.images.fit"       # optional: run with the tab as argument, instead of telling the page
 ```
 
 A preview takes the same keys under `[[previews]]`, and opens with `show-preview` as before. A
@@ -984,7 +984,7 @@ it runs as for any viewer.
 
 **The page** is an ordinary page: addresses in it are found next to it in the extension's
 folder, so `<script src="viewer.js">` and `<link rel="stylesheet" href="viewer.css">` work.
-Before its own scripts run, it has a `ferrite` object:
+Before its own scripts run, it has a `flareite` object:
 
 | Member                                      | What it's for                                                                                                                                                               |
 | ------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -1001,7 +1001,7 @@ Before its own scripts run, it has a `ferrite` object:
 
 Each `on…` function returns a function that stops listening.
 
-**Messages.** `ferrite.postMessage(value)` runs the entry's `on_message` command (starting the
+**Messages.** `flareite.postMessage(value)` runs the entry's `on_message` command (starting the
 extension if needed). In it, **`webviews::message()`** returns `{ source, data }`: the tab
 (`viewer({ viewer, path })` or `preview({ preview, key })`) and the message as JSON text. The
 extension answers with **`webviews::post-message(source, json)`**, and can message any of its
@@ -1011,8 +1011,8 @@ extension's folder. Both return `false` once the tab is closed. Images' page ask
 picture's details:
 
 ```js
-ferrite.onMessage(({ details }) => (document.getElementById('details').textContent = details))
-ferrite.postMessage({ type: 'details' })
+flareite.onMessage(({ details }) => (document.getElementById('details').textContent = details))
+flareite.postMessage({ type: 'details' })
 ```
 
 ```rust
@@ -1031,28 +1031,28 @@ also comes back in the next session, since its tab is saved with the layout; clo
 forgets it. With `retain_when_hidden = true` the page stays loaded instead, at the cost of its
 memory (moving the tab to another group still loads it again).
 
-**Looking like Ferrite.** Every page gets the theme as CSS variables, which change with it:
-`--ferrite-<token>` for each [theme token](#themes) (`--ferrite-editor-background`,
-`--ferrite-text-muted`, `--ferrite-focus-ring`, …), and `--ferrite-font-ui`,
-`--ferrite-font-mono`, `--ferrite-font-size-ui`, `--ferrite-font-size-ui-small`,
-`--ferrite-font-size-editor`, `--ferrite-radius-control`, and `--ferrite-color-scheme`. The root
-element has `data-ferrite-theme="dark"` or `"light"`. Defaults for body text, links, focus
+**Looking like Flareite.** Every page gets the theme as CSS variables, which change with it:
+`--flareite-<token>` for each [theme token](#themes) (`--flareite-editor-background`,
+`--flareite-text-muted`, `--flareite-focus-ring`, …), and `--flareite-font-ui`,
+`--flareite-font-mono`, `--flareite-font-size-ui`, `--flareite-font-size-ui-small`,
+`--flareite-font-size-editor`, `--flareite-radius-control`, and `--flareite-color-scheme`. The root
+element has `data-flareite-theme="dark"` or `"light"`. Defaults for body text, links, focus
 rings, selection, and scroll bars come with them, with no specificity, so any style of the page's
-wins. For controls like Ferrite's, link the kit, from any folder:
+wins. For controls like Flareite's, link the kit, from any folder:
 
 ```html
-<link rel="stylesheet" href="__ferrite/kit.css" />
+<link rel="stylesheet" href="__flareite/kit.css" />
 
-<div class="ferrite-toolbar">
-  <button class="ferrite-button" aria-pressed="true" aria-label="Zoom In">
-    <span class="ferrite-icon" data-icon="zoom-in"></span>
+<div class="flareite-toolbar">
+  <button class="flareite-button" aria-pressed="true" aria-label="Zoom In">
+    <span class="flareite-icon" data-icon="zoom-in"></span>
   </button>
 </div>
 ```
 
-It has `ferrite-toolbar`, `ferrite-group`, `ferrite-separator`, `ferrite-button` (pressed with
-`aria-pressed="true"`; `ferrite-primary` for the main action), `ferrite-input`, `ferrite-label`,
-and `ferrite-icon`, a 16-pixel icon in the text color.
+It has `flareite-toolbar`, `flareite-group`, `flareite-separator`, `flareite-button` (pressed with
+`aria-pressed="true"`; `flareite-primary` for the main action), `flareite-input`, `flareite-label`,
+and `flareite-icon`, a 16-pixel icon in the text color.
 
 <a id="named-icons"></a>The named icons, for the kit, tab actions, view menus, and tree items:
 `actual-size`, `add`, `branch`, `check`, `chevron-down`, `chevron-left`, `chevron-right`,
@@ -1063,19 +1063,19 @@ and `ferrite-icon`, a 16-pixel icon in the text color.
 `undo`, `upload`, `warning`, `zoom-in`, `zoom-out`.
 
 **Tab actions** are buttons beside the tab while it's active, at most 10. Without a `command`, a
-click goes to the page (`ferrite.onAction(id)`); with one, the command runs with the tab as its
+click goes to the page (`flareite.onAction(id)`); with one, the command runs with the tab as its
 argument (`workbench::command-argument()`: the viewer's file, or the preview's key), even while
 the page isn't loaded. Actions without a command need a webview; any viewer or preview can have
 actions with one. An icon file is shown as an image (it can't follow the theme's colors).
 
-**The keyboard.** Ferrite's shortcuts work while a page has focus: the page passes on key
-presses bound to Ferrite commands, and the second key of a chord. To use such a key itself,
+**The keyboard.** Flareite's shortcuts work while a page has focus: the page passes on key
+presses bound to Flareite commands, and the second key of a chord. To use such a key itself,
 handle it with `event.preventDefault()` in a `keydown` listener on an element or the
 `document` (a listener on `window` runs too late). Other keys, such as typing or Ctrl+C in a
 field, stay in the page.
 
 **The sandbox.** A page runs in a frame sandboxed with only `allow-scripts`, so it has an origin
-of its own: it can't reach Ferrite's window, IPC, cookies, or `localStorage`, navigate, open
+of its own: it can't reach Flareite's window, IPC, cookies, or `localStorage`, navigate, open
 popups, or submit forms. Its address is made for its tab, and a content security policy allows
 only the extension's files, the viewed file, and `data:` and `blob:` URLs (inline scripts and
 styles are fine). With the [`network` permission](#permissions), granted by the user, the policy
@@ -1110,10 +1110,10 @@ let id = prompts::confirm(
     buttons: vec!["Discard File".into()],
     destructive: true,
   },
-  "ferrite.git.answered",
+  "flareite.git.answered",
 )
 .map_err(|e| format!("{e:?}"))?;
-// ... remember what `id` was for; in ferrite.git.answered:
+// ... remember what `id` was for; in flareite.git.answered:
 if let Some(answer) = prompts::answer()
   && answer.value == AnswerValue::Button(0)
 {
@@ -1131,13 +1131,13 @@ The manifest declares the schemes it provides, each with the command that provid
 ```toml
 [[text_providers]]
 scheme = "git"                  # 2 to 32 lowercase letters, digits, +, -, or .
-command = "ferrite.git.provide" # one of the extension's commands
+command = "flareite.git.provide" # one of the extension's commands
 ```
 
 An address is the scheme, a colon, and whatever the extension likes: Git's are
 `git:<revision>:<path>`. The name after the last `/`, `\`, or `:` is the tab's title and picks
 the language, so `git:HEAD:src/main.rs` is highlighted as Rust. Schemes the editor or the web use
-(`file`, `untitled`, `http`, `https`, `data`, `blob`, `ferrite`) are refused.
+(`file`, `untitled`, `http`, `https`, `data`, `blob`, `flareite`) are refused.
 
 When the editor needs a text, it runs the provider's command, during which
 **`documents::requested()`** returns the address. The command answers with
@@ -1145,7 +1145,7 @@ When the editor needs a text, it runs the provider's command, during which
 empty. A command that doesn't answer fails the request.
 
 ```rust
-"ferrite.git.provide" => {
+"flareite.git.provide" => {
   if let Some(uri) = documents::requested() {
     let text = read_version(&uri); // e.g. `git cat-file blob HEAD:src/main.rs` with processes::run
     documents::provide(&uri, text.as_deref()).map_err(|e| format!("{e:?}"))?;
@@ -1201,8 +1201,8 @@ next or previous change. **Revert Selected Ranges** reverts the changes the sele
 
 ```toml
 [quick_diff]
-original = "ferrite.git.original"    # names a file's original
-apply = "ferrite.git.stage"          # optional: applies changes to an original
+original = "flareite.git.original"    # names a file's original
+apply = "flareite.git.stage"          # optional: applies changes to an original
 apply_title = "Stage"                # with apply: what applying is called
 ```
 
@@ -1253,7 +1253,7 @@ light = "#895503"                    # optional; the dark color otherwise
 
 ```toml
 # A theme, or [workbench.colors] in settings.toml:
-"ferrite.git.modified" = "#f0c674"
+"flareite.git.modified" = "#f0c674"
 ```
 
 ### Limits
@@ -1293,7 +1293,7 @@ command that isn't the extension's own, or an item whose parent isn't listed bef
 
 ## Languages
 
-Every language Ferrite knows comes from an extension: which files it is for, syntax
+Every language Flareite knows comes from an extension: which files it is for, syntax
 highlighting from a [Tree-sitter](https://tree-sitter.github.io/) grammar, highlighting of other
 languages embedded in it, and its language server. None of this needs code, so a language-only
 extension has no entrypoint. The official HTML & CSS extension is the example used below; the
@@ -1355,7 +1355,7 @@ case-insensitively.
 ### Grammars
 
 A grammar is a Tree-sitter parser compiled to WebAssembly with `tree-sitter build --wasm`, which
-exports `tree_sitter_<grammar_name>`. Ferrite uses Tree-sitter 0.27, which loads grammars of
+exports `tree_sitter_<grammar_name>`. Flareite uses Tree-sitter 0.27, which loads grammars of
 language ABI 13 to 15. Many grammars publish a prebuilt `.wasm`: all the official extensions' grammars are the
 files from their npm packages (`tree-sitter-html@0.23.2`, `tree-sitter-css@0.25.0`,
 `tree-sitter-rust@0.24.0`, and so on), except XML's, whose npm package has none: it's the
@@ -1369,9 +1369,9 @@ npx tree-sitter-cli@0.27.1 build --wasm path/to/tree-sitter-html
 
 A grammar runs in its own WebAssembly sandbox, separate from extensions'. It can use only
 Tree-sitter's small C library and up to 128 MiB of memory per thread that parses it. It is
-loaded and compiled the first time a file of its language is opened, not when Ferrite starts.
+loaded and compiled the first time a file of its language is opened, not when Flareite starts.
 
-**Grammars are trusted not to loop.** Ferrite stops a parse that takes too long between steps,
+**Grammars are trusted not to loop.** Flareite stops a parse that takes too long between steps,
 but it can't interrupt a grammar's external scanner in the middle of a call. A scanner that
 never returns blocks the thread parsing, which can freeze the editor. Use grammars from sources
 you trust, as you would any program.
@@ -1380,7 +1380,7 @@ you trust, as you would any program.
 
 `highlights.scm` is a standard Tree-sitter
 [highlight query](https://tree-sitter.github.io/tree-sitter/3-syntax-highlighting.html#highlights):
-patterns that capture nodes with names like `@keyword` or `@function.method`. Ferrite colors a
+patterns that capture nodes with names like `@keyword` or `@function.method`. Flareite colors a
 capture by the first part of its name, using the theme's `syntax-*` colors:
 
 | Capture names                                              | Color     |
@@ -1426,7 +1426,7 @@ indentation.
 
 ### Injections
 
-`injections.scm` marks text in another language, which Ferrite parses with that language's
+`injections.scm` marks text in another language, which Flareite parses with that language's
 grammar and highlights over the outer language:
 
 ```scheme
@@ -1462,10 +1462,10 @@ root_markers = ["package.json"]          # optional: files marking a project roo
 ```
 
 - **Permission.** Declaring language servers requires `language_servers = true`, and the other
-  way around. Ferrite asks the user before running them, showing each command line. Until the
+  way around. Flareite asks the user before running them, showing each command line. Until the
   user allows it, or if they deny it, the servers don't run; the languages are highlighted
   either way.
-- **Ferrite runs them**: started on demand when a file of
+- **Flareite runs them**: started on demand when a file of
   one of their languages is opened, with hover, go to definition, references, symbols, completion, and diagnostics.
   The extension's code, if any, has no access to them.
 - **Commands.** A command without `/` or `\` is looked up on the `PATH`. A relative path runs a
@@ -1481,7 +1481,7 @@ root_markers = ["package.json"]          # optional: files marking a project roo
 
 1. Run **Extensions: Load Development Extension…** and choose a checkout of the HTML & CSS
    extension. Nothing needs building.
-2. Ferrite asks whether to allow the two language servers. Either answer is fine; to get them,
+2. Flareite asks whether to allow the two language servers. Either answer is fine; to get them,
    run `npm install -g vscode-langservers-extracted`.
 3. Open an `.html` file: tags, attributes, and comments are colored, and so is the CSS in
    `<style>` and the JavaScript in `<script>`. An `.svg` file is colored the same way.
@@ -1514,7 +1514,7 @@ Each extension runs on its own thread with these limits:
 | WebAssembly stack              | 1 MiB                      |
 | Waiting events                 | 1,024 (changes are merged) |
 
-**Failures.** Ferrite stops an extension when it traps, panics, runs out of memory or stack, or
+**Failures.** Flareite stops an extension when it traps, panics, runs out of memory or stack, or
 misses a deadline. Infinite loops are interrupted at the deadline. The extension is marked
 failed, and its diagnostics, decorations, status bar items, and view contents are removed. The
 user sees why, with a **Restart** button. The editor and the document are unaffected.
@@ -1523,7 +1523,7 @@ user sees why, with a **Restart** button. The editor and the document are unaffe
 limit. An extension whose memory can't grow because the pool is used up fails with a message
 saying so, and a stopped extension returns its memory to the pool.
 
-**Resource use.** Ferrite counts, per extension, how often it ran and for how long, its slowest
+**Resource use.** Flareite counts, per extension, how often it ran and for how long, its slowest
 call, its memory (current and peak), the document changes it skipped because its queue was
 full, how long it took to compile, and how long it took to start (compiling, instantiating, and
 `activate`). Users see this in the Extensions view (the start time on each row, the rest on its
@@ -1542,8 +1542,8 @@ Every failure listed here is covered by the host's integration tests, which use 
 
 ## Installing
 
-Ferrite loads installed extensions from the `extensions` folder next to `settings.toml`, for
-example `%APPDATA%\dev.ferrite.editor\extensions` on Windows. Each extension is a subfolder with
+Flareite loads installed extensions from the `extensions` folder next to `settings.toml`, for
+example `%APPDATA%\dev.flareite.editor\extensions` on Windows. Each extension is a subfolder with
 its `extension.toml` and `.wasm` file:
 
 ```text
@@ -1566,26 +1566,26 @@ cd extensions
 cargo test -p tidy --target x86_64-pc-windows-msvc    # or your host's target triple
 ```
 
-**Integration tests.** The extension host's tests (`crates/ferrite-extension-host/tests/host.rs`)
+**Integration tests.** The extension host's tests (`crates/flareite-extension-host/tests/host.rs`)
 build the extensions workspace and run the extensions against a real editor core. They are the
 model for testing an extension end to end. Run them with
-`cargo test -p ferrite-extension-host`.
+`cargo test -p flareite-extension-host`.
 
 ## Other languages
 
 Any language that can produce a WebAssembly component for the `extension` world works. The
-component must import nothing but the Ferrite interfaces (`ferrite:extension/host`,
-`ferrite:extension/workbench`, `ferrite:extension/files`, `ferrite:extension/viewers`,
-`ferrite:extension/webviews`, `ferrite:extension/storage`, `ferrite:extension/workspace`,
-`ferrite:extension/processes`, `ferrite:extension/explorer`, `ferrite:extension/views`,
-`ferrite:extension/prompts`, `ferrite:extension/documents`, `ferrite:extension/quick-diff`, and
-`ferrite:extension/timers`). The host provides no WASI, so
+component must import nothing but the Flareite interfaces (`flareite:extension/host`,
+`flareite:extension/workbench`, `flareite:extension/files`, `flareite:extension/viewers`,
+`flareite:extension/webviews`, `flareite:extension/storage`, `flareite:extension/workspace`,
+`flareite:extension/processes`, `flareite:extension/explorer`, `flareite:extension/views`,
+`flareite:extension/prompts`, `flareite:extension/documents`, `flareite:extension/quick-diff`, and
+`flareite:extension/timers`). The host provides no WASI, so
 a component that imports `wasi:*` interfaces (most toolchains' defaults) fails to start, with a
 message saying so. Rust on `wasm32-unknown-unknown` is the supported path for now.
 
 ## Versioning
 
-The WIT package is versioned: `ferrite:extension@1.14.0`, `api_version = "1"`.
+The WIT package is versioned: `flareite:extension@1.14.0`, `api_version = "1"`.
 
 - **Additions.** New host functions arrive as minor versions of the package. Version 1.1 added the
   `workbench` interface, 1.2 added previews to it, 1.3 added the `files` interface, 1.4 the
@@ -1598,9 +1598,10 @@ The WIT package is versioned: `ferrite:extension@1.14.0`, `api_version = "1"`.
   manifest), 1.13 `workbench::set-line-annotations` and `views::set-visible` (with
   `on_selection_changed` and hidden views in the manifest), and 1.14
   `workbench::render-markdown`.
-  Wasmtime
-  links components built against an older minor version: the host's tests load Tidy builds made
-  against 1.0 and 1.2 and a TODOs build made against 1.1.
+  Wasmtime links components built against an older minor version.
+- **The rename.** The package was `ferrite:extension` until the project became Flareite; components
+  built against that name don't link and must be rebuilt
+  ([ADR 0035](adr/0035-the-flareite-rename.md)).
 - **Breaking changes.** Changes that break existing extensions get a new major version and a new
   `api_version`.
 - **Rejection.** Manifests for unsupported versions are rejected before loading.

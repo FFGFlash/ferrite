@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
  * Generates src/components/actionIcons.json: the named icons extensions can
- * use for tab actions and in webview pages (the kit's `ferrite-icon`).
+ * use for tab actions and in webview pages (the kit's `flareite-icon`).
  *
  *   node scripts/action-icons.mjs
  *

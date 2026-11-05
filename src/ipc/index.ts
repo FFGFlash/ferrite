@@ -38,7 +38,7 @@ export class CommandError extends Error {
 /** Invokes a backend command, normalizing failures to `CommandError`. */
 export async function call<T>(command: string, args?: InvokeArgs): Promise<T> {
   if (!desktop) {
-    throw new CommandError('unavailable', 'This action requires the Ferrite desktop app.')
+    throw new CommandError('unavailable', 'This action requires the Flareite desktop app.')
   }
   try {
     return await invoke<T>(command, args)

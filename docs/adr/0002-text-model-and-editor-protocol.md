@@ -5,7 +5,7 @@
 
 ## Context
 
-Milestone 2 makes Ferrite a working text editor. The design brief requires Rust to own the
+Milestone 2 makes Flareite a working text editor. The design brief requires Rust to own the
 authoritative document, the frontend not to keep full copies of documents, correct Unicode
 handling, unambiguous position APIs, efficient undo with a retention policy, and safe saving that
 never silently discards edits. These choices shape every later subsystem (syntax, LSP,
@@ -52,10 +52,10 @@ clean while versions keep increasing.
 
 ### The core does no I/O
 
-`ferrite-core` receives loaded text and produces save points. `ferrite-workspace` does the I/O,
-and `ferrite-app` coordinates it, including dialogs. This keeps the core deterministic and
+`flareite-core` receives loaded text and produces save points. `flareite-workspace` does the I/O,
+and `flareite-app` coordinates it, including dialogs. This keeps the core deterministic and
 testable, and lets saving run on a blocking thread without holding the editor lock. The core
-depends on `ferrite-workspace` only for the `FileStamp` type it stores per document.
+depends on `flareite-workspace` only for the `FileStamp` type it stores per document.
 
 ### Operation protocol with viewport views
 
@@ -103,4 +103,4 @@ on mismatch, ask before overwriting.
   applies. A click that's batched behind typing could land slightly off, which is harmless
   because positions are clamped. Extension edits (M6) will use explicit versions instead.
 - Opening a non-UTF-8 file fails with a clear error. Other encodings can be added later in
-  `ferrite-workspace` without touching the core.
+  `flareite-workspace` without touching the core.

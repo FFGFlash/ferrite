@@ -56,9 +56,9 @@ describe('problems', () => {
   })
 
   it('records reported problems newest first, counting repeats', () => {
-    recordProblem('warning', 'Saving failed: disk full', 'Ferrite', null, 1000)
+    recordProblem('warning', 'Saving failed: disk full', 'Flareite', null, 1000)
     recordProblem('error', 'Lint crashed', 'Tidy', 'example.tidy', 2000)
-    recordProblem('warning', 'Saving failed: disk full', 'Ferrite', null, 3000)
+    recordProblem('warning', 'Saving failed: disk full', 'Flareite', null, 3000)
     expect(reportedProblems.get().map(p => [p.message, p.count, p.time])).toEqual([
       ['Saving failed: disk full', 2, 3000],
       ['Lint crashed', 1, 2000],
@@ -68,7 +68,7 @@ describe('problems', () => {
     expect(reportedProblems.get()).toHaveLength(3)
 
     clearReported(reportedProblems.get()[0]!.key)
-    expect(reportedProblems.get().map(p => p.source)).toEqual(['Ferrite', 'Tidy'])
+    expect(reportedProblems.get().map(p => p.source)).toEqual(['Flareite', 'Tidy'])
     clearReported()
     expect(reportedProblems.get()).toEqual([])
   })

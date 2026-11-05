@@ -8,8 +8,8 @@
 
 ## Context
 
-The extensions under the `ferrite.` namespace (Git, Markdown, Images, and the languages HTML &
-CSS, JavaScript, JSON, Python, Rust, TOML, TypeScript, and XML) are meant to be Ferrite's official
+The extensions under the `flareite.` namespace (Git, Markdown, Images, and the languages HTML &
+CSS, JavaScript, JSON, Python, Rust, TOML, TypeScript, and XML) are meant to be Flareite's official
 extensions, released on their own schedules, so each gets a repository of its own. The editor
 depended on them in three ways: its tests loaded their grammars and built and ran Git, Markdown,
 and Images; and the extension host compiled the Markdown extension's renderer into itself, by
@@ -25,7 +25,7 @@ Example File Icons) and the test fixtures.
 
 ### Markdown rendering is the editor's, and an API (1.14)
 
-The renderer moves into the host (`ferrite-extension-host/src/markdown.rs`), where READMEs use
+The renderer moves into the host (`flareite-extension-host/src/markdown.rs`), where READMEs use
 it, and extensions call it as **`workbench::render-markdown(text)`**, which returns preview
 nodes. The Markdown extension no longer has a renderer or a Markdown parser of its own. A
 Markdown preview and a README look the same, because one renderer draws both, and any extension
@@ -54,7 +54,7 @@ can show Markdown (a commit message, a hover) without bundling a parser.
 
 Each is a standalone Cargo package (no workspace inheritance) that builds for
 `wasm32-unknown-unknown`, with its manifest's entrypoint in its own `target/`. It depends on
-`ferrite-extension-api` by path, expecting this repository checked out beside it as `editor`.
+`flareite-extension-api` by path, expecting this repository checked out beside it as `editor`.
 
 ## Consequences
 
@@ -64,6 +64,6 @@ Each is a standalone Cargo package (no workspace inheritance) that builds for
   and quick diff have none); fixtures for them, like `test.pages`, would restore the coverage.
 - A change to the API that breaks an official extension isn't caught here. Building the official
   extensions against a change is a step for whoever makes it.
-- Extensions that call `render-markdown` need Ferrite with API 1.14.
+- Extensions that call `render-markdown` need Flareite with API 1.14.
 - The README renderer and previews can't drift apart, and the editor has one copy of the
   renderer instead of two.

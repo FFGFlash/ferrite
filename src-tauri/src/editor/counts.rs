@@ -9,9 +9,9 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::Instant;
 
-use ferrite_core::{Document, DocumentId, MAX_MATCHES};
-use ferrite_tasks::Priority;
-use ferrite_text::{SearchQuery, Version};
+use flareite_core::{Document, DocumentId, MAX_MATCHES};
+use flareite_tasks::Priority;
+use flareite_text::{SearchQuery, Version};
 use tauri::{AppHandle, Manager};
 
 use super::protocol::MatchCount;

@@ -1,4 +1,4 @@
-//! Deterministic fixtures for Ferrite's benchmarks: code-like text of a given
+//! Deterministic fixtures for Flareite's benchmarks: code-like text of a given
 //! size and synthetic workspaces on disk. Generated rather than checked in,
 //! so the repository stays small and every run uses identical inputs.
 

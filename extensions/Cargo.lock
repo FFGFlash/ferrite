@@ -21,7 +21,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "00d174d5400e5e8fd687ad1049e2f578285fa914201b1af7e8b112a4546bd826"
 
 [[package]]
-name = "ferrite-extension-api"
+name = "flareite-extension-api"
 version = "1.0.0"
 dependencies = [
  "wit-bindgen",
@@ -105,14 +105,14 @@ checksum = "cf8baf1c55e62ffcace7a9f06f4bd9cd3f0c4beb022d3b367256b91b87513d98"
 name = "misbehaving"
 version = "0.1.0"
 dependencies = [
- "ferrite-extension-api",
+ "flareite-extension-api",
 ]
 
 [[package]]
 name = "pages"
 version = "0.1.0"
 dependencies = [
- "ferrite-extension-api",
+ "flareite-extension-api",
 ]
 
 [[package]]
@@ -138,7 +138,7 @@ dependencies = [
 name = "programs"
 version = "0.1.0"
 dependencies = [
- "ferrite-extension-api",
+ "flareite-extension-api",
 ]
 
 [[package]]
@@ -213,14 +213,14 @@ dependencies = [
 name = "tidy"
 version = "0.1.0"
 dependencies = [
- "ferrite-extension-api",
+ "flareite-extension-api",
 ]
 
 [[package]]
 name = "todos"
 version = "0.1.0"
 dependencies = [
- "ferrite-extension-api",
+ "flareite-extension-api",
 ]
 
 [[package]]

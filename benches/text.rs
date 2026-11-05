@@ -5,8 +5,8 @@ use std::hint::black_box;
 use std::time::Duration;
 
 use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
-use ferrite_benches::code_text;
-use ferrite_text::{ChangeSet, Edit, TextBuffer, Utf16Position};
+use flareite_benches::code_text;
+use flareite_text::{ChangeSet, Edit, TextBuffer, Utf16Position};
 
 const MB: usize = 1024 * 1024;
 

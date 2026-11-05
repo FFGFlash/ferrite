@@ -100,7 +100,7 @@ function onListKeys(event: KeyboardEvent<HTMLElement>): void {
 }
 
 /**
- * Problems with Ferrite and with extensions (an extension that stopped,
+ * Problems with Flareite and with extensions (an extension that stopped,
  * settings that were ignored, warnings and errors notifications reported),
  * then problems in files, by file. Choosing a file's problem shows it in
  * the editor.
@@ -231,7 +231,7 @@ function ProblemGroup({ group }: { group: Group }) {
               Open settings.toml
             </button>
           )}
-          {(extension || source === 'Ferrite') && (
+          {(extension || source === 'Flareite') && (
             <button
               type="button"
               className="problems__button"

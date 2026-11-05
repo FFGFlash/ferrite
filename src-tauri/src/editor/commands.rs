@@ -8,9 +8,9 @@
 
 use std::path::Path;
 
-use ferrite_core::{CoreError, Document, DocumentId, EditorOp, LanguageChoice, ViewId};
-use ferrite_text::SearchQuery;
-use ferrite_workspace::{
+use flareite_core::{CoreError, Document, DocumentId, EditorOp, LanguageChoice, ViewId};
+use flareite_text::SearchQuery;
+use flareite_workspace::{
   DecodeOptions, ENCODING_CHOICES, FileError, TextEncoding, load_text_file_with, save_text_file,
 };
 use serde::{Deserialize, Serialize};
@@ -378,7 +378,7 @@ fn build_view(
 /// The document `id` in its view `view` (view 0 if not given): each editor
 /// showing a document has its own view, with its own selections and folds.
 fn document_in_view(
-  editor: &mut ferrite_core::Editor,
+  editor: &mut flareite_core::Editor,
   id: u64,
   view: Option<u32>,
 ) -> Result<&mut Document, CoreError> {

@@ -95,7 +95,7 @@ export function App() {
   }, [])
 
   return (
-    <ErrorBoundary name="Ferrite">
+    <ErrorBoundary name="Flareite">
       <Workbench appInfo={appInfo} />
     </ErrorBoundary>
   )

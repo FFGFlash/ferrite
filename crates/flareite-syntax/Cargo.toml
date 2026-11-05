@@ -1,0 +1,20 @@
+[package]
+name = "flareite-syntax"
+description = "Tree-sitter parsing and syntax highlighting for Flareite."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+flareite-text = { workspace = true }
+streaming-iterator = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+tree-sitter = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }
+
+[lints]
+workspace = true

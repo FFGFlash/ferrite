@@ -1,4 +1,4 @@
-//! Tidy: an example Ferrite extension.
+//! Tidy: an example Flareite extension.
 //!
 //! It flags trailing whitespace and lines longer than a configurable limit
 //! (as diagnostics), and adds commands: one trims trailing whitespace (a
@@ -14,12 +14,12 @@
 use std::cell::RefCell;
 use std::collections::HashMap;
 
-use ferrite_extension_api::files::{self, FileError};
-use ferrite_extension_api::types::{
+use flareite_extension_api::files::{self, FileError};
+use flareite_extension_api::types::{
   Activation, ApiError, CommandContext, ConfigValue, Diagnostic, DocumentChange, DocumentId,
   DocumentInfo, LogLevel, MessageLevel, Permission, Position, Range, Severity, TextEdit,
 };
-use ferrite_extension_api::{Guest, export_extension, host, workbench};
+use flareite_extension_api::{Guest, export_extension, host, workbench};
 
 /// Lines read per request.
 const CHUNK_LINES: u32 = 2_000;

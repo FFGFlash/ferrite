@@ -1,12 +1,12 @@
 //! Process-wide structured logging.
 //!
 //! Events are written to stderr and, when a log directory is available, to a
-//! daily rolling file. The filter is read from `FERRITE_LOG` using
+//! daily rolling file. The filter is read from `FLAREITE_LOG` using
 //! `tracing_subscriber::EnvFilter` directive syntax, for example
-//! `FERRITE_LOG=debug,frontend=trace`.
+//! `FLAREITE_LOG=debug,frontend=trace`.
 //!
 //! Recent events are also kept in memory for the Output view, in channels:
-//! Ferrite's own, one per extension (events with an `extension` field), and
+//! Flareite's own, one per extension (events with an `extension` field), and
 //! one per language server (a `server` field). Those channels keep every
 //! level, so an extension's debug messages and a server's stderr show there
 //! even though the file only has `info` and above.
@@ -27,16 +27,16 @@ use tracing_subscriber::filter::filter_fn;
 use tracing_subscriber::layer::Context;
 use tracing_subscriber::{EnvFilter, Layer, fmt, prelude::*};
 
-pub const FILTER_ENV: &str = "FERRITE_LOG";
+pub const FILTER_ENV: &str = "FLAREITE_LOG";
 const DEFAULT_FILTER: &str = "info";
-const FILE_PREFIX: &str = "ferrite";
+const FILE_PREFIX: &str = "flareite";
 const RETAINED_FILES: usize = 7;
 
-/// Ferrite's own channel; others are `extension:<id>` and `server:<name>`.
-pub const APP_CHANNEL: &str = "ferrite";
+/// Flareite's own channel; others are `extension:<id>` and `server:<name>`.
+pub const APP_CHANNEL: &str = "flareite";
 /// Records kept per channel, so a chatty extension can't push out the rest.
 const KEPT_PER_CHANNEL: usize = 2_000;
-/// Channels kept; events for more go to Ferrite's.
+/// Channels kept; events for more go to Flareite's.
 const MAX_CHANNELS: usize = 256;
 /// Longest message kept in memory; the log file has all of it.
 const MAX_MESSAGE_BYTES: usize = 8 * 1024;
@@ -108,7 +108,7 @@ pub fn init(log_dir: Option<&Path>) -> LogGuard {
   }
 }
 
-/// Ferrite's events from `info` up, and every event of an extension or a
+/// Flareite's events from `info` up, and every event of an extension or a
 /// language server. Decided per call site, so other debug events cost
 /// nothing.
 fn kept_in_memory(metadata: &tracing::Metadata<'_>) -> bool {
@@ -193,7 +193,7 @@ impl LogBuffer {
       })
   }
 
-  /// Every channel with records, Ferrite's first, and its newest `seq`.
+  /// Every channel with records, Flareite's first, and its newest `seq`.
   pub fn channels(&self) -> Vec<LogChannel> {
     let state = self.0.lock().unwrap_or_else(PoisonError::into_inner);
     let mut channels: Vec<LogChannel> = state
@@ -212,7 +212,7 @@ impl LogBuffer {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct LogChannel {
-  /// `ferrite`, `extension:<id>`, or `server:<name>`.
+  /// `flareite`, `extension:<id>`, or `server:<name>`.
   pub id: String,
   /// The newest record's `seq`.
   pub last: u64,
@@ -354,7 +354,7 @@ mod tests {
   fn keeps_records_by_channel_with_every_level_for_extensions_and_servers() {
     let buffer = capture(|| {
       tracing::info!(path = "a.rs", "saved file");
-      tracing::debug!("hidden: Ferrite's debug events aren't kept");
+      tracing::debug!("hidden: Flareite's debug events aren't kept");
       tracing::debug!(extension = "example.tidy", "checking {} lines", 3);
       tracing::warn!(extension = %"example.tidy", dropped = 2, "too many messages");
       tracing::debug!(server = "rust-analyzer", "stderr line");
@@ -362,7 +362,7 @@ mod tests {
     let ids: Vec<String> = buffer.channels().into_iter().map(|c| c.id).collect();
     assert_eq!(
       ids,
-      ["ferrite", "extension:example.tidy", "server:rust-analyzer"]
+      ["flareite", "extension:example.tidy", "server:rust-analyzer"]
     );
     let app = buffer.read(APP_CHANNEL, 0);
     assert_eq!(app.len(), 1);

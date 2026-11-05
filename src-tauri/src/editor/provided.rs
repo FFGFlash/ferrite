@@ -3,7 +3,7 @@
 //! interface). The text comes from the extension when the document opens,
 //! and again whenever the extension says it changed.
 
-use ferrite_core::DocumentId;
+use flareite_core::DocumentId;
 use tauri::{AppHandle, Manager};
 
 use super::EditorState;

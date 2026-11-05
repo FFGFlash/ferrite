@@ -2,7 +2,7 @@
 ; ../../grammars/LICENSE-tree-sitter-xml). Elements and attributes use the
 ; same captures as HTML's, so an .svg file looks like SVG inline in HTML.
 ;
-; Ferrite colors a capture by its first segment: @tag, @attribute, @string,
+; Flareite colors a capture by its first segment: @tag, @attribute, @string,
 ; @comment, @constant, @punctuation, @operator, @escape, and so on (see
 ; docs/extensions.md). Captures it doesn't know are left uncolored.
 

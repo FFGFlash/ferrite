@@ -1,5 +1,5 @@
 {
-  "name": "ferrite",
+  "name": "flareite",
   "private": true,
   "version": "0.1.0",
   "license": "MIT OR Apache-2.0",
@@ -15,7 +15,7 @@
     "format": "prettier --write . && cargo fmt --all",
     "format:check": "prettier --check . && cargo fmt --all --check",
     "tauri": "tauri",
-    "bench": "cargo bench -p ferrite-benches",
+    "bench": "cargo bench -p flareite-benches",
     "bench:app": "node scripts/bench.mjs",
     "bench:check": "node scripts/perf-check.mjs"
   },

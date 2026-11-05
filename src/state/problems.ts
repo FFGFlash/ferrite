@@ -1,6 +1,6 @@
 /**
  * Problems for the Problems view and the status bar's counts: those with
- * Ferrite itself and with extensions, and those in files.
+ * Flareite itself and with extensions, and those in files.
  *
  * - **Current** problems come from state: an extension that stopped or
  *   couldn't be loaded, extension settings that were ignored, and a
@@ -27,7 +27,7 @@ export interface Problem {
   /** The same problem keeps its key. */
   key: string
   severity: ProblemSeverity
-  /** What it's about: `Ferrite`, `Settings`, or an extension's name. */
+  /** What it's about: `Flareite`, `Settings`, or an extension's name. */
   source: string
   /** The id of the extension it's about. */
   extension: string | null
@@ -51,7 +51,7 @@ export const settingsProblem = createStore<string | null>(null)
 export function recordProblem(
   severity: ProblemSeverity,
   message: string,
-  source = 'Ferrite',
+  source = 'Flareite',
   extension: string | null = null,
   now = Date.now(),
 ): void {
@@ -267,7 +267,7 @@ export function problemsByPath(list: ProblemsList): Map<string, PathProblems> {
   return byPath
 }
 
-/** Every error and warning: Ferrite's, extensions', and files'. */
+/** Every error and warning: Flareite's, extensions', and files'. */
 export function useProblemCounts(): { errors: number; warnings: number } {
   const app = countProblems(useProblems())
   const files = countFileProblems(useStore(fileProblemsStore))

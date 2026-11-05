@@ -1,4 +1,4 @@
-//! Ferrite desktop application.
+//! Flareite desktop application.
 //!
 //! This crate owns process lifecycle and dependency wiring: it initializes
 //! logging, registers the Tauri commands that form the frontend boundary, and
@@ -50,7 +50,7 @@ pub fn run() {
     .manage(file_drop::DropState::default())
     // Extensions' webview pages, which run in sandboxed frames.
     .register_asynchronous_uri_scheme_protocol(
-      ferrite_extension_host::webview::SCHEME,
+      flareite_extension_host::webview::SCHEME,
       |context, request, responder| {
         let app = context.app_handle().clone();
         // Files are read off the main thread.
@@ -63,7 +63,7 @@ pub fn run() {
       let log_dir = match app.path().app_log_dir() {
         Ok(dir) => Some(dir),
         Err(error) => {
-          eprintln!("Ferrite: log directory unavailable, logging to stderr only: {error}");
+          eprintln!("Flareite: log directory unavailable, logging to stderr only: {error}");
           None
         }
       };
@@ -280,7 +280,7 @@ pub fn run() {
     Ok(app) => app,
     Err(error) => {
       tracing::error!(%error, "failed to start");
-      eprintln!("Ferrite failed to start: {error}");
+      eprintln!("Flareite failed to start: {error}");
       std::process::exit(1);
     }
   };

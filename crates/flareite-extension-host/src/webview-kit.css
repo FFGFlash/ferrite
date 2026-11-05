@@ -1,0 +1,108 @@
+/*
+ * Flareite's kit for webview pages: controls that look like the workbench's,
+ * in the theme's colors. A page opts in with
+ *
+ *   <link rel="stylesheet" href="__flareite/kit.css">
+ *
+ * (from any folder). The named icons' rules follow, generated from
+ * src/components/actionIcons.json:
+ *
+ *   <span class="flareite-icon" data-icon="zoom-in"></span>
+ */
+.flareite-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 8px;
+  border-bottom: 1px solid var(--flareite-border);
+  background: var(--flareite-editor-background);
+}
+
+.flareite-group {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.flareite-separator {
+  align-self: stretch;
+  width: 1px;
+  margin: 2px 4px;
+  background: var(--flareite-border);
+}
+
+.flareite-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  min-width: 24px;
+  height: 24px;
+  padding: 0 6px;
+  border: 1px solid transparent;
+  border-radius: var(--flareite-radius-control);
+  background: none;
+  color: var(--flareite-text-muted);
+  font: inherit;
+  font-size: var(--flareite-font-size-ui-small);
+  cursor: pointer;
+}
+
+.flareite-button:hover:not(:disabled) {
+  background: var(--flareite-control-hover-background);
+  color: var(--flareite-text);
+}
+
+.flareite-button[aria-pressed='true'] {
+  border-color: var(--flareite-focus-ring);
+  color: var(--flareite-text);
+}
+
+.flareite-button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.flareite-button:focus-visible,
+.flareite-input:focus-visible {
+  outline: 1px solid var(--flareite-focus-ring);
+  outline-offset: -1px;
+}
+
+.flareite-button.flareite-primary {
+  background: var(--flareite-button-background);
+  color: var(--flareite-button-foreground);
+}
+
+.flareite-button.flareite-primary:hover:not(:disabled) {
+  background: var(--flareite-button-hover-background);
+  color: var(--flareite-button-foreground);
+}
+
+.flareite-input {
+  min-width: 0;
+  height: 24px;
+  padding: 0 6px;
+  border: 1px solid var(--flareite-input-border);
+  border-radius: var(--flareite-radius-control);
+  background: var(--flareite-input-background);
+  color: var(--flareite-text);
+  font: inherit;
+  font-size: var(--flareite-font-size-ui-small);
+}
+
+.flareite-label {
+  color: var(--flareite-text-muted);
+  font-size: var(--flareite-font-size-ui-small);
+  font-variant-numeric: tabular-nums;
+}
+
+.flareite-icon {
+  display: inline-block;
+  flex: none;
+  width: 16px;
+  height: 16px;
+  background-color: currentColor;
+  mask: var(--flareite-icon) center / contain no-repeat;
+}

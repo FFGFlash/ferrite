@@ -12,9 +12,9 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError, RwLock};
 
-use ferrite_tasks::{Priority, TaskHandle};
-use ferrite_text::{SearchQuery, TextSnapshot};
-use ferrite_workspace::{
+use flareite_tasks::{Priority, TaskHandle};
+use flareite_text::{SearchQuery, TextSnapshot};
+use flareite_workspace::{
   DecodeOptions, DirEntry, EntryKind, FileIndex, FileMatches, FileStamp, SearchLimits,
   SearchSummary, WorkspaceWatcher, create_entry, list_directory, load_text_file_with, scan_files,
   search_workspace,
@@ -249,7 +249,7 @@ fn on_files_changed(app: &AppHandle, changed: Vec<PathBuf>) {
 }
 
 /// Reloads an open document whose file changed on disk, unless the change
-/// is Ferrite's own save. Documents with unsaved changes are left alone and
+/// is Flareite's own save. Documents with unsaved changes are left alone and
 /// the user is told.
 fn reload_if_open(app: &AppHandle, path: &Path) {
   let editor_state = app.state::<EditorState>();

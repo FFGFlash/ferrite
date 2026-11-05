@@ -48,7 +48,7 @@ Alternatives considered:
 
 ### API 1.1: additive, so 1.0 extensions keep working
 
-The new functions live in a new interface, `ferrite:extension/workbench@1.1.0`, imported by the
+The new functions live in a new interface, `flareite:extension/workbench@1.1.0`, imported by the
 same world. The world's exports are unchanged.
 
 - **Old components.** A component built against 1.0 doesn't import `workbench`, and its `host`
@@ -75,7 +75,7 @@ A theme names a base (dark or light) and overrides semantic color tokens.
 ### Keybinding precedence: user, then built-in, then extensions
 
 Extensions declare keybindings for their own commands, in the same syntax as built-in ones
-(normalized by `ferrite_extension_host::keys`).
+(normalized by `flareite_extension_host::keys`).
 
 - **Order.** When a key matches several commands, the user's `[keybindings]` settings win, then
   built-in defaults, then extension defaults. Installing an extension can't take Ctrl+S away,

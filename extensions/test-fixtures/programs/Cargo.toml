@@ -10,4 +10,4 @@ publish.workspace = true
 crate-type = ["cdylib"]
 
 [dependencies]
-ferrite-extension-api = { workspace = true }
+flareite-extension-api = { workspace = true }

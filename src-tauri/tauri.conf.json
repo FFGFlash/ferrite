@@ -1,7 +1,7 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
-  "productName": "Ferrite",
-  "identifier": "dev.ferrite.editor",
+  "productName": "Flareite",
+  "identifier": "dev.flareite.editor",
   "build": {
     "beforeDevCommand": "pnpm dev",
     "devUrl": "http://localhost:1420",
@@ -12,7 +12,7 @@
     "windows": [
       {
         "label": "main",
-        "title": "Ferrite",
+        "title": "Flareite",
         "width": 1280,
         "height": 800,
         "minWidth": 640,
@@ -21,8 +21,8 @@
       }
     ],
     "security": {
-      "csp": "default-src 'self' ipc: http://ipc.localhost; style-src 'self' 'unsafe-inline'; img-src 'self' data:; frame-src ferrite-webview: http://ferrite-webview.localhost",
-      "devCsp": "default-src 'self' ipc: http://ipc.localhost ws://localhost:1420; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; frame-src ferrite-webview: http://ferrite-webview.localhost"
+      "csp": "default-src 'self' ipc: http://ipc.localhost; style-src 'self' 'unsafe-inline'; img-src 'self' data:; frame-src flareite-webview: http://flareite-webview.localhost",
+      "devCsp": "default-src 'self' ipc: http://ipc.localhost ws://localhost:1420; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; frame-src flareite-webview: http://flareite-webview.localhost"
     }
   },
   "bundle": {

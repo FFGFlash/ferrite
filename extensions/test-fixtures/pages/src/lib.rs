@@ -9,11 +9,11 @@
 use std::cell::RefCell;
 use std::collections::BTreeSet;
 
-use ferrite_extension_api::types::{
+use flareite_extension_api::types::{
   Activation, ApiError, CommandContext, DocumentChange, DocumentId, DocumentInfo, PreviewOptions,
   Webview,
 };
-use ferrite_extension_api::{Guest, export_extension, host, viewers, webviews, workbench};
+use flareite_extension_api::{Guest, export_extension, host, viewers, webviews, workbench};
 
 const PREVIEW: &str = "preview";
 

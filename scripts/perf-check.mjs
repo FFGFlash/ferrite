@@ -8,7 +8,7 @@
  *                                                committed baseline
  *   node scripts/perf-check.mjs --update         # make the last run the baseline
  *   node scripts/perf-check.mjs micro            # check Criterion's comparisons
- *                                                after `cargo bench -p ferrite-benches
+ *                                                after `cargo bench -p flareite-benches
  *                                                -- --baseline <name>`
  *
  * Options: --results PATH, --baseline-file PATH (default benches/baseline.json),
@@ -102,7 +102,7 @@ function appCheck() {
         root,
         'target',
         'release',
-        process.platform === 'win32' ? 'ferrite.exe' : 'ferrite',
+        process.platform === 'win32' ? 'flareite.exe' : 'flareite',
       ),
     ),
   )
@@ -208,7 +208,7 @@ function microCheck() {
   const threshold = Number(option('threshold', '10')) / 100
   const dir = path.join(root, 'target', 'criterion')
   if (!fs.existsSync(dir)) {
-    console.error('No Criterion results. Run: cargo bench -p ferrite-benches -- --baseline <name>')
+    console.error('No Criterion results. Run: cargo bench -p flareite-benches -- --baseline <name>')
     process.exit(2)
   }
   const changes = criterionChanges(dir).sort((a, b) => a.name.localeCompare(b.name))

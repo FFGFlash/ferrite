@@ -1,4 +1,4 @@
-# Midnight: a deep blue dark theme. Keys are Ferrite's color tokens; any
+# Midnight: a deep blue dark theme. Keys are Flareite's color tokens; any
 # token left out keeps the dark theme's color.
 [colors]
 accent = "#7aa2f7"

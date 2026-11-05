@@ -1,7 +1,7 @@
 //! Comparing two open documents for diff tabs.
 
-use ferrite_core::DocumentId;
-use ferrite_diff::{DiffError, DiffOptions, Point};
+use flareite_core::DocumentId;
+use flareite_diff::{DiffError, DiffOptions, Point};
 use serde::Serialize;
 use tauri::{AppHandle, Manager};
 
@@ -29,7 +29,7 @@ pub struct CharChangeDto {
 }
 
 impl CharChangeDto {
-  pub fn of(chars: &ferrite_diff::CharChange) -> Self {
+  pub fn of(chars: &flareite_diff::CharChange) -> Self {
     Self {
       original: range(chars.original.clone()),
       modified: range(chars.modified.clone()),
@@ -73,12 +73,12 @@ pub async fn diff_compute(
     let options = DiffOptions {
       ignore_trim_whitespace,
     };
-    let changes = ferrite_diff::diff(&before, &after, options).map_err(|error| match error {
+    let changes = flareite_diff::diff(&before, &after, options).map_err(|error| match error {
       DiffError::TooLarge => CommandError::new(
         "tooLarge",
         format!(
           "Files with more than {} lines aren't compared.",
-          ferrite_diff::MAX_LINES
+          flareite_diff::MAX_LINES
         ),
       ),
     })?;

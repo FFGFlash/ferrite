@@ -18,7 +18,7 @@ generic, with Git's knowledge in the extension.
 
 ### A diff crate in the core
 
-`ferrite-diff` compares two texts with imara-diff: lines with the histogram algorithm (and the
+`flareite-diff` compares two texts with imara-diff: lines with the histogram algorithm (and the
 indent heuristic, so changes line up with code blocks), then, within each changed block of at
 most 500 lines and 50,000 characters, words and punctuation with Myers. Columns are UTF-16, as
 everywhere in the protocol. By default whitespace at the ends of lines doesn't count, as in VS
@@ -84,4 +84,4 @@ changes, and asks for `documents_read` to find the active document's file for **
 - A selection or search that reaches into collapsed lines unfolds them in the backend without the
   diff knowing, until it next lays out; the rows can be off by the hidden lines until then.
 - Gutter markers for changes in ordinary editors, staging hunks, and conflicts (stages 4 and 7)
-  can build on `ferrite-diff` and provided documents.
+  can build on `flareite-diff` and provided documents.

@@ -23,7 +23,7 @@ const { previewChanged } = await import('../state/previews')
 const { PreviewPane, slug } = await import('./PreviewPane')
 
 const info: PreviewInfo = {
-  id: 'ferrite.markdown.preview/1',
+  id: 'flareite.markdown.preview/1',
   extension: 'Markdown',
   title: 'Preview README.md',
   icon: 'book',

@@ -17,7 +17,7 @@ const actions: { command: string; label: string }[] = [
 export function WelcomePage({ appInfo }: WelcomePageProps) {
   return (
     <div className="welcome">
-      <h1 className="welcome__title">Ferrite</h1>
+      <h1 className="welcome__title">Flareite</h1>
       <p className="welcome__tagline">A fast, extensible code editor.</p>
       <ul className="welcome__actions">
         {actions.map(({ command, label }) => {

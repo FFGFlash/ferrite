@@ -16,7 +16,7 @@ and server sync belong in the backend.
 
 ### Tree-sitter in the backend, highlights in the view
 
-Parsing and highlighting run in Rust (`ferrite-syntax`), next to the text. The
+Parsing and highlighting run in Rust (`flareite-syntax`), next to the text. The
 frontend receives per-line spans (UTF-16 columns and token kinds) in the same
 view response as the lines, so a keystroke still costs one round trip, and
 the colors always match the text being painted.
@@ -60,7 +60,7 @@ A client and backend that disagree fall back to sending all visible spans.
 
 ### Language servers on their own threads, positions in UTF-8 when possible
 
-`ferrite-lsp` runs each server with a writer thread (notifications are queued,
+`flareite-lsp` runs each server with a writer thread (notifications are queued,
 so sending never blocks under the editor lock), a reader thread, and a stderr
 logger. Requests are made from blocking threads with timeouts and
 cancellation, never while holding a lock. The client offers the UTF-8
@@ -104,7 +104,7 @@ that exits is restarted on demand up to three times.
   see [`performance.md`](../performance.md)).
 - Language servers dominate memory: rust-analyzer's process tree used about
   2 GB after indexing a small crate with the standard library, against about
-  90 MB for Ferrite itself. CPU contention while a server indexes can delay
+  90 MB for Flareite itself. CPU contention while a server indexes can delay
   frames; the benchmark measures typing once the server is idle.
 - Each grammar adds to binary size; adding languages is a code change until
   extensions can contribute grammars (M6). They can since

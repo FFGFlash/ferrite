@@ -150,7 +150,7 @@ impl TrustState {
     };
     let result = serde_json::to_string_pretty(&*self.lock())
       .map_err(std::io::Error::other)
-      .and_then(|text| ferrite_workspace::write_file_atomically(path, text.as_bytes()));
+      .and_then(|text| flareite_workspace::write_file_atomically(path, text.as_bytes()));
     if let Err(error) = result {
       tracing::error!(%error, path = %path.display(), "could not save trusted folders");
     }

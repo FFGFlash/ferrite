@@ -25,7 +25,7 @@ export interface NotifyOptions {
    * default), so it can be found after the notification is gone.
    */
   record?: boolean
-  /** What it's about, for the Problems view: `Ferrite` by default. */
+  /** What it's about, for the Problems view: `Flareite` by default. */
   source?: string
   /** The id of the extension it's about. */
   extension?: string | null

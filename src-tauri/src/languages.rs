@@ -1,5 +1,5 @@
 //! The languages the editor knows and their language servers, all from
-//! extensions: Ferrite has none built in, so without language extensions
+//! extensions: Flareite has none built in, so without language extensions
 //! every file is plain text.
 //!
 //! Rebuilt in the background whenever extensions change. A language whose
@@ -13,11 +13,11 @@ use std::path::Path;
 use std::sync::{Arc, Mutex, PoisonError, RwLock};
 use std::time::SystemTime;
 
-use ferrite_core::{CommentTokens, Document, LanguageChoice};
-use ferrite_extension_host::contributions::{LanguageContribution, LanguageServerContribution};
-use ferrite_lsp::{ServerCommand, ServerConfig};
-use ferrite_syntax::{Language, LanguageDefinition, Registry};
-use ferrite_tasks::Priority;
+use flareite_core::{CommentTokens, Document, LanguageChoice};
+use flareite_extension_host::contributions::{LanguageContribution, LanguageServerContribution};
+use flareite_lsp::{ServerCommand, ServerConfig};
+use flareite_syntax::{Language, LanguageDefinition, Registry};
+use flareite_tasks::Priority;
 use serde::Serialize;
 use tauri::{AppHandle, Manager, State};
 
@@ -260,10 +260,10 @@ pub fn examples(folders: &[&str]) -> Registry {
   let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../extensions/test-fixtures/languages");
   let definitions = folders.iter().flat_map(|folder| {
     let dir = root.join(folder);
-    let text = std::fs::read_to_string(dir.join(ferrite_extension_host::manifest::MANIFEST_FILE))
+    let text = std::fs::read_to_string(dir.join(flareite_extension_host::manifest::MANIFEST_FILE))
       .unwrap_or_else(|error| panic!("{folder}: {error}"));
     let manifest =
-      ferrite_extension_host::manifest::parse(&text, &dir, &semver::Version::new(0, 1, 0), true)
+      flareite_extension_host::manifest::parse(&text, &dir, &semver::Version::new(0, 1, 0), true)
         .unwrap_or_else(|error| panic!("{folder}: {error}"));
     manifest
       .contributions
@@ -285,7 +285,7 @@ pub fn examples(folders: &[&str]) -> Registry {
 
 #[cfg(test)]
 mod tests {
-  use ferrite_core::{Editor, EditorConfig};
+  use flareite_core::{Editor, EditorConfig};
 
   use super::*;
 
@@ -296,7 +296,7 @@ mod tests {
     let path = dir.path().join("icon.svg");
     std::fs::write(&path, "<svg/>").expect("writes");
     let mut editor = Editor::new(EditorConfig::default());
-    let loaded = ferrite_workspace::load_text_file(&path).expect("loads");
+    let loaded = flareite_workspace::load_text_file(&path).expect("loads");
     let file = editor.open(path, loaded);
     let untitled = editor.create_untitled();
     let mut language = |id, choice| {

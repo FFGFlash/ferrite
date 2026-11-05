@@ -8,7 +8,7 @@ use std::collections::HashMap;
 use std::ops::Range;
 use std::sync::{Mutex, PoisonError};
 
-use ferrite_core::{CommentTokens, Document, DocumentId, RegionMarkers, SectionHeader};
+use flareite_core::{CommentTokens, Document, DocumentId, RegionMarkers, SectionHeader};
 use tauri::{AppHandle, Manager};
 
 use super::EditorState;

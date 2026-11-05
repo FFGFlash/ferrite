@@ -6,9 +6,9 @@ const ipc = await import('../ipc/extensions')
 const { applyTheme } = await import('../themes/theme')
 const webviews = await import('./webviews')
 
-const IMAGES = 'ferrite.images.svg//w/a.svg'
-const OTHER_PAGE = 'ferrite.images.graph/key'
-const ELSEWHERE = 'ferrite.imagesx.svg//w/b.svg'
+const IMAGES = 'flareite.images.svg//w/a.svg'
+const OTHER_PAGE = 'flareite.images.graph/key'
+const ELSEWHERE = 'flareite.imagesx.svg//w/b.svg'
 
 describe('webviews', () => {
   beforeEach(() => {
@@ -38,7 +38,7 @@ describe('webviews', () => {
       webviews.registerWebviewFrame(OTHER_PAGE, other),
       webviews.registerWebviewFrame(ELSEWHERE, elsewhere),
     ]
-    webviews.storageChanged('ferrite.images', 'global', 'background', '"white"', IMAGES)
+    webviews.storageChanged('flareite.images', 'global', 'background', '"white"', IMAGES)
     expect(images).not.toHaveBeenCalled()
     expect(other).toHaveBeenCalledWith('storageChanged', {
       scope: 'global',
@@ -47,7 +47,7 @@ describe('webviews', () => {
     })
     expect(elsewhere).not.toHaveBeenCalled()
     // From the extension's code: every page hears of it.
-    webviews.storageChanged('ferrite.images', null, null, null, null)
+    webviews.storageChanged('flareite.images', null, null, null, null)
     expect(images).toHaveBeenCalledWith('storageChanged', { scope: null, key: null, value: null })
     stops.forEach(stop => stop())
   })

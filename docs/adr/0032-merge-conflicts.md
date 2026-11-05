@@ -42,7 +42,7 @@ document).
 ### The merge editor is the workbench's (API 1.12)
 
 `documents::open-merge` names a base, two versions, and a result file, so any extension can open
-one; the comparing lives in `ferrite_diff::merge`, next to the diff it builds on. Each version is
+one; the comparing lives in `flareite_diff::merge`, next to the diff it builds on. Each version is
 compared with the base; changes that overlap or touch make one range, a conflict if both sides
 changed it differently (as Git counts them). Where each range is in the result comes from
 comparing the result with the base, not from tracking edits, so the result can be edited by hand

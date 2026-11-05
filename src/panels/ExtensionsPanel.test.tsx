@@ -25,7 +25,7 @@ const tidy: ExtensionStatus = {
   name: 'Tidy',
   version: '0.1.0',
   description: 'Flags trailing whitespace and overlong lines, and trims trailing whitespace.',
-  author: 'Ferrite',
+  author: 'Flareite',
   hasIcon: true,
   hasReadme: true,
   path: '/ext/tidy',
@@ -117,13 +117,13 @@ describe('ExtensionsPanel', () => {
     expect(open).toHaveTextContent('Tidy')
     expect(open).toHaveTextContent('dev')
     expect(open).toHaveTextContent('42 ms')
-    expect(open).toHaveTextContent('Ferrite')
+    expect(open).toHaveTextContent('Flareite')
     expect(open).toHaveAttribute('aria-description', tidy.description)
     // The tooltip has what the row shortens.
     expect(open.title).toBe(
       [
         'Tidy 0.1.0 (development)',
-        'example.tidy · by Ferrite',
+        'example.tidy · by Flareite',
         tidy.description,
         'Active · started in 42 ms',
       ].join('\n'),
@@ -202,7 +202,7 @@ describe('ExtensionPage', () => {
     expect(within(page).getByRole('heading', { level: 1, name: /Tidy/ })).toHaveTextContent(
       'Tidy0.1.0development',
     )
-    expect(page).toHaveTextContent('Ferrite · example.tidy')
+    expect(page).toHaveTextContent('Flareite · example.tidy')
     expect(page).toHaveTextContent('Active · started in 42 ms')
     const readme = within(page).getByRole('region', { name: 'README' })
     expect(await within(readme).findByText('Tidy keeps whitespace tidy')).toBeInTheDocument()

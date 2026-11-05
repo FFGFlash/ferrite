@@ -19,18 +19,18 @@ aligned. We'll revisit when Tauri 3 is stable and its migration path is document
 
 ### Product name and crate naming
 
-The product is **Ferrite** (bundle identifier `dev.ferrite.editor`). Crates use the `ferrite-`
-prefix instead of the brief's `editor-` placeholder, for example `ferrite-text` and
-`ferrite-core`.
+The product is **Flareite** (bundle identifier `dev.flareite.editor`). Crates use the `flareite-`
+prefix instead of the brief's `editor-` placeholder, for example `flareite-text` and
+`flareite-core`.
 
 ### One crate for now; `src-tauri` is the application crate
 
 The brief lists both `editor-app` and `src-tauri`. Both have the same responsibility (lifecycle,
-dependency wiring, the command boundary), so they are one crate: `ferrite-app` in `src-tauri/`.
+dependency wiring, the command boundary), so they are one crate: `flareite-app` in `src-tauri/`.
 Following the brief's guidance not to create empty crates, the workspace currently has a single
-member. `ferrite-text` and `ferrite-core` will be added in Milestone 2 under `crates/`.
+member. `flareite-text` and `flareite-core` will be added in Milestone 2 under `crates/`.
 
-`ferrite-app` exposes a library (`ferrite_app::run`) plus a thin `ferrite` binary. That keeps the
+`flareite-app` exposes a library (`flareite_app::run`) plus a thin `flareite` binary. That keeps the
 code unit-testable and leaves room for mobile entry points later.
 
 ### Workspace-managed dependencies

@@ -5,7 +5,7 @@
 
 use std::time::Duration;
 
-use ferrite_tasks::{Metrics, Scheduler, Summary};
+use flareite_tasks::{Metrics, Scheduler, Summary};
 use serde::Serialize;
 use tauri::State;
 

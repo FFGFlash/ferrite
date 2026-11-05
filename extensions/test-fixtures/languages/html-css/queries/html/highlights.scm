@@ -1,7 +1,7 @@
 ; HTML highlighting, from tree-sitter-html 0.23.2 (MIT, see
 ; ../../grammars/LICENSE-tree-sitter-html), plus `=` and entities.
 ;
-; Ferrite colors a capture by its first segment: @tag, @attribute, @string,
+; Flareite colors a capture by its first segment: @tag, @attribute, @string,
 ; @comment, @constant, @punctuation, @operator, @escape, and so on (see
 ; docs/extensions.md). Captures it doesn't know are left uncolored.
 

@@ -11,11 +11,11 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, OnceLock};
 use std::time::{Duration, Instant};
 
-use ferrite_core::{Document, DocumentId, Editor};
-use ferrite_extension_host::icons::IconTheme;
-use ferrite_extension_host::preview::PreviewElement;
-use ferrite_extension_host::webview::WebviewInfo;
-use ferrite_extension_host::{
+use flareite_core::{Document, DocumentId, Editor};
+use flareite_extension_host::icons::IconTheme;
+use flareite_extension_host::preview::PreviewElement;
+use flareite_extension_host::webview::WebviewInfo;
+use flareite_extension_host::{
   Embedder, ExtensionHost, ExtensionMarks, ExtensionStatus, HostOptions, Limits, MANIFEST_FILE,
   Notification, OpenFolder, Permission, PreviewContent, PreviewInfo, PromptReply, StatusItem,
   ViewContent,
@@ -514,7 +514,7 @@ pub async fn extension_view_expand(
   wait(ticket).await
 }
 
-async fn wait(ticket: ferrite_extension_host::CommandTicket) -> Result<(), CommandError> {
+async fn wait(ticket: flareite_extension_host::CommandTicket) -> Result<(), CommandError> {
   tauri::async_runtime::spawn_blocking(move || ticket.wait())
     .await
     .map_err(CommandError::internal)?
@@ -739,7 +739,7 @@ pub async fn extension_viewer_open(
     .await
     .map_err(CommandError::internal)?
     .map_err(|message| CommandError::new("extension", message))?;
-  Ok(ferrite_extension_host::viewer_id(&viewer, &path))
+  Ok(flareite_extension_host::viewer_id(&viewer, &path))
 }
 
 /// Where a webview (viewer or preview) loads its page from; `None` if it
@@ -766,7 +766,7 @@ pub fn extension_webview_message(
 }
 
 /// The workbench's theme, as webview pages get it: `dark` or `light`, and
-/// variables by name (without `--ferrite-`).
+/// variables by name (without `--flareite-`).
 #[tauri::command]
 pub fn extension_webview_theme(
   state: State<'_, ExtensionsState>,
@@ -831,8 +831,8 @@ pub fn extension_clear_storage(
     .map_err(|message| CommandError::new("extensionStorage", message))
 }
 
-/// Serves `ferrite-webview:` requests: `/<token>/<path>` from a webview
-/// page (see `ferrite_extension_host::webview`).
+/// Serves `flareite-webview:` requests: `/<token>/<path>` from a webview
+/// page (see `flareite_extension_host::webview`).
 pub fn serve_webview(
   app: &AppHandle,
   request: &tauri::http::Request<Vec<u8>>,

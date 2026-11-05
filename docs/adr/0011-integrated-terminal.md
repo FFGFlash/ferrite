@@ -25,9 +25,9 @@ and the shell's memory and the webview's must stay bounded.
 
 ### Pseudoterminals through `portable-pty`, in a new crate
 
-`ferrite-terminal` runs each shell with `portable-pty` (from WezTerm, MIT, maintained), which
+`flareite-terminal` runs each shell with `portable-pty` (from WezTerm, MIT, maintained), which
 covers ConPTY and Unix ptys behind one interface. The crate has no Tauri dependency. Like
-`ferrite-lsp`, it runs three threads per terminal:
+`flareite-lsp`, it runs three threads per terminal:
 
 - **A writer.** It drains a bounded queue of input (64 writes, at most 1 MiB each), so a
   program that isn't reading its input never blocks the caller.
@@ -98,7 +98,7 @@ far is replayed first.
   app started from the Dock. Elsewhere, `$SHELL`. Since 2026-10-30, other installed shells can
   be chosen too (see below).
 - **Working directory.** The workspace folder, or the home folder.
-- **Environment.** `COLORTERM=truecolor`, `TERM_PROGRAM=ferrite`, `TERM_PROGRAM_VERSION`, and,
+- **Environment.** `COLORTERM=truecolor`, `TERM_PROGRAM=flareite`, `TERM_PROGRAM_VERSION`, and,
   outside Windows, `TERM=xterm-256color`.
 
 ### Keys belong to the shell
@@ -149,7 +149,7 @@ Prompt, a WSL distribution. A profile is a named shell (program, arguments, envi
   **Terminal: Select Default Profile…** writes it with `toml_edit`, keeping the file's comments.
   These replace the earlier `terminal.shell` and `terminal.args`.
 - **Cached briefly.** Looking takes about 60 ms on Windows, most of it `wsl.exe`. The result is
-  reused for 30 seconds, so a shell installed while Ferrite runs still shows up.
+  reused for 30 seconds, so a shell installed while Flareite runs still shows up.
 
 ### Resizing on Windows (2026-10-30)
 
@@ -169,7 +169,7 @@ resizing, and reading the whole buffer back:
 The ConPTY in Windows Terminal 1.22 and later doesn't repaint on resize. Microsoft publishes it
 for applications to ship (`conpty.dll` and `OpenConsole.exe`, NuGet package
 `Microsoft.Windows.Console.ConPTY`, MIT), and WezTerm and VS Code ship it for this reason.
-Ferrite ships it too:
+Flareite ships it too:
 
 - **Downloaded by the build.** `src-tauri/build.rs` downloads a pinned version from nuget.org
   once, checks the package against its SHA-256, and unpacks the files for the target

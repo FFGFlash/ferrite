@@ -1,4 +1,4 @@
-# Builds and tests Ferrite on Windows, macOS, and Linux. Timing benchmarks
+# Builds and tests Flareite on Windows, macOS, and Linux. Timing benchmarks
 # don't run here (shared runners are too noisy); the performance budget
 # tests that count work instead of timing it run with the other tests, and
 # the Criterion benchmarks are run once each to keep them working.
@@ -79,4 +79,4 @@ jobs:
         working-directory: extensions
       - run: cargo test --workspace
       - name: Run each benchmark once
-        run: cargo test -p ferrite-benches --benches --release
+        run: cargo test -p flareite-benches --benches --release

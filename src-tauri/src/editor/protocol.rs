@@ -8,11 +8,11 @@
 
 use std::ops::Range;
 
-use ferrite_core::{
+use flareite_core::{
   CommentTokens, Direction, Document, EditorOp, KnownLines, LineText, Motion, Unit,
   VerticalDirection, ViewportUpdate,
 };
-use ferrite_text::{
+use flareite_text::{
   LineEnding, SearchQuery, TextBuffer, Utf16Position, Version, normalize_line_endings,
 };
 use serde::{Deserialize, Serialize};
@@ -823,7 +823,7 @@ impl EditorView {
 // Line ranges are naturally single-element arrays here.
 #[allow(clippy::single_range_in_vec_init)]
 mod tests {
-  use ferrite_core::{Editor, MAX_MATCHES};
+  use flareite_core::{Editor, MAX_MATCHES};
 
   use super::*;
 

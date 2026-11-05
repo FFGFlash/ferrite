@@ -1,33 +1,33 @@
 [package]
-name = "ferrite-app"
-description = "Ferrite desktop application: lifecycle, dependency wiring, and the Tauri command boundary."
+name = "flareite-app"
+description = "Flareite desktop application: lifecycle, dependency wiring, and the Tauri command boundary."
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 publish = false
-default-run = "ferrite"
+default-run = "flareite"
 
 [[bin]]
-name = "ferrite"
+name = "flareite"
 path = "src/main.rs"
 
 [lib]
-name = "ferrite_app"
+name = "flareite_app"
 
 [build-dependencies]
 sha2 = { workspace = true }
 tauri-build = { workspace = true }
 
 [dependencies]
-ferrite-core = { workspace = true }
-ferrite-diff = { workspace = true }
-ferrite-extension-host = { workspace = true }
-ferrite-lsp = { workspace = true }
-ferrite-syntax = { workspace = true }
-ferrite-tasks = { workspace = true }
-ferrite-terminal = { workspace = true }
-ferrite-text = { workspace = true }
-ferrite-workspace = { workspace = true }
+flareite-core = { workspace = true }
+flareite-diff = { workspace = true }
+flareite-extension-host = { workspace = true }
+flareite-lsp = { workspace = true }
+flareite-syntax = { workspace = true }
+flareite-tasks = { workspace = true }
+flareite-terminal = { workspace = true }
+flareite-text = { workspace = true }
+flareite-workspace = { workspace = true }
 memory-stats = { workspace = true }
 open = { workspace = true }
 semver = { workspace = true }

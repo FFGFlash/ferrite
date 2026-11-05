@@ -20,7 +20,7 @@ vi.mock('../ipc/editor', async importOriginal => ({
 const editorIpc = await import('../ipc/editor')
 
 const appInfo: AppInfo = {
-  name: 'Ferrite',
+  name: 'Flareite',
   version: '0.1.0',
   os: 'windows',
   arch: 'x86_64',
@@ -72,7 +72,7 @@ describe('Workbench', () => {
         .map(tab => tab.getAttribute('aria-label')),
     ).toEqual(['Explorer', 'Search', 'Extensions'])
     expect(screen.getByRole('button', { name: 'Explorer' })).toHaveAttribute('aria-pressed', 'true')
-    expect(screen.getByRole('heading', { name: 'Ferrite' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Flareite' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /New File/ })).toBeInTheDocument()
   })
 
@@ -305,7 +305,7 @@ describe('Workbench', () => {
     act(() => {
       fileMarksStore.set([
         {
-          extension: 'ferrite.git',
+          extension: 'flareite.git',
           marks: [
             {
               path: '/w/main.rs',
@@ -387,10 +387,10 @@ describe('Workbench', () => {
   it('shows backend application details once available', () => {
     const { rerender } = render(<Workbench appInfo={null} />)
     const statusBar = screen.getByRole('contentinfo')
-    expect(within(statusBar).queryByText(/Ferrite/)).not.toBeInTheDocument()
+    expect(within(statusBar).queryByText(/Flareite/)).not.toBeInTheDocument()
 
     rerender(<Workbench appInfo={appInfo} />)
-    expect(within(statusBar).getByText('Ferrite 0.1.0')).toBeInTheDocument()
+    expect(within(statusBar).getByText('Flareite 0.1.0')).toBeInTheDocument()
     expect(screen.getByText('Windows x86_64')).toBeInTheDocument()
   })
 })

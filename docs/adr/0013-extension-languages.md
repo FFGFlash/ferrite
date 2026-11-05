@@ -6,7 +6,7 @@
 
 ## Context
 
-Ferrite highlights seven languages with Tree-sitter grammars compiled into the binary, and knows
+Flareite highlights seven languages with Tree-sitter grammars compiled into the binary, and knows
 three language servers. ADR 0005 left adding a language as a code change "until extensions can
 contribute grammars". The design brief asks for extensions that "add language support" and for a
 defined way to package, register, and associate grammars with files, without loading every
@@ -35,12 +35,12 @@ Alternatives considered:
 - **Declarative grammars (TextMate-style regular expressions).** No native code, but a second
   highlighting engine, no incremental parsing, and much weaker results than the trees the
   editor already uses.
-- **Grammars bundled in Ferrite, chosen by extensions.** Safe and simple, but adding a language
-  would still be a change to Ferrite, which is what this ADR is meant to end.
+- **Grammars bundled in Flareite, chosen by extensions.** Safe and simple, but adding a language
+  would still be a change to Flareite, which is what this ADR is meant to end.
 
 ### One Wasmtime, at the version Tree-sitter uses
 
-Tree-sitter 0.27's `wasm` feature depends on Wasmtime 48 (through its C API). Ferrite was on
+Tree-sitter 0.27's `wasm` feature depends on Wasmtime 48 (through its C API). Flareite was on
 Wasmtime 50.0.1 for its security fixes, and two Wasmtime versions would mean two copies of the
 runtime and compiler in the binary and in build times. Wasmtime fixes security issues in its
 supported older releases too: 48.0.8 was released the same day as 50.0.1 with the same fixes. So
@@ -57,7 +57,7 @@ linker warnings.
 
 ### A language registry instead of a fixed enum
 
-`ferrite-syntax` replaces the `LanguageId` enum with a `Registry` of `Language`s: the bundled
+`flareite-syntax` replaces the `LanguageId` enum with a `Registry` of `Language`s: the bundled
 ones, then extensions' `LanguageDefinition`s (id, name, file extensions and names, grammar and
 query paths). A `Language` is a reference-counted registration, compared by identity. The app
 rebuilds the registry in the background whenever extensions change, reusing it when no
@@ -113,7 +113,7 @@ root markers), and they join the configured servers. Running a program is the mo
 thing an extension can ask for, so it needs the new `language-servers` permission, which the
 manifest must request exactly when it declares servers. The prompt shows each command line.
 
-- **Ferrite runs them, not the extension.** The permission doesn't reach the WebAssembly API
+- **Flareite runs them, not the extension.** The permission doesn't reach the WebAssembly API
   (`activate` never sees it), and extension code can't talk to the servers.
 - **Commands** are programs on the `PATH`, or paths inside the extension's folder for servers
   an extension ships. Absolute paths are refused.
@@ -136,7 +136,7 @@ permission") if it declares servers; its languages work either way.
   language servers from `vscode-langservers-extracted`. Its grammars are the prebuilt files from
   the `tree-sitter-html` 0.23.2 and `tree-sitter-css` 0.25.0 npm packages (MIT).
 - Grammars are trusted not to loop. Tree-sitter's progress callback stops a parse between
-  steps, but Ferrite can't interrupt a grammar's external scanner inside a call, because
+  steps, but Flareite can't interrupt a grammar's external scanner inside a call, because
   Tree-sitter's stores have no deadline to set. A scanner that never returns blocks its thread,
   and an inline parse holds the editor lock. The guide says to use grammars from trusted
   sources.

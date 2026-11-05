@@ -1,15 +1,15 @@
 # Architecture
 
-This document describes Ferrite's architecture as it currently exists and how it is expected to
+This document describes Flareite's architecture as it currently exists and how it is expected to
 grow. The goals and constraints come from [`DESIGN.md`](DESIGN.md); decisions with lasting
 consequences are recorded as ADRs in [`adr/`](adr/).
 
 ## Current state (Milestone 8)
 
 ```text
-┌──────────────────────────── Desktop process (ferrite) ─────────────────────────────┐
+┌──────────────────────────── Desktop process (flareite) ─────────────────────────────┐
 │                                                                                    │
-│  ┌─────────── WebView ───────────┐        ┌──────────── ferrite-app ────────────┐  │
+│  ┌─────────── WebView ───────────┐        ┌──────────── flareite-app ────────────┐  │
 │  │ React workbench (src/)        │        │ commands.rs   app info, logging     │  │
 │  │  EditorView ─▶ EditorSession ─┼─ IPC ─▶│ editor/       documents, editing,   │  │
 │  │  (visible lines, highlights,  │◀─view──│               syntax state          │  │
@@ -19,43 +19,43 @@ consequences are recorded as ADRs in [`adr/`](adr/).
 │  └───────────────────────────────┘        └──┬─────────┬──────────┬─────────┬───┘  │
 │                                              │         │          │         │      │
 │        ┌─────────────────┐  ┌────────────────▼─┐ ┌─────▼────────┐ │  ┌──────▼────┐ │
-│        │ ferrite-syntax  │◀─┤ ferrite-core     │ │ ferrite-lsp  │ │  │ ferrite-  │ │
+│        │ flareite-syntax  │◀─┤ flareite-core     │ │ flareite-lsp  │ │  │ flareite-  │ │
 │        │ Tree-sitter     │  │ documents, ops,  │ │ JSON-RPC,    │ │  │ workspace │ │
 │        │ parse, highlight│  │ find, undo       │ │ positions    │ │  │           │ │
 │        └───────┬─────────┘  └────────┬─────────┘ └──────┬───────┘ │  └─────┬─────┘ │
 │                └─────────────────────▼──────────────────▼─────────▼────────▼       │
-│                                   ferrite-text: rope, change sets, edit log        │
+│                                   flareite-text: rope, change sets, edit log        │
 └──────────────────────────────────────────────────────────┬─────────────────────────┘
                                                             │ stdio
                                            language servers (rust-analyzer, ...)
 ```
 
-Extensions run beside this, in `ferrite-extension-host`, each on its own thread (see
+Extensions run beside this, in `flareite-extension-host`, each on its own thread (see
 [Extensions](#extensions)).
 
 ## Crates
 
-Crates use the `ferrite-` prefix. Dependencies point downward only. Only `ferrite-app` depends on
+Crates use the `flareite-` prefix. Dependencies point downward only. Only `flareite-app` depends on
 Tauri, and nothing in Rust depends on the frontend.
 
-| Crate                    | Responsibility                                                                                                                                                                                                                   | Depends on                                                                     |
-| ------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------ |
-| `ferrite-text`           | Rope-backed `TextBuffer`, validated `ChangeSet`s, versions, the line-splice log, UTF-16 conversion, grapheme/word boundaries, line endings, regex/literal search over the rope                                                   | `ropey`, `unicode-segmentation`, `regex-cursor`                                |
-| `ferrite-workspace`      | Reading and atomically writing files, directory listings with ignore rules, the Go to File index, find in files, file watching, backups of unsaved documents                                                                     | `ferrite-text`, `ignore`, `globset`, `nucleo-matcher`, `notify-debouncer-mini` |
-| `ferrite-core`           | `Editor` (open documents), `Document`, selections, `EditorOp`s (including find/replace), undo history, dirty state, reload from disk, incremental viewport updates. No I/O.                                                      | `ferrite-text`, `ferrite-workspace` (for `FileStamp`)                          |
-| `ferrite-syntax`         | The language registry of extensions' WebAssembly Tree-sitter grammars (none built in); language detection, incremental and interruptible parsing with injected layers, per-line highlight spans                                  | `ferrite-text`, `tree-sitter` (with `wasm`), grammar crates                    |
-| `ferrite-lsp`            | Language server processes and JSON-RPC over stdio, UTF-8/UTF-16 position conversion, incremental document changes from the edit log, server configuration and workspace roots, a scripted test server                            | `ferrite-process`, `ferrite-text`, `lsp-types`, `serde_json`                   |
-| `ferrite-diff`           | Line and character diffs of two texts for diff tabs: histogram line diff, then words within changed blocks, optionally ignoring whitespace at the ends of lines                                                                  | `imara-diff`                                                                   |
-| `ferrite-process`        | Starting programs (language servers, extensions' programs) in a process group with no console window, so stopping one stops what it started; finding programs on the `PATH`                                                      | `win32job` (Windows), `rustix` (Unix)                                          |
-| `ferrite-extension-api`  | The extension API: the WIT interface (`wit/extension.wit`) and the Rust bindings extensions build against (`Guest`, `export_extension!`). Standalone, so extensions outside the repository can use it                            | `wit-bindgen`                                                                  |
-| `ferrite-extension-host` | Extension discovery, manifest validation, permission decisions, a worker thread and bounded event queue per extension, Wasmtime with deadlines and memory limits, the host side of the API (validated reads, edits, diagnostics) | `ferrite-core`, `ferrite-text`, `wasmtime`, `wit-component`, `semver`, `toml`  |
-| `ferrite-tasks`          | Bounded background scheduler (priorities, keyed replacement, cancellation) and timing histograms                                                                                                                                 | `tracing`                                                                      |
-| `ferrite-terminal`       | Shells in pseudoterminals (ConPTY, Unix ptys), UTF-8 output decoding, output history for replay, flow control, default shell detection                                                                                           | `portable-pty`                                                                 |
-| `ferrite-app`            | Process lifecycle, Tauri commands, dialogs, clipboard, settings, session state, workspace coordination, syntax and language server state per document, backend events, instrumentation, benchmark mode, logging                  | all of the above, Tauri, `toml`, `toml_edit`, `memory-stats`                   |
-| `ferrite-benches`        | Criterion benchmarks and deterministic fixtures (`benches/`), not part of the app                                                                                                                                                | `ferrite-text`, `ferrite-core`, `ferrite-workspace`, `criterion`               |
+| Crate                     | Responsibility                                                                                                                                                                                                                   | Depends on                                                                      |
+| ------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------- |
+| `flareite-text`           | Rope-backed `TextBuffer`, validated `ChangeSet`s, versions, the line-splice log, UTF-16 conversion, grapheme/word boundaries, line endings, regex/literal search over the rope                                                   | `ropey`, `unicode-segmentation`, `regex-cursor`                                 |
+| `flareite-workspace`      | Reading and atomically writing files, directory listings with ignore rules, the Go to File index, find in files, file watching, backups of unsaved documents                                                                     | `flareite-text`, `ignore`, `globset`, `nucleo-matcher`, `notify-debouncer-mini` |
+| `flareite-core`           | `Editor` (open documents), `Document`, selections, `EditorOp`s (including find/replace), undo history, dirty state, reload from disk, incremental viewport updates. No I/O.                                                      | `flareite-text`, `flareite-workspace` (for `FileStamp`)                         |
+| `flareite-syntax`         | The language registry of extensions' WebAssembly Tree-sitter grammars (none built in); language detection, incremental and interruptible parsing with injected layers, per-line highlight spans                                  | `flareite-text`, `tree-sitter` (with `wasm`), grammar crates                    |
+| `flareite-lsp`            | Language server processes and JSON-RPC over stdio, UTF-8/UTF-16 position conversion, incremental document changes from the edit log, server configuration and workspace roots, a scripted test server                            | `flareite-process`, `flareite-text`, `lsp-types`, `serde_json`                  |
+| `flareite-diff`           | Line and character diffs of two texts for diff tabs: histogram line diff, then words within changed blocks, optionally ignoring whitespace at the ends of lines                                                                  | `imara-diff`                                                                    |
+| `flareite-process`        | Starting programs (language servers, extensions' programs) in a process group with no console window, so stopping one stops what it started; finding programs on the `PATH`                                                      | `win32job` (Windows), `rustix` (Unix)                                           |
+| `flareite-extension-api`  | The extension API: the WIT interface (`wit/extension.wit`) and the Rust bindings extensions build against (`Guest`, `export_extension!`). Standalone, so extensions outside the repository can use it                            | `wit-bindgen`                                                                   |
+| `flareite-extension-host` | Extension discovery, manifest validation, permission decisions, a worker thread and bounded event queue per extension, Wasmtime with deadlines and memory limits, the host side of the API (validated reads, edits, diagnostics) | `flareite-core`, `flareite-text`, `wasmtime`, `wit-component`, `semver`, `toml` |
+| `flareite-tasks`          | Bounded background scheduler (priorities, keyed replacement, cancellation) and timing histograms                                                                                                                                 | `tracing`                                                                       |
+| `flareite-terminal`       | Shells in pseudoterminals (ConPTY, Unix ptys), UTF-8 output decoding, output history for replay, flow control, default shell detection                                                                                           | `portable-pty`                                                                  |
+| `flareite-app`            | Process lifecycle, Tauri commands, dialogs, clipboard, settings, session state, workspace coordination, syntax and language server state per document, backend events, instrumentation, benchmark mode, logging                  | all of the above, Tauri, `toml`, `toml_edit`, `memory-stats`                    |
+| `flareite-benches`        | Criterion benchmarks and deterministic fixtures (`benches/`), not part of the app                                                                                                                                                | `flareite-text`, `flareite-core`, `flareite-workspace`, `criterion`             |
 
 Extensions themselves (the examples and test fixtures) build to WebAssembly in a separate
-workspace, `extensions/`. The official extensions (`ferrite.*`: Git, Markdown, Images, and the
+workspace, `extensions/`. The official extensions (`flareite.*`: Git, Markdown, Images, and the
 languages) have repositories of their own; nothing in this one depends on them
 ([ADR 0034](adr/0034-official-extensions-in-their-own-repositories.md)). Tests that need real
 grammars use copies in `extensions/test-fixtures/languages/`. The design brief's `editor-app`
@@ -73,7 +73,7 @@ and hardening decisions (crash recovery, accessibility, regression checks) in
 
 ## Background work
 
-All background work runs on one `ferrite-tasks` scheduler owned by the app: a fixed pool of
+All background work runs on one `flareite-tasks` scheduler owned by the app: a fixed pool of
 worker threads (CPU cores − 1, between one and four) with three priorities and a queue of at most
 256 tasks. When the queue is full, the least important, oldest task is dropped.
 
@@ -138,7 +138,7 @@ See [ADR 0002](adr/0002-text-model-and-editor-protocol.md) for the reasoning.
   the text makes them stale.
 - **Folding** (`folds.rs`, [ADR 0015](adr/0015-code-folding.md)) keeps the folded regions as
   byte offsets that follow edits. The fold operations take the document's foldable regions as line
-  ranges from the caller: the language's fold query (`ferrite_syntax::fold_ranges`) or
+  ranges from the caller: the language's fold query (`flareite_syntax::fold_ranges`) or
   indentation (`Document::indentation_folds`). Display rows skip hidden lines. Up and Down count
   rows, other movement steps over hidden lines, and any other operation that leaves a selection
   in hidden lines unfolds their region. Line operations take a folded region with its first
@@ -166,11 +166,11 @@ See [ADR 0002](adr/0002-text-model-and-editor-protocol.md) for the reasoning.
 
 ## Files and saving
 
-`ferrite-workspace` reads and writes files. `ferrite-app` coordinates, so the core stays free of
+`flareite-workspace` reads and writes files. `flareite-app` coordinates, so the core stays free of
 I/O.
 
 - **Loading** reads the whole file, of any size, and decodes it
-  (`ferrite-workspace/src/encoding.rs`, [ADR 0023](adr/0023-encodings-and-viewers.md)). A byte
+  (`flareite-workspace/src/encoding.rs`, [ADR 0023](adr/0023-encodings-and-viewers.md)). A byte
   order mark picks UTF-8 or UTF-16. Without one, NUL bytes in the first 8 KiB mean a binary file
   (`Binary`, which the workbench asks about), unless every other byte is NUL (UTF-16 without a
   BOM). Valid UTF-8 comes next, then the legacy encoding `chardetng` guesses, if the file decodes
@@ -209,7 +209,7 @@ timestamp granularity and with the same length isn't detected.
 
 ## Workspace
 
-`ferrite-app/src/workspace.rs` owns the open folder (one at a time). Opening one starts:
+`flareite-app/src/workspace.rs` owns the open folder (one at a time). Opening one starts:
 
 - **Exclusions and ignore rules.** `files.exclude` globs (default `.git`, `.DS_Store`,
   `Thumbs.db`) are hidden everywhere. `.gitignore` (in git repositories), `.ignore`, and global
@@ -223,14 +223,14 @@ timestamp granularity and with the same length isn't detected.
 - **Explorer listings** are fetched one directory at a time when a folder is expanded, never by
   walking the whole tree. Directories are listed first, sorted case-insensitively. Listing
   requests outside the workspace root are refused.
-- **Creating files and folders** (`workspace_create`, `ferrite-workspace/src/create.rs`) takes a
+- **Creating files and folders** (`workspace_create`, `flareite-workspace/src/create.rs`) takes a
   parent folder inside the workspace and a typed name, which may contain `/` or `\` to create
   subfolders on the way. Names that would leave the parent (`..`) or that the platform can't
   store (on Windows: `<>:"|?*`, trailing periods or spaces, device names like `nul`) are refused,
   and nothing existing is ever replaced. The frontend re-lists the changed folders right away
   instead of waiting for the watcher.
 - **Renaming, moving, copying, and deleting** ([ADR 0019](adr/0019-explorer-file-operations.md),
-  `src-tauri/src/entries.rs`, `ferrite-workspace/src/entries.rs`) take paths inside the open
+  `src-tauri/src/entries.rs`, `flareite-workspace/src/entries.rs`) take paths inside the open
   folder (not the folder itself, and no `..`). Nothing existing is replaced: a rename or move onto a taken name fails, and a
   copy takes the first free `name copy.ext`, `name copy 2.ext`, …. A move across drives copies,
   then deletes. Deleting asks with a native dialog, then moves to the system's trash (the
@@ -247,7 +247,7 @@ timestamp granularity and with the same length isn't detected.
 - **File watching** (`notify` with a 250 ms debounce) keeps everything current incrementally. The
   index adds and removes only the changed paths, the explorer re-lists only the loaded directories
   that changed, and open documents react:
-  - unchanged stamp (Ferrite's own save): ignored;
+  - unchanged stamp (Flareite's own save): ignored;
   - **clean** document: reloaded in place;
   - **dirty** document: left untouched, and the user is told that saving will ask before
     overwriting.
@@ -259,8 +259,8 @@ timestamp granularity and with the same length isn't detected.
 
 ## Settings and session state
 
-- **`settings.toml`** lives in the platform config directory (e.g. `%APPDATA%\dev.ferrite.editor`)
-  and is edited in Ferrite itself, in the settings editor (**Preferences: Open Settings**,
+- **`settings.toml`** lives in the platform config directory (e.g. `%APPDATA%\dev.flareite.editor`)
+  and is edited in Flareite itself, in the settings editor (**Preferences: Open Settings**,
   `Ctrl+,`) or as a document (**Open Settings (TOML)**). It's created from a commented template
   the first time it's needed. The settings editor ([ADR 0017](adr/0017-settings-editor.md)) is a
   page (`page:settings`) that lists `settings_schema`: every built-in setting
@@ -337,7 +337,7 @@ changes, so a crash, a forced shutdown, or a power cut loses at most the last se
   20 s), but not while hovered or focused. Only sticky ones, such as the permission prompt,
   stay until answered.
 - **Problems** ([ADR 0018](adr/0018-output-and-problems.md), `panels/ProblemsPanel`,
-  `state/problems.ts`) lists what's wrong with Ferrite and extensions, grouped by source. Current
+  `state/problems.ts`) lists what's wrong with Flareite and extensions, grouped by source. Current
   problems come from state (an extension that stopped or couldn't be loaded, ignored extension
   settings, a `settings.toml` that isn't in effect) and go away when fixed. Reported problems
   are the warnings and errors notifications showed, counted when repeated, kept until cleared
@@ -373,7 +373,7 @@ same registry, so they appear in the palette before their extension starts.
 
 When a key matches several commands, the user's `[keybindings]` settings win (they replace a
 command's keys, or remove them with `""`), then built-in defaults, then extension defaults. The
-backend validates and normalizes key syntax (`ferrite_extension_host::keys`) for both
+backend validates and normalizes key syntax (`flareite_extension_host::keys`) for both
 manifests and settings. **Preferences: Keyboard Shortcuts** opens a list of every command with
 its id and keys.
 
@@ -511,7 +511,7 @@ The development CSP additionally allows Vite's HMR socket and inline scripts.
 
 ## Syntax highlighting
 
-`ferrite-syntax` holds the languages in a `Registry`. All of them are grammars that extensions
+`flareite-syntax` holds the languages in a `Registry`. All of them are grammars that extensions
 contribute as WebAssembly ([ADR 0013](adr/0013-extension-languages.md),
 [ADR 0014](adr/0014-languages-only-from-extensions.md)); none is built in. The app
 rebuilds the registry when extensions change (`languages.rs`) and keeps one `SyntaxTree` per
@@ -554,7 +554,7 @@ after Save As or when the languages change.
 
 ## Language servers
 
-`ferrite-lsp` runs servers and speaks the protocol; the app decides which documents go to which
+`flareite-lsp` runs servers and speaks the protocol; the app decides which documents go to which
 server (`lsp/`).
 
 - **Servers start on demand.** The first view of a document whose language has a configured
@@ -570,7 +570,7 @@ server (`lsp/`).
   notifications to the app; a third forwards stderr to the log. The client answers the requests
   servers send (configuration, progress tokens, capability registration) with defaults.
 - **Positions.** The client offers UTF-8 and UTF-16 position encodings, preferring UTF-8, which is
-  Ferrite's native unit, so rust-analyzer needs no conversion. For UTF-16 servers, positions are
+  Flareite's native unit, so rust-analyzer needs no conversion. For UTF-16 servers, positions are
   converted with the rope's indices.
 - **Document sync is incremental.** Each view sends the buffer's edits since the last sync as
   `didChange` ranges (for UTF-8, straight from the edit log's points; for UTF-16, by replaying
@@ -602,16 +602,16 @@ server (`lsp/`).
   Opening or closing a folder, or changing `[lsp]` settings, restarts all servers. On exit, the
   app asks every server to shut down and kills those that don't within 2 seconds. Killing a
   server kills every process it started too: each server runs in its own job object on Windows
-  (which also kills it if Ferrite crashes) and its own process group on Unix.
+  (which also kills it if Flareite crashes) and its own process group on Unix.
 
 ## Terminals
 
-`ferrite-terminal` runs shells; `src-tauri/src/terminal.rs` exposes them as commands; xterm.js
+`flareite-terminal` runs shells; `src-tauri/src/terminal.rs` exposes them as commands; xterm.js
 emulates the terminal in the frontend (`src/terminal/`). The decisions are in
 [ADR 0011](adr/0011-integrated-terminal.md).
 
 ```text
- frontend (xterm.js)                     ferrite-app / ferrite-terminal          shell
+ frontend (xterm.js)                     flareite-app / flareite-terminal          shell
  ───────────────────                     ──────────────────────────────          ─────
  keys, paste, replies ── terminal_write ─▶ input queue ── writer thread ───────▶ pty
  drawn output ───── terminal_acknowledge ─▶ flow control ◀─┐
@@ -619,7 +619,7 @@ emulates the terminal in the frontend (`src/terminal/`). The decisions are in
                                                        waiter thread ◀── exit
 ```
 
-- **Profiles.** `ferrite-terminal/src/profiles.rs` finds the installed shells where their
+- **Profiles.** `flareite-terminal/src/profiles.rs` finds the installed shells where their
   installers put them. On Windows, that's PowerShell 7, Windows PowerShell, Command Prompt, Git
   Bash, Cygwin, MSYS2, and each WSL distribution (`wsl.exe --list --quiet`, without Docker
   Desktop's). Elsewhere, it's `/etc/shells` and `$SHELL`. The system is reached through a
@@ -641,7 +641,7 @@ emulates the terminal in the frontend (`src/terminal/`). The decisions are in
 - **Exit.** A shell that exits with code 0 closes its tab. Any other exit leaves the tab with a
   message until a key is pressed. Killing a terminal, or quitting the app, ends the shell and
   the programs it started.
-- **ConPTY on Windows.** Ferrite ships the ConPTY from Windows Terminal (`conpty.dll` and
+- **ConPTY on Windows.** Flareite ships the ConPTY from Windows Terminal (`conpty.dll` and
   `OpenConsole.exe`), which `src-tauri/build.rs` downloads (pinned and hash-checked) and
   `tauri.windows.conf.json` installs beside the executable. The one in Windows rewraps and
   repaints its screen on resize, which duplicated or lost lines. The emulator is told it's
@@ -650,12 +650,12 @@ emulates the terminal in the frontend (`src/terminal/`). The decisions are in
 
 ## Extensions
 
-`ferrite-extension-host` loads and runs WebAssembly extensions; `src-tauri/src/extensions.rs`
+`flareite-extension-host` loads and runs WebAssembly extensions; `src-tauri/src/extensions.rs`
 connects it to the editor, settings, and frontend. The developer guide is
 [`extensions.md`](extensions.md); the decisions are in [ADR 0006](adr/0006-wasm-extensions.md).
 
 ```text
- editor side                        ferrite-extension-host                  extension thread
+ editor side                        flareite-extension-host                  extension thread
  ───────────                        ──────────────────────                  ────────────────
  view, open, close ── sync ───────▶ document records ── push ─▶ bounded queue ─▶ document-*
  palette command ──── run ────────▶ start if needed ── push ─▶ (merges changes)  run-command
@@ -700,7 +700,7 @@ connects it to the editor, settings, and frontend. The developer guide is
   overwrites a file changed on disk) only if the document had no unsaved changes.
 - **Programs** (API 1.6, `processes.rs`; [ADR 0026](adr/0026-programs-trust-and-explorer-marks.md)).
   An extension runs only the programs its manifest declares (`[[programs]]`), with the
-  `processes` permission, while the open folder is trusted. Each runs in a `ferrite-process`
+  `processes` permission, while the open folder is trusted. Each runs in a `flareite-process`
   group with its output collected on threads (32 MiB). `run` waits within the call's deadline;
   `spawn` returns at once, and a thread waits and queues the result as a background command
   (`Event::background`, which a full queue still takes). The worker's `ProcessTable` stops what's
@@ -724,7 +724,7 @@ connects it to the editor, settings, and frontend. The developer guide is
   result as a read-only core document (`src-tauri/src/editor/provided.rs`) and asks again on
   `ProvidedChanged`. `OpenDiff` becomes a `diff:` dock item (`src/state/diffs.ts`), whose sides
   open hidden and show in `DiffView`: editors with zones, line classes, and folds set by the diff
-  (`src/editor/diffLayout.ts`), compared by `diff_compute` (`ferrite-diff`).
+  (`src/editor/diffLayout.ts`), compared by `diff_compute` (`flareite-diff`).
 - **Line annotations, the cursor's line, and hidden views** (API 1.13;
   [ADR 0033](adr/0033-blame-repositories-and-performance.md)). The host keeps line annotations
   like code lenses and sends those on a view's lines (`EditorView.annotations`);
@@ -738,7 +738,7 @@ connects it to the editor, settings, and frontend. The developer guide is
 - **Code lenses and merge editors** (API 1.12; [ADR 0032](adr/0032-merge-conflicts.md)).
   The host keeps code lenses with each document like decorations (mapped through edits); views
   carry them (`EditorView.lenses`) and the editor draws them as zones above their lines.
-  `ferrite_diff::merge` finds the ranges two versions changed from their base and what the
+  `flareite_diff::merge` finds the ranges two versions changed from their base and what the
   result has of each; `src-tauri/src/editor/merge.rs` serves them (`merge_compute`) and edits the
   result (`merge_set_range`, `merge_reset`), and `src/editor/MergeView.tsx` draws the tab,
   lined up by `mergeLayout.ts`, with its documents kept by `src/state/merges.ts`.
@@ -750,7 +750,7 @@ connects it to the editor, settings, and frontend. The developer guide is
 - **Signing in and timers** (`askpass.rs`, `timers.rs`;
   [ADR 0030](adr/0030-branches-remotes-and-signing-in.md)). Programs declared with `askpass` run
   with `GIT_ASKPASS`/`SSH_ASKPASS` naming the app's own executable, which, finding
-  `FERRITE_ASKPASS_*` in its environment, sends the question over a local connection to the host
+  `FLAREITE_ASKPASS_*` in its environment, sends the question over a local connection to the host
   (`askpass::client_main`, first in `main`). The host asks with a prompt answered to the waiting
   thread (`Shared::ask_user`). Timers wait on threads of their own and run their command with
   `Payload::Timer`.
@@ -760,7 +760,7 @@ connects it to the editor, settings, and frontend. The developer guide is
   (`src-tauri/src/editor/quick_diff.rs`), diffs each document version in the background, and puts
   the changes on view lines as `changes` for the gutter. Reverting edits the document;
   applying runs the extension's `apply` command with the original's new text
-  (`ExtensionHost::apply_to_original`, `Payload::Apply`), using `ferrite_diff::splice`.
+  (`ExtensionHost::apply_to_original`, `Payload::Apply`), using `flareite_diff::splice`.
 - **Workspace Trust** (`src-tauri/src/trust.rs`). The app decides whether the open folder is
   trusted (`OpenFolder::trusted`), asks the user, and gates language servers itself; trust
   changes restart language servers and run extensions' `on_folder_changed` commands.
@@ -809,7 +809,7 @@ viewers through the `viewers` interface (API 1.4).
 - **Themes** apply after their extension loads. The frontend re-resolves `workbench.theme`
   whenever the extension list changes, falling back to the system theme while it isn't loaded.
 - **File icon themes** ([ADR 0009](adr/0009-file-icon-themes.md)) are loaded and checked with
-  the manifest (`ferrite-extension-host/src/icons.rs`). They're left out of the extension list,
+  the manifest (`flareite-extension-host/src/icons.rs`). They're left out of the extension list,
   and the frontend fetches the one named by `workbench.icon_theme` with `extensions_icon_theme`
   (`state/iconTheme.ts`). Icons arrive as `data:` URLs and are drawn with `<img>`. Until the
   theme loads, and for anything it doesn't match, the explorer and Go to File use the built-in Lucide icons.
@@ -817,7 +817,7 @@ viewers through the `viewers` interface (API 1.4).
   which the extension reads with `workbench::command-argument()` during that command.
 - **Previews** ([ADR 0016](adr/0016-previews.md)) are formatted text sent as a flat list of typed
   nodes. The host checks the tree and resolves links and pictures against the document's folder
-  (`ferrite-extension-host/src/preview.rs`). Open previews are dock items (`preview:<id>`) that
+  (`flareite-extension-host/src/preview.rs`). Open previews are dock items (`preview:<id>`) that
   follow `state/previews.ts`, as terminals follow theirs. `extension_preview_content` highlights
   code blocks with the editor's grammars, and pictures load through `extension_preview_image`,
   only for files the content names. Links to web addresses open through `open_external`, which
@@ -837,10 +837,10 @@ viewers through the `viewers` interface (API 1.4).
   until their tabs close. **Reopen Editor With** swaps a tab between text and viewers in place.
 - **Webviews** ([ADR 0025](adr/0025-webviews.md)) are viewers and previews that show a page of
   the extension's own. `WebviewFrame` loads it in a frame sandboxed with `allow-scripts` from the
-  `ferrite-webview:` protocol, which `extensions::serve_webview` answers from the host
-  (`ferrite-extension-host/src/webview.rs`): the extension's files and the viewed file, under a
-  random token per tab, with a content security policy, the theme as `--ferrite-*` variables,
-  and the bridge script (`webview.js`) that gives pages the `ferrite` object. Messages, storage
+  `flareite-webview:` protocol, which `extensions::serve_webview` answers from the host
+  (`flareite-extension-host/src/webview.rs`): the extension's files and the viewed file, under a
+  random token per tab, with a content security policy, the theme as `--flareite-*` variables,
+  and the bridge script (`webview.js`) that gives pages the `flareite` object. Messages, storage
   requests, tab state, action states, and passed-on shortcuts arrive as `postMessage` from the
   frame, which `WebviewFrame` checks and turns into commands (`extension_webview_message`, …);
   posts to pages wait in `state/webviews.ts` until a page loads. Extension storage and saved tab
@@ -975,22 +975,22 @@ viewers through the `viewers` interface (API 1.4).
 
 ## Logging and diagnostics
 
-`ferrite-app` installs a `tracing` subscriber during Tauri's `setup` hook, once the platform log
+`flareite-app` installs a `tracing` subscriber during Tauri's `setup` hook, once the platform log
 directory is known:
 
 - Output goes to stderr (colored) and a daily rolling file through a non-blocking writer. Seven
   files are retained.
-- `FERRITE_LOG` overrides the default `info` filter. Invalid directives fall back to the default
+- `FLAREITE_LOG` overrides the default `info` filter. Invalid directives fall back to the default
   with a warning.
 - If the log directory can't be created, logging continues on stderr only. Logging problems never
   prevent startup.
 - Panics are logged through `tracing` before the default hook runs.
 - The file writer is flushed on `RunEvent::Exit`.
 - **The Output view's records** ([ADR 0018](adr/0018-output-and-problems.md)) are kept by
-  another layer, in memory, in channels: `ferrite`, `extension:<id>` (records with an
+  another layer, in memory, in channels: `flareite`, `extension:<id>` (records with an
   `extension` field), and `server:<name>` (a `server` field). Each keeps its newest 2,000
-  records. Its per-layer filter keeps `info` and above from Ferrite and every level from
-  extensions and servers. It looks only at call-site metadata, so Ferrite's own debug call sites
+  records. Its per-layer filter keeps `info` and above from Flareite and every level from
+  extensions and servers. It looks only at call-site metadata, so Flareite's own debug call sites
   stay disabled. The frontend polls `logs_read(channel, after)` once a second while the view is
   shown, and `logs_file` names today's file for **Open Log File**.
 - Document lifecycle events (open, save, close) are logged at `info`, file errors at `warn`, and
@@ -998,7 +998,7 @@ directory is known:
 
 ## Instrumentation
 
-- **Backend:** named timing histograms (`ferrite_tasks::Metrics`; power-of-two buckets, O(1)
+- **Backend:** named timing histograms (`flareite_tasks::Metrics`; power-of-two buckets, O(1)
   memory) for `editor.apply`, `editor.view`, `document.load`, `document.save`,
   `workspace.index`, `workspace.search`, and `search.count`. The scheduler also keeps wait and run
   times per task type, with completed, cancelled, dropped, and panicked counts.
@@ -1029,19 +1029,19 @@ Single, warm-cache runs on the development machine (Windows 11, x86_64), for ori
 Indexing this repository (149 non-ignored files) took 13 ms on the index thread, after the
 window was already interactive.
 
-The M1 release `ferrite.exe` process had a working set of about 30 MB. WebView2 runs in separate
+The M1 release `flareite.exe` process had a working set of about 30 MB. WebView2 runs in separate
 processes, which this figure excludes.
 
 ## Testing and CI
 
-| Layer                  | What runs                                                                                   |
-| ---------------------- | ------------------------------------------------------------------------------------------- |
-| Rust unit tests        | Every crate; `cargo test --workspace`                                                       |
-| Extension host         | `crates/ferrite-extension-host/tests/host.rs` builds the WebAssembly fixtures and runs them |
-| Performance budgets    | Work counted, not timed (lines and bytes per keystroke and page in a 200,000-line document) |
-| Frontend               | Vitest with jsdom: components, state, the editor session, axe accessibility checks          |
-| Benchmarks, end to end | `scripts/bench.mjs` against the release build; `scripts/perf-check.mjs` against a baseline  |
-| Microbenchmarks        | Criterion; `perf-check.mjs micro` reads its comparison with a saved baseline                |
+| Layer                  | What runs                                                                                    |
+| ---------------------- | -------------------------------------------------------------------------------------------- |
+| Rust unit tests        | Every crate; `cargo test --workspace`                                                        |
+| Extension host         | `crates/flareite-extension-host/tests/host.rs` builds the WebAssembly fixtures and runs them |
+| Performance budgets    | Work counted, not timed (lines and bytes per keystroke and page in a 200,000-line document)  |
+| Frontend               | Vitest with jsdom: components, state, the editor session, axe accessibility checks           |
+| Benchmarks, end to end | `scripts/bench.mjs` against the release build; `scripts/perf-check.mjs` against a baseline   |
+| Microbenchmarks        | Criterion; `perf-check.mjs micro` reads its comparison with a saved baseline                 |
 
 - **CI** (`.github/workflows/ci.yml`) runs formatting, Clippy with warnings as errors, and all
   tests on Windows, macOS, and Linux, plus the frontend checks. Each Criterion benchmark runs

@@ -23,9 +23,9 @@ permission by itself.
 
 ### Components with a WIT interface, run by Wasmtime
 
-The API is one WIT package, `ferrite:extension@1.0.0`, in the `ferrite-extension-api` crate.
+The API is one WIT package, `flareite:extension@1.0.0`, in the `flareite-extension-api` crate.
 
-- **Host side.** `ferrite-extension-host` generates Wasmtime host bindings from it
+- **Host side.** `flareite-extension-host` generates Wasmtime host bindings from it
   (`bindgen!`).
 - **Extension side.** The same crate generates the Rust bindings extensions use (wit-bindgen,
   behind an `export_extension!` macro).
@@ -46,13 +46,13 @@ Alternatives considered:
 Extensions are built for `wasm32-unknown-unknown`. wit-bindgen embeds the interface description
 in the module, and the host turns the module into a component when it loads it (`wit-component`;
 loading the example, including this and compilation, takes 15–20 ms). The host links nothing but
-the Ferrite API.
+the Flareite API.
 
 - **Imports.** An extension's only imports are the functions in `host`. There is no filesystem,
   network, environment, clock, or random source to forget to lock down.
 - **Toolchain.** The target is a standard rustup target with no extra tooling.
 - **Other inputs.** A ready-made component (from another language) loads too, if it imports
-  only the Ferrite API.
+  only the Flareite API.
 
 Alternatives considered:
 

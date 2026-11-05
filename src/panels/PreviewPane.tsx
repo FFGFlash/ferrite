@@ -11,7 +11,7 @@
  * - **Pictures** in files the backend resolved are loaded through it; web
  *   pictures aren't loaded (so a preview sends no requests), and show their
  *   description instead.
- * - **Code blocks** in a language Ferrite knows are highlighted with the
+ * - **Code blocks** in a language Flareite knows are highlighted with the
  *   editor's colors.
  */
 import { ImageOff } from 'lucide-react'

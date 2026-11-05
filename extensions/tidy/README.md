@@ -1,6 +1,6 @@
 # Tidy
 
-Tidy keeps whitespace tidy. It's an example of a Ferrite extension with code, written in Rust
+Tidy keeps whitespace tidy. It's an example of a Flareite extension with code, written in Rust
 and built for WebAssembly.
 
 ## Features

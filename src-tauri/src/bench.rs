@@ -1,4 +1,4 @@
-//! End-to-end benchmark support, active only when Ferrite is started with
+//! End-to-end benchmark support, active only when Flareite is started with
 //! `--bench <name> [file]` (see `scripts/bench.mjs`). Extensions are not
 //! loaded unless `--bench-extensions` is given too. `--bench-language <dir>`
 //! (repeatable) loads only that extension folder, for its languages, so a
@@ -7,7 +7,7 @@
 //! The frontend reads the requested benchmark at startup, runs it against the
 //! real editor (IPC, rendering, and all), and reports its measurements. The
 //! report is written as one JSON object to the file named by the
-//! `FERRITE_BENCH_OUT` environment variable (or stdout), and the app exits
+//! `FLAREITE_BENCH_OUT` environment variable (or stdout), and the app exits
 //! shortly after, leaving the harness time to measure process memory.
 
 use std::path::PathBuf;
@@ -125,9 +125,9 @@ pub fn bench_generate(
   let mut editor = editor.lock();
   let id = editor.create_untitled();
   let document = editor.document_mut(id)?;
-  document.apply(ferrite_core::EditorOp::Insert(text))?;
-  document.apply(ferrite_core::EditorOp::Move {
-    motion: ferrite_core::Motion::DocumentStart,
+  document.apply(flareite_core::EditorOp::Insert(text))?;
+  document.apply(flareite_core::EditorOp::Move {
+    motion: flareite_core::Motion::DocumentStart,
     extend: false,
   })?;
   Ok(DocumentSummary::of(document))
@@ -152,7 +152,7 @@ pub fn bench_report(
     },
   });
   let line = report.to_string();
-  match std::env::var_os("FERRITE_BENCH_OUT") {
+  match std::env::var_os("FLAREITE_BENCH_OUT") {
     Some(path) => {
       if let Err(error) = std::fs::write(&path, &line) {
         tracing::error!(%error, "could not write benchmark report");

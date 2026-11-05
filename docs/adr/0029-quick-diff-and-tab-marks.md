@@ -17,7 +17,7 @@ general feature, and partial staging now.
 ### The editor compares; the extension names the original (API 1.9)
 
 Comparing on every keystroke in WebAssembly would copy the whole text into the extension each
-time, so the editor compares, with `ferrite-diff`, as in diff tabs. The extension only says what
+time, so the editor compares, with `flareite-diff`, as in diff tabs. The extension only says what
 a file is compared with: a manifest's `[quick_diff]` names a command that answers a file's
 original with `set-original(path, uri)`. The original is an address the extension already
 provides (ADR 0028), so Git's is `git::<path>`, the index version, for tracked files, and none
@@ -32,7 +32,7 @@ staged exactly.
 
 ### Reverting and applying move whole lines between the sides
 
-`ferrite_diff::splice` turns chosen changes into edits: reverting replaces a change's lines in
+`flareite_diff::splice` turns chosen changes into edits: reverting replaces a change's lines in
 the document with the original's, as one undoable edit; applying makes the original's new text,
 which the extension's `apply` command receives whole (`to-apply`). Treating both texts as ending
 with a line break makes changes at the end of a file come out right. Line breaks follow each side

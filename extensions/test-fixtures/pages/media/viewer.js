@@ -1,4 +1,4 @@
-ferrite.onMessage(message => {
+flareite.onMessage(message => {
   document.getElementById('size').textContent = `${message.size} bytes`
 })
-ferrite.postMessage({ type: 'size' })
+flareite.postMessage({ type: 'size' })

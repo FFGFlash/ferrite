@@ -1,6 +1,6 @@
 [package]
 name = "todos"
-description = "Example Ferrite extension: finds TODO comments, highlights them, and lists them in a side bar view."
+description = "Example Flareite extension: finds TODO comments, highlights them, and lists them in a side bar view."
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -10,4 +10,4 @@ publish.workspace = true
 crate-type = ["cdylib"]
 
 [dependencies]
-ferrite-extension-api = { workspace = true }
+flareite-extension-api = { workspace = true }

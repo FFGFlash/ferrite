@@ -1,0 +1,18 @@
+[package]
+name = "flareite-text"
+description = "Text storage for Flareite: rope-backed buffers, validated change sets, and position conversion."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+ropey = { workspace = true }
+regex-automata = { workspace = true }
+regex-cursor = { workspace = true }
+regex-syntax = { workspace = true }
+thiserror = { workspace = true }
+unicode-segmentation = { workspace = true }
+
+[lints]
+workspace = true

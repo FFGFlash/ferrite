@@ -6,7 +6,7 @@
 ## Context
 
 The explorer could create and open files and folders, nothing else. Renaming, moving, or
-deleting one meant leaving Ferrite, and an open document then pointed at a path that no longer
+deleting one meant leaving Flareite, and an open document then pointed at a path that no longer
 existed. Extensions could add items to the explorer's menu for files, but not folders, and an
 item got only a path it couldn't use: an extension has no file access, so a formatter's
 **Format All** on a folder was impossible.
@@ -70,7 +70,7 @@ Extensions can list, read, and write files in the open folder, with two new perm
   A file the user is editing keeps their changes theirs to save, and an extension never works
   on an older copy than the user sees.
 - **Line endings and encoding** are kept: written text gets the file's line ending, and a
-  byte-order mark stays. Files are UTF-8, as everywhere in Ferrite.
+  byte-order mark stays. Files are UTF-8, as everywhere in Flareite.
 - **Listing** is like Go to File: Git-ignored and excluded files are left out, up to 10,000.
 - **Limits.** 16 MiB per file. Commands keep their 10 s deadline, which fits thousands of small
   files.
@@ -83,7 +83,7 @@ Tidy shows it: **Trim Trailing Whitespace in Files**, for files and folders.
   says so, and the user can deny it and keep the rest.
 - `Embedder` has two new methods with defaults (`open_folder`, `save`), so other embedders,
   like the tests', keep compiling.
-- Path normalization moved to `ferrite-workspace` (`normalize_path`), so the extension host
+- Path normalization moved to `flareite-workspace` (`normalize_path`), so the extension host
   compares paths as the app does.
 - Reveal shells out to `explorer` or `open` rather than adding `tauri-plugin-opener`, which would
   have brought about 30 crates (a D-Bus stack) for one function.

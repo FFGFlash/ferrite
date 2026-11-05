@@ -18,7 +18,7 @@ drags.
 
 ### Tauri's drop handler on, and drags on pointer events
 
-Tauri's drop handler is on again, on every platform. Ferrite's own drags no longer use HTML5 drag
+Tauri's drop handler is on again, on every platform. Flareite's own drags no longer use HTML5 drag
 and drop: they're a pointer pressed and moved (`components/drag.ts`).
 
 - **Starting.** A press on a tab, an activity bar button, or an explorer row becomes a drag once

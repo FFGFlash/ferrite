@@ -13,7 +13,7 @@ use std::ops::Range;
 use std::path::PathBuf;
 use std::sync::{Mutex, MutexGuard, PoisonError};
 
-use ferrite_core::{Document, DocumentId};
+use flareite_core::{Document, DocumentId};
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Manager};
 

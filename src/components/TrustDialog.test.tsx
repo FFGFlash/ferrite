@@ -64,10 +64,10 @@ describe('TrustDialog', () => {
   it('names the extension that asks, and can take trust back', async () => {
     const user = userEvent.setup()
     render(<TrustDialog />)
-    extensionsStore.set([{ id: 'ferrite.git', name: 'Git' } as never])
+    extensionsStore.set([{ id: 'flareite.git', name: 'Git' } as never])
     act(() => setWorkspace(folder('/code/repo', 'untrusted')))
     expect(screen.queryByRole('alertdialog')).toBeNull()
-    act(() => trustRequested('ferrite.git'))
+    act(() => trustRequested('flareite.git'))
     expect(screen.getByRole('alertdialog')).toHaveTextContent(
       'Git needs the folder to be trusted to work.',
     )
@@ -76,7 +76,7 @@ describe('TrustDialog', () => {
 
     // A trusted folder says so, and requests are ignored.
     act(() => setWorkspaceTrustInfo(folder('/code/repo', 'trusted')))
-    act(() => trustRequested('ferrite.git'))
+    act(() => trustRequested('flareite.git'))
     expect(trustPrompt.get()).toBeNull()
     act(() => trustPrompt.set({ requestedBy: null }))
     expect(

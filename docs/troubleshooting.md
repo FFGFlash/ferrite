@@ -1,28 +1,28 @@
 # Troubleshooting
 
-## Where Ferrite keeps things
+## Where Flareite keeps things
 
-| What                                  | Windows                                  | macOS                                              | Linux                                    |
-| ------------------------------------- | ---------------------------------------- | -------------------------------------------------- | ---------------------------------------- |
-| Settings, permissions, extensions     | `%APPDATA%\dev.ferrite.editor`           | `~/Library/Application Support/dev.ferrite.editor` | `~/.config/dev.ferrite.editor`           |
-| Session state (`state.json`), backups | `%LOCALAPPDATA%\dev.ferrite.editor`      | `~/Library/Application Support/dev.ferrite.editor` | `~/.local/share/dev.ferrite.editor`      |
-| Logs                                  | `%LOCALAPPDATA%\dev.ferrite.editor\logs` | `~/Library/Logs/dev.ferrite.editor`                | `~/.local/share/dev.ferrite.editor/logs` |
+| What                                  | Windows                                   | macOS                                               | Linux                                     |
+| ------------------------------------- | ----------------------------------------- | --------------------------------------------------- | ----------------------------------------- |
+| Settings, permissions, extensions     | `%APPDATA%\dev.flareite.editor`           | `~/Library/Application Support/dev.flareite.editor` | `~/.config/dev.flareite.editor`           |
+| Session state (`state.json`), backups | `%LOCALAPPDATA%\dev.flareite.editor`      | `~/Library/Application Support/dev.flareite.editor` | `~/.local/share/dev.flareite.editor`      |
+| Logs                                  | `%LOCALAPPDATA%\dev.flareite.editor\logs` | `~/Library/Logs/dev.flareite.editor`                | `~/.local/share/dev.flareite.editor/logs` |
 
-**Logs.** Logs roll over daily, and the last seven days are kept. For more detail, start Ferrite
-with `FERRITE_LOG=debug`. To include messages from the user interface too, use
-`FERRITE_LOG=debug,frontend=trace`.
+**Logs.** Logs roll over daily, and the last seven days are kept. For more detail, start Flareite
+with `FLAREITE_LOG=debug`. To include messages from the user interface too, use
+`FLAREITE_LOG=debug,frontend=trace`.
 
-**View: Output** (`Ctrl+Shift+U`) shows recent log messages inside Ferrite, one log at a time:
-Ferrite's, an extension's (its **Log** button in the Extensions view opens it), or a language
+**View: Output** (`Ctrl+Shift+U`) shows recent log messages inside Flareite, one log at a time:
+Flareite's, an extension's (its **Log** button in the Extensions view opens it), or a language
 server's, including everything the server prints. Extensions' and servers' debug messages show
-there without changing `FERRITE_LOG`. **Open Log File** (beside the Output tab) opens the full
+there without changing `FLAREITE_LOG`. **Open Log File** (beside the Output tab) opens the full
 log.
 
-**View: Problems** (`Ctrl+Shift+M`) lists what's wrong with Ferrite and extensions, including
+**View: Problems** (`Ctrl+Shift+M`) lists what's wrong with Flareite and extensions, including
 the warnings and errors notifications showed before they disappeared, then the problems in
 files. The status bar shows how many errors and warnings there are.
 
-## Ferrite crashed or was closed unexpectedly
+## Flareite crashed or was closed unexpectedly
 
 Your unsaved changes are backed up as you type. The next start restores them as unsaved tabs
 and shows a warning listing them.
@@ -34,7 +34,7 @@ and shows a warning listing them.
 - **Backups that can't be restored** are kept in the `backups` folder (see the table above) and
   the warning says so. Each backup is a text file: two header lines, then your text.
 
-Closing Ferrite normally, and choosing **Don't Save**, removes the backups. That's why they
+Closing Flareite normally, and choosing **Don't Save**, removes the backups. That's why they
 don't come back after a normal close.
 
 ## Part of the window says it "stopped working because of an internal error"
@@ -50,7 +50,7 @@ Please report it with the log file's last lines: the error and where it happened
 
 ## Settings don't take effect
 
-Ferrite applies `settings.toml` when you save it in Ferrite. If the file has a mistake (an
+Flareite applies `settings.toml` when you save it in Flareite. If the file has a mistake (an
 unknown key, a value out of range, invalid TOML), a notification names it, Problems lists it
 until it's fixed, and the previous settings stay in effect. **Preferences: Open Settings** shows the mistake too, and can't change
 settings until it's fixed. It lists every available setting with the value in effect.
@@ -74,7 +74,7 @@ To start over, delete `settings.toml`. **Preferences: Open Settings (TOML)** cre
 
 ## No syntax colors
 
-Ferrite has no languages built in. Load the extension for the language (for example a
+Flareite has no languages built in. Load the extension for the language (for example a
 checkout of the official Rust extension, with **Extensions: Load Development Extension…**), and
 check in the Extensions view that it isn't invalid or turned off. The status bar names the active file's
 language once one claims it. If the language is there but the file stays uncolored, the log
@@ -88,11 +88,11 @@ language extensions, which ask before running one: if you chose **Don't Allow**,
 **Run language servers** on in the Extensions view.
 
 - **Not found.** Install the server (for example `rustup component add rust-analyzer`), or point
-  Ferrite at it: `[lsp.servers.rust-analyzer] command = "..."`.
+  Flareite at it: `[lsp.servers.rust-analyzer] command = "..."`.
 - **Crashing.** A server that keeps exiting is restarted three times, then left stopped. The log
   has its error output. Changing its `[lsp]` settings, or reopening the folder, starts it again.
 
-## Ferrite is slow or uses a lot of memory
+## Flareite is slow or uses a lot of memory
 
 - **See what's busy.** Open **Developer: Toggle Performance Overlay**: it shows input-to-paint
   latency, backend timings, background tasks, memory, open documents, and extensions.
@@ -126,6 +126,6 @@ language extensions, which ask before running one: if you chose **Don't Allow**,
 
 ## Starting from a clean slate
 
-Close Ferrite, then remove `state.json` to forget the open folder, files, and layout. Remove
+Close Flareite, then remove `state.json` to forget the open folder, files, and layout. Remove
 `extension-permissions.json` to be asked about extension permissions again. Your settings and
 extensions are kept unless you remove those too.

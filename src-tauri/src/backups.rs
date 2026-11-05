@@ -2,7 +2,7 @@
 //! restoring them after an instance ended without shutting down cleanly.
 //!
 //! A background thread writes a backup of each document with unsaved
-//! changes shortly after it changes (see [`ferrite_workspace::BackupSession`]
+//! changes shortly after it changes (see [`flareite_workspace::BackupSession`]
 //! for the files and how abandoned sessions are recognized). Editing paths
 //! only signal the thread; snapshots are taken under the editor lock, which
 //! is cheap (ropes are shared), and written without it. Large documents are
@@ -15,9 +15,9 @@ use std::sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
-use ferrite_core::{DocumentId, Editor, EditorOp};
-use ferrite_text::{TextSnapshot, Version};
-use ferrite_workspace::{
+use flareite_core::{DocumentId, Editor, EditorOp};
+use flareite_text::{TextSnapshot, Version};
+use flareite_workspace::{
   Abandoned, BackupMeta, BackupSession, DecodeOptions, FileError, RecoveredBackup, TextEncoding,
   load_text_file_with,
 };
@@ -424,7 +424,7 @@ pub fn restore(app: &AppHandle, abandoned: Abandoned) {
       "restored unsaved changes after a crash"
     );
     let message = format!(
-      "Ferrite didn't shut down properly last time. Unsaved changes were restored: {}.",
+      "Flareite didn't shut down properly last time. Unsaved changes were restored: {}.",
       list(&titles)
     );
     events::emit(
@@ -535,7 +535,7 @@ fn list(titles: &[String]) -> String {
 mod tests {
   use std::sync::LazyLock;
 
-  use ferrite_core::EditorConfig;
+  use flareite_core::EditorConfig;
 
   use super::*;
 

@@ -17,7 +17,7 @@ export interface LogRecord {
 }
 
 export interface LogChannel {
-  /** `ferrite`, `extension:<id>`, or `server:<name>`. */
+  /** `flareite`, `extension:<id>`, or `server:<name>`. */
   id: string
   /** The newest record's `seq`. */
   last: number

@@ -10,16 +10,16 @@ edition = "2024"
 license = "MIT OR Apache-2.0"
 
 [workspace.dependencies]
-ferrite-core = { path = "crates/ferrite-core" }
-ferrite-diff = { path = "crates/ferrite-diff" }
-ferrite-extension-host = { path = "crates/ferrite-extension-host" }
-ferrite-lsp = { path = "crates/ferrite-lsp" }
-ferrite-process = { path = "crates/ferrite-process" }
-ferrite-syntax = { path = "crates/ferrite-syntax" }
-ferrite-tasks = { path = "crates/ferrite-tasks" }
-ferrite-terminal = { path = "crates/ferrite-terminal" }
-ferrite-text = { path = "crates/ferrite-text" }
-ferrite-workspace = { path = "crates/ferrite-workspace" }
+flareite-core = { path = "crates/flareite-core" }
+flareite-diff = { path = "crates/flareite-diff" }
+flareite-extension-host = { path = "crates/flareite-extension-host" }
+flareite-lsp = { path = "crates/flareite-lsp" }
+flareite-process = { path = "crates/flareite-process" }
+flareite-syntax = { path = "crates/flareite-syntax" }
+flareite-tasks = { path = "crates/flareite-tasks" }
+flareite-terminal = { path = "crates/flareite-terminal" }
+flareite-text = { path = "crates/flareite-text" }
+flareite-workspace = { path = "crates/flareite-workspace" }
 
 base64 = "0.23.1"
 # Guesses the encoding of text files that aren't UTF-8, for encoding_rs.

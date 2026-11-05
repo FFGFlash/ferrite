@@ -1,6 +1,6 @@
 # The example extensions and the test fixtures build to WebAssembly in their
 # own workspace, separate from the editor (see `.cargo/config.toml` for the
-# target). The official `ferrite.*` extensions have repositories of their own.
+# target). The official `flareite.*` extensions have repositories of their own.
 [workspace]
 resolver = "3"
 members = ["tidy", "todos", "test-fixtures/misbehaving", "test-fixtures/pages", "test-fixtures/programs"]
@@ -12,7 +12,7 @@ license = "MIT OR Apache-2.0"
 publish = false
 
 [workspace.dependencies]
-ferrite-extension-api = { path = "../crates/ferrite-extension-api" }
+flareite-extension-api = { path = "../crates/flareite-extension-api" }
 
 [profile.release]
 opt-level = "s"

@@ -1,7 +1,7 @@
 ; Markdown's inline text: emphasis, code spans, and links. Adapted from the
 ; queries of tree-sitter-markdown 0.5.3 (MIT, see
-; ../../grammars/LICENSE-tree-sitter-markdown), with capture names Ferrite
-; colors. Ferrite's syntax colors have no bold or italic, so emphasis gets a
+; ../../grammars/LICENSE-tree-sitter-markdown), with capture names Flareite
+; colors. Flareite's syntax colors have no bold or italic, so emphasis gets a
 ; color of its own.
 
 (emphasis) @type

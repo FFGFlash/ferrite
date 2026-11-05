@@ -26,10 +26,10 @@ const LEVELS: { value: LogLevel; label: string }[] = [
 ]
 const RANK: Record<LogLevel, number> = { trace: 0, debug: 1, info: 2, warn: 3, error: 4 }
 
-/** A channel's name: Ferrite, an extension's name, or a language server's. */
+/** A channel's name: Flareite, an extension's name, or a language server's. */
 export function channelLabel(id: string, extensions: readonly ExtensionStatus[]): string {
   if (id === APP_CHANNEL) {
-    return 'Ferrite'
+    return 'Flareite'
   }
   if (id.startsWith('extension:')) {
     const extension = id.slice('extension:'.length)
@@ -50,7 +50,7 @@ const timeFormat = new Intl.DateTimeFormat(undefined, {
 })
 
 /**
- * Recent log records of Ferrite, an extension, or a language server, as
+ * Recent log records of Flareite, an extension, or a language server, as
  * the backend keeps them. New records are fetched while the view is shown.
  */
 export function OutputPanel() {
@@ -191,7 +191,7 @@ async function openLogFile(): Promise<void> {
     if (path) {
       await openPath(path)
     } else {
-      notify('info', 'Ferrite has no log file this session.')
+      notify('info', 'Flareite has no log file this session.')
     }
   } catch (error) {
     reportError('Opening the log file', error)

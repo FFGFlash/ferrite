@@ -15,10 +15,10 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::Duration;
 
-use ferrite_core::{Document, DocumentId, ViewId};
-use ferrite_diff::{DiffOptions, LineChange};
-use ferrite_syntax::{deadline, parse};
-use ferrite_text::{Edit, TextBuffer, Version};
+use flareite_core::{Document, DocumentId, ViewId};
+use flareite_diff::{DiffOptions, LineChange};
+use flareite_syntax::{deadline, parse};
+use flareite_text::{Edit, TextBuffer, Version};
 use serde::Serialize;
 use tauri::{AppHandle, Manager, State};
 
@@ -223,7 +223,7 @@ fn changes_of(app: &AppHandle, document: &Document) -> Option<Arc<Vec<LineChange
 
 fn compute(original: &str, text: &str) -> Vec<LineChange> {
   // Whitespace counts: these changes are reverted and staged.
-  ferrite_diff::diff(original, text, DiffOptions::default()).unwrap_or_default()
+  flareite_diff::diff(original, text, DiffOptions::default()).unwrap_or_default()
 }
 
 fn kind(change: &LineChange) -> GutterChangeKind {
@@ -415,12 +415,12 @@ fn revert_in(
   changes: &[LineChange],
   lines: &[RangeInclusive<usize>],
 ) -> Result<bool, CommandError> {
-  let chosen = ferrite_diff::touching(changes, lines);
+  let chosen = flareite_diff::touching(changes, lines);
   if chosen.is_empty() {
     return Ok(false);
   }
   let text = document.buffer().contents();
-  let edits = ferrite_diff::revert(original, &text, &chosen)
+  let edits = flareite_diff::revert(original, &text, &chosen)
     .into_iter()
     .map(|splice| Edit::new(splice.range, splice.text))
     .collect();
@@ -476,13 +476,13 @@ pub async fn quick_diff_apply(
       return Ok(false);
     };
     let lines = lines_or_selected(document, lines);
-    let chosen = ferrite_diff::touching(&changes, &lines);
+    let chosen = flareite_diff::touching(&changes, &lines);
     if chosen.is_empty() {
       return Ok(false);
     }
     (
       uri,
-      ferrite_diff::apply(&original, &document.buffer().contents(), &chosen),
+      flareite_diff::apply(&original, &document.buffer().contents(), &chosen),
     )
   };
   apply_to(&app, job.0, job.1).await
@@ -505,7 +505,7 @@ async fn apply_to(app: &AppHandle, uri: String, text: String) -> Result<bool, Co
 
 /// The texts and changes of a diff tab's documents, as they are now.
 fn diff_of(
-  editor: &ferrite_core::Editor,
+  editor: &flareite_core::Editor,
   original: u64,
   modified: u64,
 ) -> Result<(Option<String>, String, String, Vec<LineChange>), CommandError> {
@@ -566,13 +566,13 @@ pub async fn diff_apply(
     let document = editor.document_mut(DocumentId::from_raw(modified))?;
     document.use_view(ViewId::from_raw(view.unwrap_or(0)));
     let lines = lines_or_selected(document, lines);
-    let chosen = ferrite_diff::touching(&changes, &lines);
+    let chosen = flareite_diff::touching(&changes, &lines);
     if chosen.is_empty() {
       return Ok(false);
     }
     (
       uri,
-      ferrite_diff::apply(&original_text, &modified_text, &chosen),
+      flareite_diff::apply(&original_text, &modified_text, &chosen),
     )
   };
   apply_to(&app, job.0, job.1).await
@@ -580,7 +580,7 @@ pub async fn diff_apply(
 
 #[cfg(test)]
 mod tests {
-  use ferrite_core::{Editor, EditorOp};
+  use flareite_core::{Editor, EditorOp};
 
   use super::*;
 

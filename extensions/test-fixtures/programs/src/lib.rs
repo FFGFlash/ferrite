@@ -3,12 +3,12 @@
 //! The host's integration tests run its commands; outcomes are reported
 //! with `show_message`.
 
-use ferrite_extension_api::explorer::{self, FileMark};
-use ferrite_extension_api::processes::{self, ProcessOptions, ProcessOutput};
-use ferrite_extension_api::types::{
+use flareite_extension_api::explorer::{self, FileMark};
+use flareite_extension_api::processes::{self, ProcessOptions, ProcessOutput};
+use flareite_extension_api::types::{
   Activation, CommandContext, DocumentChange, DocumentId, DocumentInfo, MessageLevel,
 };
-use ferrite_extension_api::{Guest, export_extension, host, workbench, workspace};
+use flareite_extension_api::{Guest, export_extension, host, workbench, workspace};
 
 fn report(message: impl AsRef<str>) {
   host::show_message(MessageLevel::Info, message.as_ref());

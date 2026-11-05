@@ -1,0 +1,35 @@
+/*
+ * Flareite's defaults for webview pages, injected before the page's own
+ * styles. Every selector is inside :where(), so it has no specificity and
+ * any rule of the page's wins. The colors are the theme's (--flareite-*).
+ */
+:where(html) {
+  color-scheme: var(--flareite-color-scheme);
+  background: var(--flareite-editor-background);
+  scrollbar-color: var(--flareite-minimap-slider-hover-background) transparent;
+}
+
+:where(body) {
+  margin: 0;
+  color: var(--flareite-editor-foreground);
+  font-family: var(--flareite-font-ui);
+  font-size: var(--flareite-font-size-ui);
+  line-height: 1.5;
+}
+
+:where(a) {
+  color: var(--flareite-link);
+}
+
+:where(code, kbd, pre, samp) {
+  font-family: var(--flareite-font-mono);
+}
+
+:where(:focus-visible) {
+  outline: 1px solid var(--flareite-focus-ring);
+  outline-offset: -1px;
+}
+
+:where(::selection) {
+  background: var(--flareite-editor-selection);
+}

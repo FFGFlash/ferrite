@@ -5,7 +5,7 @@
 
 use std::path::PathBuf;
 
-use ferrite_core::Document;
+use flareite_core::Document;
 use serde::Serialize;
 use tauri::{AppHandle, Manager};
 

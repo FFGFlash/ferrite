@@ -1,0 +1,1144 @@
+/// The Flareite extension API, version 1 (1.1: workbench contributions;
+/// 1.2: previews; 1.3: files; 1.4: viewers; 1.5: webviews and storage;
+/// 1.6: workspace, processes, and explorer marks; 1.7: tree views,
+/// prompts, deleting files, and opening files; 1.8: provided documents
+/// and diffs; 1.9: quick diff; 1.10: timers; 1.11: graphs, folders, and
+/// the active file; 1.12: code lenses and merge editors; 1.13: line
+/// annotations, selection changes, and hiding views; 1.14: rendering
+/// Markdown).
+///
+/// An extension is a WebAssembly component targeting the `extension` world.
+/// It can call only the functions it imports here; there is no other
+/// filesystem, network, environment, clock, or process access. See
+/// `docs/extensions.md`.
+package flareite:extension@1.14.0;
+
+/// Types shared by the host functions and the extension's exports.
+interface types {
+  /// Identifies an open document. Never reused while the editor runs.
+  type document-id = u64;
+
+  /// A place in a document: a zero-based line, and a column counted in
+  /// UTF-8 bytes from the start of that line.
+  record position {
+    line: u32,
+    column: u32,
+  }
+
+  /// The text from `start` up to (not including) `end`.
+  record range {
+    start: position,
+    end: position,
+  }
+
+  record document-info {
+    id: document-id,
+    /// Increases with every change to the text.
+    version: u64,
+    /// The file the document was opened from or saved to.
+    path: option<string>,
+    /// A language identifier such as `rust`, `typescript`, or `python`.
+    language: option<string>,
+    line-count: u32,
+    /// Length in UTF-8 bytes.
+    length: u64,
+    /// Whether it has unsaved changes.
+    dirty: bool,
+  }
+
+  /// Text read from a document, with the version it was read at.
+  record text-slice {
+    version: u64,
+    text: string,
+  }
+
+  /// Lines read from a document, with the version they were read at.
+  record line-slice {
+    version: u64,
+    /// The lines, without their line breaks.
+    lines: list<string>,
+  }
+
+  /// `range`, in the text before this change, was replaced by `text`.
+  record text-change {
+    range: range,
+    text: string,
+  }
+
+  record document-change {
+    document: document-id,
+    /// The version after the changes.
+    version: u64,
+    /// The changes since the previous notification, in order: each one
+    /// applies to the text left by the one before. `none` when they were
+    /// too large to send; read the document again.
+    changes: option<list<text-change>>,
+  }
+
+  /// Replaces `range` with `text`. Line breaks in `text` are converted to
+  /// the document's line ending.
+  record text-edit {
+    range: range,
+    text: string,
+  }
+
+  enum severity {
+    error,
+    warning,
+    information,
+    hint,
+  }
+
+  record diagnostic {
+    range: range,
+    severity: severity,
+    message: string,
+    /// A short identifier for the kind of problem, e.g. `line-too-long`.
+    code: option<string>,
+  }
+
+  /// Capabilities an extension can request in its manifest. Only those the
+  /// user grants are available.
+  enum permission {
+    /// Read open documents, receive their changes, publish diagnostics.
+    documents-read,
+    /// Edit open documents.
+    documents-write,
+  }
+
+  enum log-level {
+    trace,
+    debug,
+    info,
+    warn,
+    error,
+  }
+
+  enum message-level {
+    info,
+    warning,
+    error,
+  }
+
+  /// A configuration value, of the type declared in the manifest.
+  variant config-value {
+    boolean(bool),
+    integer(s64),
+    number(f64),
+    text(string),
+  }
+
+  variant api-error {
+    /// The user has not granted the permission this call needs.
+    permission-denied(permission),
+    /// No open document has this identifier.
+    unknown-document,
+    /// The document has changed; it is now at the given version.
+    stale-version(u64),
+    /// A position is outside the document or inside a character.
+    invalid-range(string),
+    /// The request exceeds one of the host's limits.
+    too-large(string),
+    invalid-argument(string),
+  }
+
+  /// Passed to `activate`.
+  record activation {
+    /// The permissions the user has granted.
+    granted: list<permission>,
+  }
+
+  /// Where a command was run from.
+  record command-context {
+    /// The document in the active editor, if any.
+    document: option<document-id>,
+    /// That document's selections, the primary one first.
+    selections: list<range>,
+  }
+
+  /// The content of a status bar item declared in the manifest. (1.1)
+  record status-item {
+    /// Plain text, at most 100 characters.
+    text: string,
+    tooltip: option<string>,
+    /// One of the extension's commands, run when the item is clicked.
+    command: option<string>,
+  }
+
+  /// A row in one of the extension's side bar views. (1.1)
+  record view-item {
+    /// Unique within the view.
+    id: string,
+    /// The item this one is nested under; it must come earlier in the list.
+    parent: option<string>,
+    label: string,
+    /// Shown dimmed after the label.
+    description: option<string>,
+    tooltip: option<string>,
+    /// Whether its children are shown at first.
+    expanded: bool,
+    /// One of the extension's commands, run with `argument` when the item
+    /// is activated (see `command-argument`).
+    command: option<string>,
+    argument: option<string>,
+  }
+
+  /// How a table column's cells are aligned. (1.2)
+  enum column-alignment {
+    none,
+    left,
+    center,
+    right,
+  }
+
+  /// Preformatted text in a preview. (1.2)
+  record preview-code {
+    /// The language it's in, as written after a Markdown code fence: a
+    /// language id (`rust`) or file extension (`rs`). Code in a known
+    /// language is highlighted.
+    language: option<string>,
+    text: string,
+  }
+
+  /// A link in a preview. Its text is its children. (1.2)
+  record preview-link {
+    /// A web address (`https:`, `http:`, or `mailto:`), a heading in the
+    /// preview (`#name`), or a file relative to the preview's document
+    /// (`guide.md`, `docs/setup.md#install`). Anything else is shown as
+    /// text.
+    destination: string,
+    title: option<string>,
+  }
+
+  /// A picture in a preview. (1.2)
+  record preview-image {
+    /// A PNG, JPEG, GIF, WebP, SVG, BMP, ICO, or AVIF file (BMP, ICO, and
+    /// AVIF since 1.4) relative to the preview's document, at most 64 MiB.
+    /// Web addresses aren't loaded: `description` is shown.
+    source: string,
+    /// Text describing the picture, shown when it can't be.
+    description: string,
+    title: option<string>,
+  }
+
+  /// What a node of a preview is. Blocks go in the preview itself, in
+  /// quotes, and in list items; inline nodes go in paragraphs, headings,
+  /// table cells, list items, and other inline nodes. (1.2)
+  variant preview-element {
+    paragraph,
+    /// Level 1 to 6.
+    heading(u8),
+    quote,
+    bulleted-list,
+    /// Numbered from the given number.
+    numbered-list(u32),
+    /// An item of a list; `some(done)` for a task list item.
+    list-item(option<bool>),
+    code-block(preview-code),
+    rule,
+    /// One alignment per column.
+    table(list<column-alignment>),
+    /// A table's header row, holding cells. Rows follow it.
+    table-head,
+    table-row,
+    table-cell,
+    text(string),
+    emphasis,
+    strong,
+    strikethrough,
+    /// Inline code.
+    code(string),
+    link(preview-link),
+    image(preview-image),
+    line-break,
+  }
+
+  /// A node of a preview's content. (1.2)
+  record preview-node {
+    /// The index of the node this one is inside, which must come before
+    /// it; `none` for the top level.
+    parent: option<u32>,
+    element: preview-element,
+  }
+
+  /// How to show a preview. (1.2)
+  record preview-options {
+    /// The tab's title, at most 100 characters.
+    title: string,
+    /// The document it shows. The preview closes with it, and relative
+    /// links and images are found from its folder.
+    document: option<document-id>,
+    /// Opens it beside the document (or the active editor) instead of in
+    /// the same group.
+    beside: bool,
+  }
+
+  /// A file open in one of the extension's viewers. (1.5)
+  record viewed-file {
+    /// The viewer's id, as declared in the manifest.
+    viewer: string,
+    path: string,
+  }
+
+  /// An open preview of the extension: its id as declared in the
+  /// manifest, and the key it was shown with. (1.5)
+  record preview-instance {
+    preview: string,
+    key: string,
+  }
+
+  /// A tab of the extension's that shows a webview page. (1.5)
+  variant webview {
+    viewer(viewed-file),
+    preview(preview-instance),
+  }
+
+  /// A message a webview page sent with `flareite.postMessage`. (1.5)
+  record webview-message {
+    /// The tab whose page sent it.
+    source: webview,
+    /// The message, as JSON text.
+    data: string,
+  }
+}
+
+/// Functions the editor provides.
+interface host {
+  use types.{
+    api-error, config-value, diagnostic, document-id, document-info, line-slice, log-level,
+    message-level, range, text-edit, text-slice,
+  };
+
+  /// Writes to the editor's log, tagged with the extension.
+  log: func(level: log-level, message: string);
+
+  /// Shows a notification to the user.
+  show-message: func(level: message-level, message: string);
+
+  /// A setting declared in the manifest's `configuration`: the user's
+  /// value, or the declared default. `none` for undeclared keys.
+  configuration: func(key: string) -> option<config-value>;
+
+  /// The open documents.
+  documents: func() -> result<list<document-info>, api-error>;
+
+  document: func(id: document-id) -> result<document-info, api-error>;
+
+  /// Lines `start` up to (not including) `end`, clamped to the document.
+  read-lines: func(id: document-id, start: u32, end: u32) -> result<line-slice, api-error>;
+
+  read-range: func(id: document-id, range: range) -> result<text-slice, api-error>;
+
+  /// Applies `edits` as one undoable change if the document is still at
+  /// `version`; all or none are applied. Ranges refer to the text at
+  /// `version` and must not overlap. Returns the new version.
+  apply-edits: func(id: document-id, version: u64, edits: list<text-edit>) -> result<u64, api-error>;
+
+  /// Replaces this extension's diagnostics for a document. Ranges refer to
+  /// the text at `version`, which must be the current version or one
+  /// recently sent to the extension.
+  publish-diagnostics: func(
+    id: document-id,
+    version: u64,
+    diagnostics: list<diagnostic>,
+  ) -> result<_, api-error>;
+
+  /// Changes one of the extension's settings in the user's settings, or
+  /// removes it there (`none`), which restores its default. The value must
+  /// fit the setting's declaration. Use it for choices the user makes, such
+  /// as "Always" in a prompt. (1.7)
+  set-configuration: func(key: string, value: option<config-value>) -> result<_, api-error>;
+}
+
+/// Contributions to the workbench: status bar items, side bar views,
+/// editor decorations, and previews, all declared in the manifest. (1.1)
+interface workbench {
+  use types.{api-error, document-id, preview-node, preview-options, range, status-item, view-item};
+
+  /// Shows a status bar item with new content, or hides it (`none`).
+  set-status-item: func(id: string, item: option<status-item>) -> result<_, api-error>;
+
+  /// Replaces the items of a side bar view (at most 5,000).
+  set-view-items: func(view: string, items: list<view-item>) -> result<_, api-error>;
+
+  /// Shows a message in a view instead of (or above) its items, e.g. while
+  /// it is empty; `none` removes it.
+  set-view-message: func(view: string, message: option<string>) -> result<_, api-error>;
+
+  /// Shows a side bar view.
+  show-view: func(view: string) -> result<_, api-error>;
+
+  /// Replaces the ranges decorated with one of the extension's decoration
+  /// types in a document. Ranges refer to the text at `version`, as for
+  /// diagnostics. Needs the `documents-read` permission.
+  set-decorations: func(
+    id: document-id,
+    version: u64,
+    decoration: string,
+    ranges: list<range>,
+  ) -> result<_, api-error>;
+
+  /// Selects `range` in a document and scrolls it into view, making it the
+  /// active document. Needs the `documents-read` permission.
+  reveal: func(id: document-id, range: range) -> result<_, api-error>;
+
+  /// The argument the running command was invoked with, from a view item
+  /// or an explorer menu (the file's or folder's path); `none` otherwise.
+  command-argument: func() -> option<string>;
+
+  /// Opens one of the extension's previews in a tab, or shows it if it's
+  /// open. `key` tells apart the previews of one type, e.g. one per
+  /// document. Showing a document's preview needs the `documents-read`
+  /// permission. (1.2)
+  show-preview: func(preview: string, key: string, options: preview-options) -> result<_, api-error>;
+
+  /// Replaces the content of an open preview: at most 100,000 nodes and
+  /// 8 MiB of text. Returns false, changing nothing, if the preview isn't
+  /// open (the user closed it), so the extension can stop updating it.
+  /// (1.2)
+  set-preview-content: func(preview: string, key: string, nodes: list<preview-node>) -> result<bool, api-error>;
+
+  /// Closes a preview, if it's open. (1.2)
+  close-preview: func(preview: string, key: string) -> result<_, api-error>;
+
+  /// Markdown as preview nodes, for `set-preview-content` or
+  /// `viewers::set-viewer-content`: the editor's own renderer, which shows
+  /// extensions' READMEs. CommonMark with GitHub's tables, strikethrough,
+  /// and task lists; HTML is reduced to its text and front matter is left
+  /// out, and a document too long for a preview is cut with a note. At
+  /// most 8 MiB of text (`too-large` otherwise). Needs no permission.
+  /// (1.14)
+  render-markdown: func(text: string) -> result<list<preview-node>, api-error>;
+
+  /// The file of the editor in use, if it shows one: a document's, a
+  /// viewer's, or a diff's modified file. The manifest's
+  /// `on_active_file_changed` command runs when it changes. (1.11)
+  active-file: func() -> option<string>;
+
+  /// A link shown above a line of a document, as VS Code's code lenses:
+  /// clicking it runs one of the extension's commands with `argument`
+  /// (`command-argument`), for the document. (1.12)
+  record code-lens {
+    line: u32,
+    /// Plain text, at most 100 characters.
+    title: string,
+    tooltip: option<string>,
+    command: string,
+    argument: option<string>,
+  }
+
+  /// Replaces this extension's code lenses in a document (at most 1,000).
+  /// Lines refer to the text at `version`, as for diagnostics, and follow
+  /// its edits. Needs the `documents-read` permission. (1.12)
+  set-code-lenses: func(id: document-id, version: u64, lenses: list<code-lens>) -> result<_, api-error>;
+
+  /// Faint text shown after a line's end, such as who last changed it.
+  /// (1.13)
+  record line-annotation {
+    line: u32,
+    /// Plain text, at most 200 characters.
+    text: string,
+    /// Shown on hover; plain text, at most 2,000 characters.
+    tooltip: option<string>,
+  }
+
+  /// Replaces this extension's line annotations in a document (at most
+  /// 100,000; one per line). Like code lenses, lines refer to the text at
+  /// `version` and follow its edits. Needs the `documents-read`
+  /// permission. The manifest's `on_selection_changed` command runs (with
+  /// the document and its selections as its context) when the cursor
+  /// moves to another line, so an extension can annotate just the line
+  /// in use. (1.13)
+  set-line-annotations: func(id: document-id, version: u64, annotations: list<line-annotation>) -> result<_, api-error>;
+}
+
+/// Files in the folder open in the editor, e.g. to format every file in a
+/// folder from the explorer's menu. Reading needs the `files-read`
+/// permission and writing `files-write` (they aren't listed in
+/// `activation.granted`). Paths are absolute, and only files inside the
+/// open folder can be used. (1.3)
+interface files {
+  /// Why a file call failed.
+  variant file-error {
+    /// The permission the call needs (`files-read` or `files-write`) isn't
+    /// granted.
+    permission-denied(string),
+    /// No folder is open, or the path isn't inside it.
+    outside-folder,
+    not-found,
+    /// A folder was given where a file is needed, or the other way round.
+    wrong-kind,
+    /// The file isn't text: it looks binary. (Text in other encodings
+    /// than UTF-8 is read and written in its own encoding.)
+    not-text,
+    /// The request exceeds one of the host's limits.
+    too-large(string),
+    /// The file couldn't be read or written; why.
+    failed(string),
+  }
+
+  /// Files found by `list-files`.
+  record file-list {
+    /// Absolute paths, sorted.
+    paths: list<string>,
+    /// Whether more files were there than are listed.
+    truncated: bool,
+  }
+
+  /// The open folder, if there is one.
+  folder: func() -> result<option<string>, file-error>;
+
+  /// The files in `folder` and its subfolders, except those the user's
+  /// `files.exclude` setting hides and those Git ignores: at most 10,000.
+  list-files: func(folder: string) -> result<file-list, file-error>;
+
+  /// The text of a file, line breaks included. A file open in the editor
+  /// is read from its document, unsaved changes included.
+  read-file: func(path: string) -> result<string, file-error>;
+
+  /// Replaces the text of a file, or creates the file in an existing
+  /// folder. Line breaks in `text` are converted to the file's line ending
+  /// (a new file gets them as written). A file open in the editor is
+  /// changed in its document, as one change the user can undo, and saved
+  /// unless it had unsaved changes. Writing the text a file already has
+  /// changes nothing.
+  write-file: func(path: string, text: string) -> result<_, file-error>;
+
+  /// Deletes a file or a folder and everything in it: to the system's
+  /// trash (the Recycle Bin on Windows), where the user can restore it, or
+  /// permanently. Needs `files-write`. Fails, deleting nothing, if the
+  /// trash can't take it. (1.7)
+  delete: func(path: string, to-trash: bool) -> result<_, file-error>;
+}
+
+/// Files opened in one of the extension's viewers: tabs that show a file
+/// the way the extension draws it, such as an image, instead of as text.
+/// A viewer is declared in the manifest with the file names it opens and
+/// the command that fills it in, which runs with the file's path as its
+/// argument (see `command-argument`) whenever the file is opened in the
+/// viewer or changes on disk. A webview viewer (1.5) shows a page instead,
+/// and needs no command. Viewers need no permission: a viewer can read
+/// only the files open in it. (1.4)
+interface viewers {
+  use types.{api-error, preview-node};
+
+  /// Bytes read from a file open in a viewer.
+  record file-bytes {
+    /// The size of the whole file.
+    size: u64,
+    /// The bytes from the offset asked for: fewer than asked for at the
+    /// end of the file.
+    bytes: list<u8>,
+  }
+
+  /// Replaces what one of the extension's viewers shows for a file, with
+  /// the same content a preview has: at most 100,000 nodes and 8 MiB of
+  /// text. Pictures and links are found from the file's folder, so a
+  /// picture of the file itself is its name. Returns false, changing
+  /// nothing, if the file isn't open in the viewer (the user closed it).
+  set-viewer-content: func(viewer: string, path: string, nodes: list<preview-node>) -> result<bool, api-error>;
+
+  /// Reads up to `length` bytes (at most 16 MiB) of a file open in one of
+  /// the extension's viewers, starting at `offset`.
+  read-viewed-file: func(viewer: string, path: string, offset: u64, length: u32) -> result<file-bytes, api-error>;
+}
+
+/// Pages that viewers and previews show instead of preview content: HTML,
+/// styles, and scripts from the extension's folder, or HTML the extension
+/// sets. A viewer or preview is a webview when its manifest entry has
+/// `webview`. Its page runs sandboxed: it can load only the extension's
+/// files and, in a viewer, the file open in it, and can't reach the editor
+/// except by messages. The page sends them with `flareite.postMessage`,
+/// which runs the command named by the entry's `on_message` (see
+/// `message`), and receives them with `flareite.onMessage`. (1.5)
+interface webviews {
+  use types.{api-error, webview, webview-message};
+
+  /// Replaces the page a webview shows with `html` (at most 4 MiB), and
+  /// loads it. Relative addresses in it are found in the extension's
+  /// folder. Returns false, changing nothing, if the tab isn't open.
+  set-webview-html: func(webview: webview, html: string) -> result<bool, api-error>;
+
+  /// Sends a message, as JSON text (at most 1 MiB), to a webview's page,
+  /// which receives it parsed. Messages sent before the page has loaded
+  /// wait for it. Returns false if the tab isn't open.
+  post-message: func(webview: webview, message: string) -> result<bool, api-error>;
+
+  /// The message the running command was run for, when it's a webview's
+  /// `on_message` command; `none` otherwise.
+  message: func() -> option<webview-message>;
+}
+
+/// Small values the extension keeps across sessions, as JSON text: global
+/// ones, and the open folder's. Its webview pages share them
+/// (`flareite.storage`, `flareite.workspaceStorage`). Each scope holds at most
+/// 1 MiB, and keys are at most 200 bytes. Users can clear what an extension
+/// stores. Needs no permission. (1.5)
+interface storage {
+  use types.{api-error};
+
+  enum storage-scope {
+    /// Shared by every folder.
+    global,
+    /// The folder open in the editor; nothing is kept while none is.
+    workspace,
+  }
+
+  /// A value, as JSON text; `none` if there is none.
+  get: func(scope: storage-scope, key: string) -> option<string>;
+
+  /// Sets a value (JSON text), or removes it (`none`).
+  set: func(scope: storage-scope, key: string, value: option<string>) -> result<_, api-error>;
+
+  /// The keys that have values, sorted.
+  keys: func(scope: storage-scope) -> list<string>;
+}
+
+/// The folder open in the editor, whether the user trusts it, and changes
+/// to files on disk. (1.6)
+///
+/// The manifest's `on_folder_changed` command runs when the open folder
+/// changes (opened, closed, or another one opened) or the user changes
+/// whether they trust it.
+interface workspace {
+  use files.{file-error};
+
+  record folder-info {
+    /// Absolute.
+    path: string,
+    /// Whether the user trusts the folder's files. Programs (the
+    /// `processes` interface) run only in a trusted folder, since programs
+    /// such as Git and build tools may run code from it. With no folder
+    /// open, nothing needs trust.
+    trusted: bool,
+  }
+
+  /// The open folder, if any. Needs no permission.
+  folder: func() -> option<folder-info>;
+
+  /// Asks the user whether they trust the open folder, if they haven't
+  /// trusted it. Their answer runs `on_folder_changed`.
+  request-trust: func();
+
+  /// Opens a file in the editor, as if the user opened it, and shows it.
+  /// Needs no permission. (1.7)
+  open-file: func(path: string) -> result<_, file-error>;
+
+  /// Changes to files under a watched path, reported to its command.
+  record file-changes {
+    /// What `watch` returned.
+    watch: u64,
+    /// The files and folders that were created, changed, or removed,
+    /// absolute and sorted. Only paths under the watched one.
+    paths: list<string>,
+    /// Too many changed to list (more than 10,000), so `paths` is empty:
+    /// look again at everything under the watched path.
+    overflow: bool,
+  }
+
+  /// Watches a file, or a folder and everything in it. When something
+  /// under it changes, `command` (one of the extension's own) runs, during
+  /// which `changes` lists what did. Changes that arrive while the
+  /// extension is busy are merged into one call.
+  ///
+  /// A path inside the open folder needs `files-read`, and is watched only
+  /// while that folder is open, `.git` included. A path outside it needs
+  /// `processes` (which can read it anyway). At most 32 watches.
+  watch: func(path: string, command: string) -> result<u64, file-error>;
+
+  /// Stops a watch. Watches also stop when the extension does.
+  unwatch: func(watch: u64);
+
+  /// The changes the running command was run for, when it's a watch's
+  /// command; `none` otherwise.
+  changes: func() -> option<file-changes>;
+
+  /// Opens a folder in the editor in place of the open one, as if the user
+  /// chose it (they're asked whether to trust it, as usual). (1.11)
+  open-folder: func(path: string) -> result<_, file-error>;
+}
+
+/// Programs the manifest declares in `[[programs]]`, which run on the
+/// user's computer as the user. Needs the `processes` permission, and a
+/// trusted folder (or none). (1.6)
+interface processes {
+  variant process-error {
+    /// The `processes` permission isn't granted.
+    permission-denied,
+    /// The open folder isn't trusted (see `workspace::folder`).
+    untrusted,
+    /// The manifest declares no program with this name.
+    unknown-program(string),
+    /// The program isn't installed, or couldn't be started; why.
+    not-found(string),
+    /// It ran longer than allowed and was stopped.
+    timed-out,
+    /// It was stopped with `kill`.
+    killed,
+    /// The request exceeds one of the host's limits.
+    too-large(string),
+    invalid-argument(string),
+    failed(string),
+  }
+
+  record process-options {
+    /// The folder it runs in, absolute; the open folder by default (which
+    /// must then be open).
+    cwd: option<string>,
+    /// Variables added to Flareite's environment, or replacing its values.
+    env: list<tuple<string, string>>,
+    /// Written to its standard input, which is then closed. Without it,
+    /// its input is empty.
+    stdin: option<list<u8>>,
+    /// Stops it after this long. `run` stops it at the running command's
+    /// deadline in any case, and `spawn` lets it run until it ends.
+    timeout-ms: option<u32>,
+  }
+
+  record process-output {
+    /// `none` when it didn't exit by itself (it was stopped by a signal).
+    exit-code: option<s32>,
+    stdout: list<u8>,
+    stderr: list<u8>,
+    /// Output beyond 32 MiB (standard output and error together) was
+    /// dropped.
+    truncated: bool,
+  }
+
+  /// Runs a declared program with `args` and waits for it to end, within
+  /// the running call's deadline.
+  run: func(program: string, args: list<string>, options: process-options) -> result<process-output, process-error>;
+
+  /// Starts a declared program and returns at once. When it ends, `command`
+  /// (one of the extension's own) runs, during which `finished` returns
+  /// its outcome. At most 16 run at once; they are stopped when the
+  /// extension stops.
+  spawn: func(program: string, args: list<string>, options: process-options, command: string) -> result<u64, process-error>;
+
+  /// Stops a program `spawn` started, and everything it started. Its
+  /// command still runs, with `killed`. Returns false if it had ended.
+  kill: func(process: u64) -> bool;
+
+  /// A program that `spawn` started, and how it ended.
+  record finished-process {
+    /// What `spawn` returned.
+    process: u64,
+    outcome: result<process-output, process-error>,
+  }
+
+  /// The program the running command was run for, when it's a `spawn`
+  /// command; `none` otherwise.
+  finished: func() -> option<finished-process>;
+}
+
+/// Marks on files and folders in the explorer, such as a version control
+/// status: a color, a short badge, and a tooltip. Needs no permission. (1.6)
+interface explorer {
+  use types.{api-error};
+
+  record file-mark {
+    /// Absolute.
+    path: string,
+    /// One or two characters shown at the end of the row, such as `M`.
+    badge: option<string>,
+    /// The name of a color the manifest declares under `[colors]`, for the
+    /// row's text.
+    color: option<string>,
+    /// Plain text, such as "Modified".
+    tooltip: option<string>,
+    /// Shows the row dimmed.
+    faded: bool,
+    /// Marks everything inside a folder too, as with an untracked folder.
+    inherit: bool,
+    /// Folders that contain it show its color and a dot. Where marks
+    /// propagate to the same folder, the highest `priority` wins.
+    propagate: bool,
+    priority: u8,
+  }
+
+  /// Replaces all of the extension's marks: at most 100,000, one per path.
+  set-file-marks: func(marks: list<file-mark>) -> result<_, api-error>;
+}
+
+/// Side bar views as trees, in API 1.7: items with icons, marks, and
+/// children loaded when opened; buttons and menus for the view and its
+/// items (declared in the manifest); a text box; a welcome message; and a
+/// count badge. Views can be sections of one container (`container` in the
+/// manifest), shown together under one activity bar entry. Needs no
+/// permission.
+interface views {
+  use types.{api-error};
+
+  variant item-icon {
+    none,
+    /// A named icon, as for tab actions (`add`, `check`, `refresh`, ...).
+    named(string),
+    /// The file icon theme's icon for a file with this path or name.
+    file(string),
+    /// The file icon theme's icon for a folder with this path or name.
+    folder(string),
+  }
+
+  /// How an item looks besides its label, as explorer marks do.
+  record item-mark {
+    /// One or two characters at the end of the row, such as `M`.
+    badge: option<string>,
+    /// The name of a color the manifest declares under `[colors]`, for the
+    /// label and the badge.
+    color: option<string>,
+    /// Strikes the label through, as for a deleted file.
+    strikethrough: bool,
+    faded: bool,
+  }
+
+  enum expansion {
+    /// A leaf, unless items name it as their parent.
+    none,
+    collapsed,
+    expanded,
+  }
+
+  record tree-item {
+    /// Unique within the view.
+    id: string,
+    /// The item it's nested under, which must come earlier in the list.
+    parent: option<string>,
+    label: string,
+    /// Shown dimmed after the label.
+    description: option<string>,
+    tooltip: option<string>,
+    icon: item-icon,
+    mark: option<item-mark>,
+    /// Which of the manifest's `view/item` menus apply to it: those whose
+    /// `contexts` list this.
+    context: option<string>,
+    /// Whether it can be opened, and is at first. An item that can be
+    /// opened but has no children listed gets them when it's opened: the
+    /// view's `on_expand` command runs, and calls `set-children`.
+    expansion: expansion,
+    /// Run with `argument` when the item is activated (click or Enter).
+    command: option<string>,
+    argument: option<string>,
+  }
+
+  /// Replaces the items of one of the extension's views: at most 10,000,
+  /// children loaded with `set-children` included.
+  set-items: func(view: string, items: list<tree-item>) -> result<_, api-error>;
+
+  /// Replaces the children of an item (and theirs). Their parents must be
+  /// `parent` or an item listed before them. Returns false, changing
+  /// nothing, if the view has no such item any more.
+  set-children: func(view: string, parent: string, items: list<tree-item>) -> result<bool, api-error>;
+
+  /// A button in a welcome message.
+  record welcome-button {
+    label: string,
+    /// One of the extension's commands, run with `argument`.
+    command: string,
+    argument: option<string>,
+  }
+
+  /// Shown in a view instead of its items while it has none.
+  record welcome {
+    /// Plain text; a blank line starts a paragraph.
+    text: string,
+    buttons: list<welcome-button>,
+  }
+
+  set-welcome: func(view: string, welcome: option<welcome>) -> result<_, api-error>;
+
+  /// A number on the view's header and on its activity bar entry (added up
+  /// for a container's sections); 0 shows none.
+  set-badge: func(view: string, count: u32) -> result<_, api-error>;
+
+  /// The flags the view's menus test with `when` (`"tree"`, `"!tree"`).
+  set-flags: func(view: string, names: list<string>) -> result<_, api-error>;
+
+  /// The text in the view's text box (declared with `[views.input]`).
+  input: func(view: string) -> result<string, api-error>;
+
+  /// Replaces the text in the view's text box.
+  set-input: func(view: string, text: string) -> result<_, api-error>;
+
+  /// The items a command from a view's menu or button was run for: the
+  /// arguments of the selected items, when the clicked item is one of
+  /// them, or of the clicked item alone. Empty otherwise.
+  selection: func() -> list<string>;
+
+  /// An item being opened, for the view's `on_expand` command.
+  record expanding-item {
+    view: string,
+    item: string,
+    argument: option<string>,
+  }
+
+  /// The item the running command was run to load children for, when it's
+  /// a view's `on_expand` command; `none` otherwise.
+  expanding: func() -> option<expanding-item>;
+
+  /// A lane of a history graph: what it leads to (a commit, say), and its
+  /// color, 0 to 4 by turns. (1.11)
+  record graph-lane {
+    id: string,
+    color: u32,
+  }
+
+  /// A row of a history graph, beside a view item. (1.11)
+  record graph-row {
+    /// The item it's beside.
+    item: string,
+    /// What its node is: the lanes coming in for it end at the node.
+    node: string,
+    /// What the node leads to: a lane leaves it for each.
+    parents: list<string>,
+    /// The lanes at the row's top and bottom, left to right. A lane at the
+    /// top for something else carries on to the bottom lane for the same.
+    inputs: list<graph-lane>,
+    outputs: list<graph-lane>,
+  }
+
+  /// Draws a history graph beside a view's items, in VS Code's style: one
+  /// row per item it names (at most 10,000, with 64 lanes each). Rows of
+  /// items it doesn't name (an opened commit's files) carry the lanes on.
+  /// It replaces the view's graph; an empty list removes it. (1.11)
+  set-graph: func(view: string, rows: list<graph-row>) -> result<_, api-error>;
+
+  /// Shows or hides one of the extension's views (a section hides from its
+  /// container). Views start as the manifest's `hidden` says. (1.13)
+  set-visible: func(view: string, visible: bool) -> result<_, api-error>;
+}
+
+/// Asking the user something: choosing from a list, typing text, or
+/// confirming. Each returns at once with the prompt's id; the answer runs
+/// the given command, during which `answer` returns it. One prompt shows at
+/// a time: a new one cancels the one showing. Needs no permission. (1.7)
+interface prompts {
+  use types.{api-error};
+
+  record pick-item {
+    label: string,
+    /// Shown dimmed after the label.
+    description: option<string>,
+    /// What `answer` returns when it's chosen.
+    value: string,
+  }
+
+  /// Shows a list to choose from (at most 1,000 items), filtered as the
+  /// user types. `title` says what's being chosen.
+  pick: func(title: string, items: list<pick-item>, command: string) -> result<u64, api-error>;
+
+  record input-options {
+    /// Says what to type.
+    title: string,
+    /// The text at first.
+    value: string,
+    placeholder: option<string>,
+  }
+
+  /// Asks for a line of text.
+  input: func(options: input-options, command: string) -> result<u64, api-error>;
+
+  record confirm-options {
+    message: string,
+    /// More about it, shown below.
+    detail: option<string>,
+    /// The choices, the first being the main one; Cancel is added.
+    buttons: list<string>,
+    /// The main choice destroys something (it's shown as a warning).
+    destructive: bool,
+  }
+
+  /// Asks the user to confirm, in a dialog.
+  confirm: func(options: confirm-options, command: string) -> result<u64, api-error>;
+
+  variant answer-value {
+    /// Closed without an answer, or replaced by another prompt.
+    cancelled,
+    /// A `pick`'s chosen item's value.
+    picked(string),
+    /// An `input`'s text.
+    text(string),
+    /// The index of a `confirm`'s button.
+    button(u32),
+  }
+
+  record prompt-answer {
+    /// What the prompt function returned.
+    prompt: u64,
+    value: answer-value,
+  }
+
+  /// The answer the running command was run for; `none` otherwise.
+  answer: func() -> option<prompt-answer>;
+
+  /// Asks for a folder, in the system's dialog. The answer is
+  /// `text(path)`, an absolute path. (1.11)
+  pick-folder: func(title: string, command: string) -> result<u64, api-error>;
+}
+
+/// Read-only documents the extension provides for addresses of its own,
+/// and tabs comparing two documents. (1.8)
+///
+/// The manifest's `[[text_providers]]` declare schemes, such as `git`, with
+/// the command that provides the text at an address (`git:HEAD:src/main.rs`)
+/// when the editor needs it: when a tab shows it, and again after `changed`.
+/// While that command runs, `requested` returns the address, and the
+/// command answers with `provide`. Needs no permission.
+interface documents {
+  use types.{api-error};
+
+  /// The address the running command was run to provide text for, when
+  /// it's a text provider's command; `none` otherwise.
+  requested: func() -> option<string>;
+
+  /// Answers a request: the text at `uri` (at most 32 MiB), or `none` when
+  /// there's nothing there, which shows as empty.
+  provide: func(uri: string, text: option<string>) -> result<_, api-error>;
+
+  /// The texts at these addresses of the extension's may have changed, so
+  /// open documents showing them ask for them again. An address ending in
+  /// `*` stands for every address starting with what's before it
+  /// (`git:*` for all of a scheme's).
+  changed: func(uris: list<string>) -> result<_, api-error>;
+
+  /// Opens the document at one of the extension's addresses, read-only, in
+  /// a tab of its own.
+  open: func(uri: string) -> result<_, api-error>;
+
+  /// Opens a tab comparing two documents: `original` on the left (or
+  /// above) and `modified` on the right. Each is a file's absolute path or
+  /// an address a provider declares. When `modified` is a file, it can be
+  /// edited in the tab.
+  open-diff: func(original: string, modified: string, title: string) -> result<_, api-error>;
+
+  /// One of the versions a merge combines. (1.12)
+  record merge-side {
+    /// An absolute path, or an address an extension provides.
+    uri: string,
+    /// Such as "Incoming" or "Current".
+    title: string,
+    /// Such as the branch or commit it's from.
+    description: option<string>,
+  }
+
+  record merge-options {
+    /// The versions' common ancestor (an absolute path or an address).
+    base: string,
+    /// Shown on the left above the result.
+    incoming: merge-side,
+    /// Shown on the right above the result.
+    current: merge-side,
+    /// The file the merge writes: an absolute path.
+    result-file: string,
+    /// The tab's title.
+    title: string,
+    /// Start the result again from the base with the changes that don't
+    /// conflict made, e.g. when the file holds conflict markers.
+    reset-result: bool,
+    /// Runs when the user completes the merge, after the result is saved,
+    /// with the result's path as the argument (`workbench::command-argument`).
+    on-complete: option<string>,
+  }
+
+  /// Opens a merge editor (VS Code's): the two versions above the result,
+  /// each change from the base marked, conflicting ones with buttons to
+  /// accept either side or both. (1.12)
+  open-merge: func(options: merge-options) -> result<_, api-error>;
+}
+
+/// Comparing files with their originals as they're edited (1.9): the
+/// editor marks changed lines beside the text, shows a change's original
+/// lines on request, and can revert changes, or apply them to the original
+/// (staging them, for Git).
+///
+/// The manifest's `[quick_diff]` names the command that finds a file's
+/// original (`original`), and optionally the command that applies changes to
+/// it (`apply`, with `apply_title`, such as "Stage"). An original is an
+/// address the extension provides (see `documents`); the editor reads it, and
+/// reads it again when the extension says it changed.
+interface quick-diff {
+  use types.{api-error};
+
+  /// The file (an absolute path) the running `original` command was run
+  /// for; `none` otherwise.
+  requested-file: func() -> option<string>;
+
+  /// Answers the request: the address of the file's original, or `none`
+  /// when it has none (a file Git doesn't track), when nothing is marked.
+  set-original: func(path: string, uri: option<string>) -> result<_, api-error>;
+
+  /// An original with changes made to it.
+  record applied {
+    /// The original's address.
+    uri: string,
+    /// Its text with the changes made (at most 32 MiB).
+    text: string,
+  }
+
+  /// While the `apply` command runs: what to make the original.
+  to-apply: func() -> option<applied>;
+
+  /// Files' originals may be different ones now (a file became tracked, say):
+  /// the editor asks again for these open files', or for all when the list
+  /// is empty.
+  originals-changed: func(paths: list<string>) -> result<_, api-error>;
+
+  /// Applies the changes the selections in the active editor touch to its
+  /// file's original, as if the user chose to: for a command such as "Stage
+  /// Selected Ranges".
+  apply-selected-ranges: func() -> result<_, api-error>;
+}
+
+/// Running one of the extension's commands later (1.10), as for fetching
+/// in the background every few minutes.
+interface timers {
+  use types.{api-error};
+
+  /// Runs `command` (one of the extension's own) once, after `delay-ms`
+  /// (1 second to 1 day). Returns the timer's id. At most 16 wait at once;
+  /// they're dropped when the extension stops.
+  set-timer: func(delay-ms: u32, command: string) -> result<u64, api-error>;
+
+  /// Cancels a timer. Returns false if it had run or been cancelled.
+  clear-timer: func(id: u64) -> bool;
+
+  /// The timer the running command was run for; `none` otherwise.
+  fired: func() -> option<u64>;
+}
+
+world extension {
+  use types.{activation, command-context, document-change, document-id, document-info};
+
+  import host;
+  import workbench;
+  import files;
+  import viewers;
+  import webviews;
+  import storage;
+  import workspace;
+  import processes;
+  import explorer;
+  import views;
+  import prompts;
+  import documents;
+  import quick-diff;
+  import timers;
+
+  /// Called once before any other export. An error fails the extension.
+  export activate: func(context: activation) -> result<_, string>;
+
+  /// Called before the extension is unloaded.
+  export deactivate: func();
+
+  /// Runs one of the commands declared in the manifest.
+  export run-command: func(command: string, context: command-context) -> result<_, string>;
+
+  /// A document was opened, or was already open when the extension was
+  /// activated. Only sent with the `documents-read` permission, as are the
+  /// other document notifications.
+  export document-opened: func(document: document-info);
+
+  export document-changed: func(change: document-change);
+
+  export document-closed: func(document: document-id);
+}

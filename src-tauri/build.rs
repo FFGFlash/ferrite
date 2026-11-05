@@ -24,7 +24,7 @@ fn main() {
   {
     println!("cargo::error=Couldn't get ConPTY {CONPTY_VERSION}: {error}");
     println!(
-      "cargo::error=Building Ferrite for Windows downloads it once from nuget.org into \
+      "cargo::error=Building Flareite for Windows downloads it once from nuget.org into \
        src-tauri/conpty; check the network connection."
     );
     return;
@@ -36,7 +36,7 @@ fn main() {
 }
 
 /// tauri-build copies the resources next to the executable on every build,
-/// even `cargo check`. A running Ferrite holds them open (the loaded
+/// even `cargo check`. A running Flareite holds them open (the loaded
 /// `conpty.dll`, each terminal's `OpenConsole.exe`), and Windows won't
 /// overwrite a file in use, but it will rename one. So copies in use are
 /// moved aside, and a later build deletes them once they're free.

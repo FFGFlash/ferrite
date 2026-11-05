@@ -85,7 +85,7 @@ impl UiStateStore {
 
 fn write_atomically(path: &std::path::Path, state: &UiState) -> std::io::Result<()> {
   let bytes = serde_json::to_vec_pretty(state)?;
-  ferrite_workspace::write_file_atomically(path, &bytes)
+  flareite_workspace::write_file_atomically(path, &bytes)
 }
 
 /// Records which files are open, after documents are opened, closed, or saved

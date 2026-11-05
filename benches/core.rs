@@ -4,13 +4,13 @@ use std::hint::black_box;
 use std::time::Duration;
 
 use criterion::{BatchSize, Criterion, criterion_group, criterion_main};
-use ferrite_benches::code_text;
-use ferrite_core::{Direction, Editor, EditorOp, KnownLines, Motion, Unit};
-use ferrite_text::SearchQuery;
+use flareite_benches::code_text;
+use flareite_core::{Direction, Editor, EditorOp, KnownLines, Motion, Unit};
+use flareite_text::SearchQuery;
 
 const MB: usize = 1024 * 1024;
 
-fn editor_with(text: &str) -> (Editor, ferrite_core::DocumentId) {
+fn editor_with(text: &str) -> (Editor, flareite_core::DocumentId) {
   let mut editor = Editor::default();
   let id = editor.create_untitled();
   let document = editor.document_mut(id).expect("open");

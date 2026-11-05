@@ -1,6 +1,6 @@
-# Contributing to Ferrite
+# Contributing to Flareite
 
-This guide is for people working on Ferrite itself. To write an extension, see
+This guide is for people working on Flareite itself. To write an extension, see
 [`docs/extensions.md`](docs/extensions.md). For how the pieces fit together, see
 [`docs/architecture.md`](docs/architecture.md).
 
@@ -27,7 +27,7 @@ Platform notes:
   ```
 
   Without them, the crates other than the app still build and test:
-  `cargo test --workspace --exclude ferrite-app --exclude ferrite-benches`. That command also
+  `cargo test --workspace --exclude flareite-app --exclude flareite-benches`. That command also
   works in WSL to test Linux behavior from a Windows machine.
 
 ## Before sending a change
@@ -86,9 +86,9 @@ Responsiveness is a requirement, so changes on hot paths need numbers.
   judge:
 
   ```sh
-  cargo bench -p ferrite-benches -- --save-baseline before
+  cargo bench -p flareite-benches -- --save-baseline before
   # ...make the change...
-  cargo bench -p ferrite-benches -- --baseline before
+  cargo bench -p flareite-benches -- --baseline before
   node scripts/perf-check.mjs micro --threshold 10
   ```
 

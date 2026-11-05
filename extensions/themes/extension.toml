@@ -3,7 +3,7 @@ id = "example.themes"
 name = "Example Themes"
 version = "0.1.0"
 description = "Two color themes: Midnight (dark) and Paper (light)."
-author = "Ferrite"
+author = "Flareite"
 api_version = "1"
 
 [[themes]]

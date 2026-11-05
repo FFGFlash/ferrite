@@ -11,7 +11,7 @@ edited. Each of those editors has its own cursor, scroll position, and folds, an
 text, its undo history, and whether it's saved.
 
 The backend kept all of that per document: the selections, cursor history, and folds in
-`ferrite_core::Document`, and what the client had been sent of the highlights (the highlight
+`flareite_core::Document`, and what the client had been sent of the highlights (the highlight
 mirror). Two editors of one document would have fought over all of it.
 
 ## Decisions

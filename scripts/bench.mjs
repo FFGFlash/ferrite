@@ -2,7 +2,7 @@
 /**
  * End-to-end benchmarks against the release build.
  *
- *   pnpm tauri build --no-bundle          # build target/release/ferrite first
+ *   pnpm tauri build --no-bundle          # build target/release/flareite first
  *   node scripts/bench.mjs startup        # launch time and idle memory (5 runs)
  *   node scripts/bench.mjs typing         # keystroke-to-paint latency
  *                                         (--file F also types into F, e.g.
@@ -19,7 +19,7 @@
  * repeatable),
  * --json PATH (default
  * target/bench/results.json). The app runs with `--bench <name>`, writes its
- * report to the file in FERRITE_BENCH_OUT, and stays up briefly so this
+ * report to the file in FLAREITE_BENCH_OUT, and stays up briefly so this
  * script can measure the memory of its whole process tree (the app plus its
  * WebView processes).
  */
@@ -41,7 +41,12 @@ const which =
 const binary = path.resolve(
   option(
     'binary',
-    path.join(root, 'target', 'release', process.platform === 'win32' ? 'ferrite.exe' : 'ferrite'),
+    path.join(
+      root,
+      'target',
+      'release',
+      process.platform === 'win32' ? 'flareite.exe' : 'flareite',
+    ),
   ),
 )
 const jsonOut = path.resolve(option('json', path.join(root, 'target', 'bench', 'results.json')))
@@ -118,11 +123,11 @@ function processTreeMemory(pid) {
 
 /** Launches one benchmark run and waits for its report. */
 async function runOnce(name, extra = []) {
-  const out = path.join(os.tmpdir(), `ferrite-bench-${process.pid}-${Date.now()}.json`)
+  const out = path.join(os.tmpdir(), `flareite-bench-${process.pid}-${Date.now()}.json`)
   const started = performance.now()
   const flags = [...(withExtensions ? ['--bench-extensions'] : []), ...languages]
   const child = spawn(binary, ['--bench', name, ...extra, ...flags], {
-    env: { ...process.env, FERRITE_BENCH_OUT: out },
+    env: { ...process.env, FLAREITE_BENCH_OUT: out },
     stdio: 'ignore',
   })
   const exited = new Promise(resolve => child.on('exit', resolve))

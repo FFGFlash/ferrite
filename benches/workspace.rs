@@ -7,9 +7,9 @@ use std::sync::atomic::AtomicBool;
 use std::time::Duration;
 
 use criterion::{Criterion, criterion_group, criterion_main};
-use ferrite_benches::{create_workspace, synthetic_paths};
-use ferrite_text::SearchQuery;
-use ferrite_workspace::{
+use flareite_benches::{create_workspace, synthetic_paths};
+use flareite_text::SearchQuery;
+use flareite_workspace::{
   ExcludeFilter, FileIndex, SearchLimits, list_directory, scan_files, search_workspace,
 };
 

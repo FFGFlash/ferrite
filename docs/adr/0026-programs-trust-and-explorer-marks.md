@@ -18,7 +18,7 @@ needs the same process API.
 Running Git on a folder runs code from it. `core.fsmonitor`, `core.sshCommand`, and hooks name
 programs. A `.git/config` in a downloaded archive can make a plain `git status` run anything.
 Language servers have the same problem: rust-analyzer runs build scripts. VS Code guards against
-this with Workspace Trust, and Ferrite had nothing like it.
+this with Workspace Trust, and Flareite had nothing like it.
 
 ## Decisions
 
@@ -38,7 +38,7 @@ the outcome), and `kill`.
   the user lets an extension run can be told to do anything (`git -c core.sshCommand=…`), so
   restricting them would protect nothing. The permission is what protects, and its description
   says so.
-- **Process groups.** `ferrite-process` (factored out of `ferrite-lsp`) starts each program in a
+- **Process groups.** `flareite-process` (factored out of `flareite-lsp`) starts each program in a
   job object or process group with no console window. Stopping one stops what it started, and
   everything an extension started stops with it.
 - **Results by command, not by a new export.** Adding exports breaks components built against
@@ -75,7 +75,7 @@ inside a folder (an untracked folder). `propagate` colors the folders that conta
 where the highest `priority` wins. Marks need no permission.
 
 Colors aren't hex values in the call. The manifest declares them under `[colors]`, with dark and
-light defaults, as theme tokens (`ferrite.git.modified`), which themes and `[workbench.colors]`
+light defaults, as theme tokens (`flareite.git.modified`), which themes and `[workbench.colors]`
 can set. Theme validation accepts any well-formed extension token, since a theme may color
 extensions the user hasn't installed.
 

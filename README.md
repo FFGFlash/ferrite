@@ -1,4 +1,4 @@
-# Ferrite
+# Flareite
 
 A fast, memory-efficient, extensible code editor built with Rust, Tauri, React, and a sandboxed
 WebAssembly extension system.
@@ -8,7 +8,7 @@ WebAssembly extension system.
 > per-extension resource accounting, CI on Windows, macOS, and Linux, and performance regression
 > checks. See [`docs/DESIGN.md`](docs/DESIGN.md) for the brief and milestone plan,
 > [`docs/performance.md`](docs/performance.md) for measurements, and
-> [`CONTRIBUTING.md`](CONTRIBUTING.md) for how to work on Ferrite.
+> [`CONTRIBUTING.md`](CONTRIBUTING.md) for how to work on Flareite.
 
 ## Prerequisites
 
@@ -36,11 +36,11 @@ pnpm tauri dev
 desktop window. Frontend changes hot-reload; Rust changes trigger a rebuild and restart.
 
 Files passed on the command line open as tabs, for example
-`target/debug/ferrite path/to/file.rs` (the debug binary needs `pnpm dev` running).
+`target/debug/flareite path/to/file.rs` (the debug binary needs `pnpm dev` running).
 
 ## Editing
 
-Ferrite opens text files of any size, in UTF-8, UTF-16, or a legacy encoding such as Windows-1252
+Flareite opens text files of any size, in UTF-8, UTF-16, or a legacy encoding such as Windows-1252
 or Shift JIS, which it detects and shows in the status bar. Click the encoding to reopen or save the
 file with another one. Files are saved in the encoding they were read in, and line endings and a
 byte order mark are preserved exactly; new lines use the file's existing line ending. A file that
@@ -112,7 +112,7 @@ Code folds where the language's fold query says (blocks, bodies, long argument l
 or by indentation for languages without one. Fold markers appear in the gutter when the pointer
 is over it; click one to fold, or click the ⋯ after a folded line to unfold. A folded region
 moves, copies, and deletes with its first line, and searching or undoing into it unfolds it.
-Ferrite remembers what was folded in each file.
+Flareite remembers what was folded in each file.
 
 Region comments mark foldable regions of your own, written with the language's comment syntax:
 
@@ -140,18 +140,18 @@ Expression; in the replace field, Enter replaces and Ctrl+Enter replaces all. Re
 replacements can use `$1` and `${name}`.
 
 Hold Shift with any movement key to extend the selection. Closing a tab or the window with
-unsaved changes asks whether to save them. If another program changes an open file, Ferrite
+unsaved changes asks whether to save them. If another program changes an open file, Flareite
 reloads it when you have no unsaved changes, and otherwise keeps your version and asks before
 overwriting when you save.
 
 ## Languages
 
-Ferrite has no languages built in: each comes from an extension, so you add exactly the ones you
+Flareite has no languages built in: each comes from an extension, so you add exactly the ones you
 edit. Without any, files are plain text. A file's language comes from its name and is shown in the
 status bar; click it (or run **View: Change Language Mode**, `Ctrl+K M`) to choose another one,
 plain text, or to go back to detecting it. The choice lasts while the file is open. A language
 extension brings a Tree-sitter grammar compiled to WebAssembly for highlighting, and usually
-declares a language server. The official ones (`ferrite.*`) each have a repository of their own;
+declares a language server. The official ones (`flareite.*`) each have a repository of their own;
 all but Markdown have no code to build:
 
 | Extension  | Languages                     | Language server                   | Install the server with                                |
@@ -168,11 +168,11 @@ all but Markdown have no code to build:
 
 Load one with **Extensions: Load Development Extension…** (choose its folder, such as a checkout
 of the Rust extension), or install it by copying its folder into the `extensions` folder next to
-`settings.toml`. Ferrite asks before running an extension's language server; highlighting
+`settings.toml`. Flareite asks before running an extension's language server; highlighting
 works either way. Markdown's highlighting needs no build either; its preview does (see
 [Extensions](#extensions)).
 
-With a language server, Ferrite also shows errors and warnings as you type (squiggles, and in
+With a language server, Flareite also shows errors and warnings as you type (squiggles, and in
 **View: Problems** with every file's, counted in the status bar), shows type information and documentation when the pointer rests on a
 symbol, goes to definitions (F12 or Ctrl/⌘+click; holding Ctrl/⌘ underlines the symbol under the
 pointer when it has one), finds references (Shift+F12, or Ctrl/⌘+click on a definition: one is
@@ -186,14 +186,14 @@ be changed, added, or turned off in the `[lsp]` section of the settings.
 
 ## Extensions
 
-Extensions are WebAssembly modules that run in a sandbox: they can only use Ferrite's
-[extension API](crates/ferrite-extension-api/wit/extension.wit). With it they add commands to
+Extensions are WebAssembly modules that run in a sandbox: they can only use Flareite's
+[extension API](crates/flareite-extension-api/wit/extension.wit). With it they add commands to
 the palette, read open documents, edit them, and show problems as squiggles. They can also
 customize the workbench: color themes, file icon themes, keybindings, context menu items, status
 bar items, side bar views, highlights in the text, and previews (formatted pages, such as rendered
 Markdown), mark files in the explorer, and add languages. They have no access to files, the
 network, or anything else on your computer beyond the permissions they request. Before an
-extension starts, Ferrite asks you to allow them: reading or editing open documents or the open
+extension starts, Flareite asks you to allow them: reading or editing open documents or the open
 folder's files, or running the language servers or programs (such as Git) it declares, which
 run only in folders you [trust](#workspace). The
 Extensions view (`Ctrl+Shift+X`) lists each extension with its icon, name, description, author,
@@ -265,9 +265,9 @@ editor-background = "#101018"            # any token in src/themes/tokens.json
 
 ## Recovering unsaved changes
 
-Unsaved changes are backed up in the background while you work. If Ferrite crashes, is killed,
+Unsaved changes are backed up in the background while you work. If Flareite crashes, is killed,
 or the computer loses power, the next start reopens them as unsaved tabs and says so. Closing
-Ferrite normally still asks about unsaved changes, and changes you choose not to save are not
+Flareite normally still asks about unsaved changes, and changes you choose not to save are not
 brought back.
 
 If part of the window shows "stopped working because of an internal error", choose **Try
@@ -301,7 +301,7 @@ It follows the file you're editing: switching tabs, going to a
 definition, or opening a search result expands the file's folders and selects it.
 
 **Workspace Trust.** Programs that work on a folder can run code from it: a language server
-builds the project, and Git runs hooks. So the first time you open a folder, Ferrite asks
+builds the project, and Git runs hooks. So the first time you open a folder, Flareite asks
 whether you trust its files (you can trust every folder in its parent instead). Until you do, it
 runs in Restricted Mode, shown in the status bar: language servers don't start and extensions
 can't run programs, while editing and everything else work. Click **Restricted Mode**, or run
@@ -370,12 +370,12 @@ Tabs sit in groups, and any tab can go in any group, beside any other.
   places.
 - **Problems and Output** open along the bottom, with the terminals. **Problems**
   (`Ctrl+Shift+M`, or the counts in the status bar) lists what's wrong. First, problems with
-  Ferrite and its extensions: an extension that stopped, settings that were ignored, and the
+  Flareite and its extensions: an extension that stopped, settings that were ignored, and the
   warnings and errors notifications showed (notifications disappear after a while, so this is
   where to find them again). Then the errors, warnings, and information in files, by file:
   those in open files, from language servers and extensions, and those a language server
   reports for files that aren't open (rust-analyzer checks the whole folder, for example).
-  Choose one to go to it. Groups collapse, and the arrow keys move between rows. **Output** (`Ctrl+Shift+U`) shows recent log messages from Ferrite, from each extension,
+  Choose one to go to it. Groups collapse, and the arrow keys move between rows. **Output** (`Ctrl+Shift+U`) shows recent log messages from Flareite, from each extension,
   and from each language server (including what the server prints), with **Open Log File** for
   the full log. Each extension's page and its gear menu in the Extensions view have **Show
   Log**.
@@ -391,7 +391,7 @@ the workspace folder; pressed in the terminal, it returns to the editor. **Termi
 Terminal** (`` Ctrl+Shift+` ``) or the **+** button beside a terminal's tabs opens another. Like
 any tab, a terminal can be docked anywhere.
 
-- **Shells.** Ferrite finds the shells installed on your computer:
+- **Shells.** Flareite finds the shells installed on your computer:
   - **Windows:** PowerShell 7, Windows PowerShell, Command Prompt, Git Bash, Cygwin, MSYS2, and
     each WSL distribution, such as "Ubuntu (WSL)".
   - **macOS and Linux:** the shells listed in `/etc/shells`, such as bash, zsh, and fish.
@@ -407,10 +407,10 @@ any tab, a terminal can be docked anywhere.
 - **Clipboard.** On Windows, `Ctrl+C` copies when text is selected and `Ctrl+V` pastes; on Linux
   use `Ctrl+Shift+C` and `Ctrl+Shift+V`; on macOS, `Cmd+C` and `Cmd+V`.
 - **Lifetime.** `exit` closes the tab. A shell that fails leaves its tab open until you press a
-  key. Terminals keep running when hidden or when the window reloads, and end when Ferrite
+  key. Terminals keep running when hidden or when the window reloads, and end when Flareite
   quits.
-- **On Windows**, Ferrite uses the console host from Windows Terminal, which it installs beside
-  `ferrite.exe`, rather than the one built into Windows, which loses or repeats lines when a
+- **On Windows**, Flareite uses the console host from Windows Terminal, which it installs beside
+  `flareite.exe`, rather than the one built into Windows, which loses or repeats lines when a
   terminal is resized. The first Windows build downloads it (see
   [ADR 0011](docs/adr/0011-integrated-terminal.md#resizing-on-windows-2026-10-30)).
 - **Colors.** The ANSI colors are theme tokens (`terminal-ansi-red`, and so on), so themes and
@@ -460,11 +460,11 @@ enabled = false                          # hide one that was found
 max_line_length = 120                    # settings an extension declares
 ```
 
-| Platform | Settings                                            | Session state                                       |
-| -------- | --------------------------------------------------- | --------------------------------------------------- |
-| Windows  | `%APPDATA%\dev.ferrite.editor\settings.toml`        | `%LOCALAPPDATA%\dev.ferrite.editor\state.json`      |
-| macOS    | `~/Library/Application Support/dev.ferrite.editor/` | `~/Library/Application Support/dev.ferrite.editor/` |
-| Linux    | `~/.config/dev.ferrite.editor/`                     | `~/.local/share/dev.ferrite.editor/`                |
+| Platform | Settings                                             | Session state                                        |
+| -------- | ---------------------------------------------------- | ---------------------------------------------------- |
+| Windows  | `%APPDATA%\dev.flareite.editor\settings.toml`        | `%LOCALAPPDATA%\dev.flareite.editor\state.json`      |
+| macOS    | `~/Library/Application Support/dev.flareite.editor/` | `~/Library/Application Support/dev.flareite.editor/` |
+| Linux    | `~/.config/dev.flareite.editor/`                     | `~/.local/share/dev.flareite.editor/`                |
 
 ## Commands
 
@@ -472,7 +472,7 @@ max_line_length = 120                    # settings an extension declares
 | ------------------------------------------------------- | --------------------------------------------------------------- |
 | `pnpm tauri dev`                                        | Run the desktop app in development mode                         |
 | `pnpm tauri build`                                      | Build a release binary and platform installers                  |
-| `pnpm tauri build --no-bundle`                          | Build the release binary only (`target/release/ferrite[.exe]`)  |
+| `pnpm tauri build --no-bundle`                          | Build the release binary only (`target/release/flareite[.exe]`) |
 | `pnpm dev`                                              | Run only the frontend in a browser (no backend; IPC is stubbed) |
 | `pnpm test`                                             | Run frontend tests (Vitest + Testing Library)                   |
 | `pnpm typecheck`                                        | Type-check the frontend                                         |
@@ -493,27 +493,27 @@ max_line_length = 120                    # settings an extension declares
 The backend logs through [`tracing`](https://docs.rs/tracing) to stderr and to a daily rolling
 file (seven files retained) in the platform log directory:
 
-| Platform | Log directory                            |
-| -------- | ---------------------------------------- |
-| Windows  | `%LOCALAPPDATA%\dev.ferrite.editor\logs` |
-| macOS    | `~/Library/Logs/dev.ferrite.editor`      |
-| Linux    | `~/.local/share/dev.ferrite.editor/logs` |
+| Platform | Log directory                             |
+| -------- | ----------------------------------------- |
+| Windows  | `%LOCALAPPDATA%\dev.flareite.editor\logs` |
+| macOS    | `~/Library/Logs/dev.flareite.editor`      |
+| Linux    | `~/.local/share/dev.flareite.editor/logs` |
 
-Set `FERRITE_LOG` to change the filter, using
+Set `FLAREITE_LOG` to change the filter, using
 [`EnvFilter` syntax](https://docs.rs/tracing-subscriber/latest/tracing_subscriber/filter/struct.EnvFilter.html).
 The default is `info`. Frontend messages are logged under the `frontend` target:
 
 ```sh
-FERRITE_LOG=debug,frontend=trace pnpm tauri dev
+FLAREITE_LOG=debug,frontend=trace pnpm tauri dev
 ```
 
-**View: Output** (`Ctrl+Shift+U`) shows recent messages without opening the file: Ferrite's,
+**View: Output** (`Ctrl+Shift+U`) shows recent messages without opening the file: Flareite's,
 each extension's, and each language server's, in separate logs. Those keep every level from
 extensions and servers, including their debug messages and a server's stderr, whatever the
 filter.
 
 Startup timing is logged as `backend initialized` and `frontend ready`, each with `elapsed_ms`
-measured from the start of `ferrite_app::run`.
+measured from the start of `flareite_app::run`.
 
 ## Repository layout
 
@@ -524,18 +524,18 @@ benches/              Criterion benchmarks and fixtures
 scripts/              End-to-end benchmark harness and performance regression checks
 .github/workflows/    CI: formatting, lints, and tests on Windows, macOS, and Linux
 crates/
-  ferrite-extension-api/   Extension API: WIT interface and Rust bindings for extensions
-  ferrite-extension-host/  Extension loading, permissions, sandbox, limits, host functions
-  ferrite-tasks/      Background scheduler and timing metrics
-  ferrite-terminal/   Shells in pseudoterminals, output streaming, flow control
-  ferrite-syntax/     Tree-sitter grammars, incremental parsing, highlighting
-  ferrite-lsp/        Language server client: processes, JSON-RPC, positions, document sync
-  ferrite-process/    Starting programs, and stopping them with everything they started
-  ferrite-diff/       Line and character diffs for diff tabs
-  ferrite-text/       Rope-backed text buffer, change sets, positions, Unicode boundaries
-  ferrite-workspace/  Files, explorer listings, Go to File index, find in files, watching
-  ferrite-core/       Documents, selections, editing operations, undo, dirty state
-src-tauri/            ferrite-app crate: Tauri shell, lifecycle, IPC commands, dialogs, logging
+  flareite-extension-api/   Extension API: WIT interface and Rust bindings for extensions
+  flareite-extension-host/  Extension loading, permissions, sandbox, limits, host functions
+  flareite-tasks/      Background scheduler and timing metrics
+  flareite-terminal/   Shells in pseudoterminals, output streaming, flow control
+  flareite-syntax/     Tree-sitter grammars, incremental parsing, highlighting
+  flareite-lsp/        Language server client: processes, JSON-RPC, positions, document sync
+  flareite-process/    Starting programs, and stopping them with everything they started
+  flareite-diff/       Line and character diffs for diff tabs
+  flareite-text/       Rope-backed text buffer, change sets, positions, Unicode boundaries
+  flareite-workspace/  Files, explorer listings, Go to File index, find in files, watching
+  flareite-core/       Documents, selections, editing operations, undo, dirty state
+src-tauri/            flareite-app crate: Tauri shell, lifecycle, IPC commands, dialogs, logging
 src/                  React + TypeScript workbench
   app/                Root component, workbench layout, view registry
   commands/           Command registry, keybindings, fuzzy matching, built-in commands

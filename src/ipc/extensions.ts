@@ -142,7 +142,7 @@ export interface PreviewContribution {
 
 /** A button beside a viewer's or preview's tabs. */
 export interface TabAction {
-  /** What the page's `ferrite.onAction` gets. */
+  /** What the page's `flareite.onAction` gets. */
   id: string
   title: string
   icon: { kind: 'named'; name: string } | { kind: 'image'; url: string }

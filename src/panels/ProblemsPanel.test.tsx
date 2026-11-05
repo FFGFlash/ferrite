@@ -71,7 +71,7 @@ describe('ProblemsPanel', () => {
     settingsProblem.set(null)
     fileProblemsStore.set({ files: [], leftOut: 0 })
     collapsedGroups.set(new Set())
-    outputChannel.set('ferrite')
+    outputChannel.set('flareite')
     workspaceStore.update(state => ({
       ...state,
       info: { root: 'C:\\work', name: 'work', trust: 'trusted' },
@@ -98,14 +98,14 @@ describe('ProblemsPanel', () => {
     expect(groups.map(item => item.querySelector('.problems__name')?.textContent)).toEqual([
       'Settings',
       'Tidy',
-      'Ferrite',
+      'Flareite',
     ])
     expect(
       within(group('Tidy'))
         .getAllByRole('img')
         .map(icon => icon.getAttribute('aria-label')),
     ).toEqual(['Error', 'Warning', 'Error'])
-    expect(within(group('Ferrite')).getByText('×2')).toBeTruthy()
+    expect(within(group('Flareite')).getByText('×2')).toBeTruthy()
     expect(await axeViolations(container)).toEqual([])
 
     await user.click(within(group('Tidy')).getByRole('button', { name: 'Restart' }))
@@ -118,8 +118,8 @@ describe('ProblemsPanel', () => {
 
     // Reported problems can be cleared; current ones stay until fixed.
     expect(within(group('Tidy')).getAllByRole('button', { name: /^Clear:/ })).toHaveLength(1)
-    await user.click(within(group('Ferrite')).getByRole('button', { name: /^Clear:/ }))
-    expect(screen.queryByRole('listitem', { name: 'Ferrite' })).toBeNull()
+    await user.click(within(group('Flareite')).getByRole('button', { name: /^Clear:/ }))
+    expect(screen.queryByRole('listitem', { name: 'Flareite' })).toBeNull()
   })
 
   it('lists problems in files, by file, and shows one in the editor', async () => {
@@ -128,9 +128,9 @@ describe('ProblemsPanel', () => {
     fileProblemsStore.set({ files: [libRs, mainRs], leftOut: 3 })
     const { container } = render(<ProblemsPanel />)
 
-    // After Ferrite's own, with the folder inside the open folder.
+    // After Flareite's own, with the folder inside the open folder.
     const names = [...container.querySelectorAll('.problems__name')].map(n => n.textContent)
-    expect(names).toEqual(['Ferrite', 'lib.rs', 'main.rs'])
+    expect(names).toEqual(['Flareite', 'lib.rs', 'main.rs'])
     expect(within(group('main.rs')).getByText('src')).toBeTruthy()
     const rows = within(group('main.rs')).getAllByRole('button', { name: /mismatched|long/ })
     expect(rows.map(row => row.textContent)).toEqual([

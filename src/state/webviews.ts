@@ -10,7 +10,7 @@
  * - **Broadcasts** (the theme, stored values that changed) go to the pages
  *   loaded now. Pages loaded later get the theme in their HTML, and read
  *   stored values themselves.
- * - **Tab action states** that pages set (`ferrite.setActionState`), for
+ * - **Tab action states** that pages set (`flareite.setActionState`), for
  *   the buttons beside their tabs.
  */
 import { setWebviewTheme } from '../ipc/extensions'
@@ -141,7 +141,7 @@ export function setActionState(id: string, action: string, state: unknown): void
   }))
 }
 
-/** The theme as pages get it: `--ferrite-<name>` variables. */
+/** The theme as pages get it: `--flareite-<name>` variables. */
 export interface WebviewTheme {
   kind: 'dark' | 'light'
   variables: Record<string, string>

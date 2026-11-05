@@ -13,8 +13,8 @@ const { registerCommands } = await import('../commands/registry')
 const webviews = await import('../state/webviews')
 const { WebviewFrame } = await import('./WebviewFrame')
 
-const ID = 'ferrite.images.svg//w/cat.svg'
-const URL = 'http://ferrite-webview.localhost/abc/media/viewer.html'
+const ID = 'flareite.images.svg//w/cat.svg'
+const URL = 'http://flareite-webview.localhost/abc/media/viewer.html'
 
 /** A message from `source`, as the page's bridge sends them. */
 const fromPage = (source: Window | null, data: unknown) =>
@@ -39,21 +39,24 @@ describe('WebviewFrame', () => {
     const page = frame.contentWindow!
     const posted = vi.spyOn(page, 'postMessage')
 
-    fromPage(page, { ferrite: 'webview', type: 'ready' })
+    fromPage(page, { flareite: 'webview', type: 'ready' })
     expect(posted).toHaveBeenCalledWith(
-      { ferrite: 'webview', type: 'message', data: '{"size":"64 × 64"}' },
+      { flareite: 'webview', type: 'message', data: '{"size":"64 × 64"}' },
       '*',
     )
     act(() => webviews.webviewMessage(ID, '2'))
-    expect(posted).toHaveBeenLastCalledWith({ ferrite: 'webview', type: 'message', data: '2' }, '*')
+    expect(posted).toHaveBeenLastCalledWith(
+      { flareite: 'webview', type: 'message', data: '2' },
+      '*',
+    )
 
-    fromPage(page, { ferrite: 'webview', type: 'message', data: '{"zoom":2}' })
+    fromPage(page, { flareite: 'webview', type: 'message', data: '{"zoom":2}' })
     expect(ipc.sendWebviewMessage).toHaveBeenCalledWith(ID, '{"zoom":2}')
 
     // Other windows, and other shapes, are ignored.
-    fromPage(window, { ferrite: 'webview', type: 'message', data: '"spoofed"' })
+    fromPage(window, { flareite: 'webview', type: 'message', data: '"spoofed"' })
     fromPage(page, { type: 'message', data: '"unmarked"' })
-    fromPage(page, { ferrite: 'webview', type: 'message', data: { not: 'text' } })
+    fromPage(page, { flareite: 'webview', type: 'message', data: { not: 'text' } })
     expect(ipc.sendWebviewMessage).toHaveBeenCalledTimes(1)
   })
 
@@ -61,22 +64,22 @@ describe('WebviewFrame', () => {
     const { rerender } = render(<WebviewFrame id={ID} title="cat.svg" fileVersion={0} />)
     const frame = await screen.findByTitle<HTMLIFrameElement>('cat.svg')
     const posted = vi.spyOn(frame.contentWindow!, 'postMessage')
-    fromPage(frame.contentWindow, { ferrite: 'webview', type: 'ready' })
+    fromPage(frame.contentWindow, { flareite: 'webview', type: 'ready' })
     rerender(<WebviewFrame id={ID} title="cat.svg" fileVersion={1} />)
     expect(posted).toHaveBeenCalledWith(
-      { ferrite: 'webview', type: 'fileChanged', data: undefined },
+      { flareite: 'webview', type: 'fileChanged', data: undefined },
       '*',
     )
 
     vi.mocked(ipc.getWebview).mockResolvedValue({
-      url: 'http://ferrite-webview.localhost/abc/',
+      url: 'http://flareite-webview.localhost/abc/',
       version: 1,
     })
     act(() => webviews.webviewChanged(ID))
     await waitFor(() =>
       expect(screen.getByTitle('cat.svg')).toHaveAttribute(
         'src',
-        'http://ferrite-webview.localhost/abc/?v=1',
+        'http://flareite-webview.localhost/abc/?v=1',
       ),
     )
   })
@@ -87,37 +90,37 @@ describe('WebviewFrame', () => {
     const page = frame.contentWindow!
     const posted = vi.spyOn(page, 'postMessage')
 
-    fromPage(page, { ferrite: 'webview', type: 'setState', data: '{"zoom":2}' })
+    fromPage(page, { flareite: 'webview', type: 'setState', data: '{"zoom":2}' })
     expect(ipc.setWebviewState).toHaveBeenCalledWith(ID, '{"zoom":2}')
 
     vi.mocked(ipc.webviewStorage).mockResolvedValueOnce('"white"')
     fromPage(page, {
-      ferrite: 'webview',
+      flareite: 'webview',
       type: 'storage',
       data: { id: 7, scope: 'global', op: 'get', key: 'background' },
     })
     expect(ipc.webviewStorage).toHaveBeenCalledWith(ID, 'global', 'get', 'background', null)
     await waitFor(() =>
       expect(posted).toHaveBeenCalledWith(
-        { ferrite: 'webview', type: 'storageResult', data: { id: 7, value: '"white"' } },
+        { flareite: 'webview', type: 'storageResult', data: { id: 7, value: '"white"' } },
         '*',
       ),
     )
 
     vi.mocked(ipc.webviewStorage).mockRejectedValueOnce(new Error('no folder is open'))
     fromPage(page, {
-      ferrite: 'webview',
+      flareite: 'webview',
       type: 'storage',
       data: { id: 8, scope: 'workspace', op: 'set', key: 'zoom', value: '2' },
     })
     await waitFor(() =>
       expect(posted).toHaveBeenCalledWith(
-        { ferrite: 'webview', type: 'storageResult', data: { id: 8, error: 'no folder is open' } },
+        { flareite: 'webview', type: 'storageResult', data: { id: 8, error: 'no folder is open' } },
         '*',
       ),
     )
     // Malformed requests are ignored.
-    fromPage(page, { ferrite: 'webview', type: 'storage', data: { id: 'x', scope: 1 } })
+    fromPage(page, { flareite: 'webview', type: 'storage', data: { id: 'x', scope: 1 } })
     expect(ipc.webviewStorage).toHaveBeenCalledTimes(2)
   })
 
@@ -129,10 +132,10 @@ describe('WebviewFrame', () => {
     const frame = await screen.findByTitle<HTMLIFrameElement>('cat.svg')
     const page = frame.contentWindow!
     const posted = vi.spyOn(page, 'postMessage')
-    fromPage(page, { ferrite: 'webview', type: 'ready' })
+    fromPage(page, { flareite: 'webview', type: 'ready' })
     expect(posted).toHaveBeenCalledWith(
       {
-        ferrite: 'webview',
+        flareite: 'webview',
         type: 'keybindings',
         data: expect.arrayContaining([
           { key: 'p', ctrl: true, meta: false, alt: false, shift: false },
@@ -146,18 +149,18 @@ describe('WebviewFrame', () => {
     window.addEventListener('keydown', pressed, true)
     const press = { key: 'p', code: 'KeyP', ctrlKey: true, shiftKey: false, altKey: false }
     fromPage(page, {
-      ferrite: 'webview',
+      flareite: 'webview',
       type: 'keydown',
       data: { ...press, metaKey: false, repeat: false },
     })
-    fromPage(page, { ferrite: 'webview', type: 'keydown', data: { ...press, metaKey: 'no' } })
+    fromPage(page, { flareite: 'webview', type: 'keydown', data: { ...press, metaKey: 'no' } })
     expect(pressed).toHaveBeenCalledTimes(1)
     const event = pressed.mock.calls[0]![0] as KeyboardEvent
     expect([event.key, event.ctrlKey, event.target]).toEqual(['p', true, frame])
     window.removeEventListener('keydown', pressed, true)
 
     fromPage(page, {
-      ferrite: 'webview',
+      flareite: 'webview',
       type: 'actionState',
       data: { action: 'fit', state: { pressed: true } },
     })

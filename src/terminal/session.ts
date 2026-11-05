@@ -22,7 +22,7 @@ import { reportError } from '../state/notifications'
 /**
  * Output drawn before telling the backend, which pauses a shell that gets
  * too far ahead. At most the backend's low water mark (100,000), or it could
- * stay paused (see `ferrite_terminal::flow`).
+ * stay paused (see `flareite_terminal::flow`).
  */
 export const ACKNOWLEDGE_EVERY = 50_000
 

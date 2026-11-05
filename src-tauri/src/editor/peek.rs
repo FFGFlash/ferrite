@@ -6,10 +6,10 @@
 use std::path::Path;
 use std::time::Duration;
 
-use ferrite_core::MAX_DISPLAY_LINE_BYTES;
-use ferrite_syntax::{SyntaxTree, deadline, parse};
-use ferrite_text::TextBuffer;
-use ferrite_workspace::load_text_file;
+use flareite_core::MAX_DISPLAY_LINE_BYTES;
+use flareite_syntax::{SyntaxTree, deadline, parse};
+use flareite_text::TextBuffer;
+use flareite_workspace::load_text_file;
 use serde::Serialize;
 use tauri::{AppHandle, Manager};
 
@@ -98,7 +98,7 @@ pub fn editor_document_lines(
 ) -> Result<PeekLinesDto, CommandError> {
   let state = app.state::<EditorState>();
   let editor = state.lock();
-  let document = editor.document(ferrite_core::DocumentId::from_raw(id))?;
+  let document = editor.document(flareite_core::DocumentId::from_raw(id))?;
   let tree = state.syntax.tree(&app, document);
   Ok(lines_of(document.buffer(), tree.as_ref(), start, end))
 }

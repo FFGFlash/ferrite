@@ -8,7 +8,7 @@
 
 use std::sync::{Mutex, PoisonError};
 
-use ferrite_extension_host::MessageLevel;
+use flareite_extension_host::MessageLevel;
 use serde::Serialize;
 use tauri::ipc::Channel;
 use tauri::{AppHandle, Manager, State};
@@ -26,8 +26,8 @@ pub struct MergeSideDto {
   pub description: Option<String>,
 }
 
-impl From<ferrite_extension_host::MergeSide> for MergeSideDto {
-  fn from(side: ferrite_extension_host::MergeSide) -> Self {
+impl From<flareite_extension_host::MergeSide> for MergeSideDto {
+  fn from(side: flareite_extension_host::MergeSide) -> Self {
     Self {
       uri: side.uri,
       title: side.title,
@@ -161,7 +161,7 @@ pub enum AppEvent {
   ExtensionFileMarksChanged,
   /// An extension asks the user something, replacing any prompt showing.
   ExtensionPrompt {
-    prompt: ferrite_extension_host::Prompt,
+    prompt: flareite_extension_host::Prompt,
   },
   /// An extension's prompt was withdrawn (the extension stopped).
   ExtensionPromptClosed { id: u64 },

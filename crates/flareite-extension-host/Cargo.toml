@@ -1,0 +1,31 @@
+[package]
+name = "flareite-extension-host"
+description = "Loads and runs WASM extensions: manifests, permissions, lifecycle, limits, and the host side of the extension API."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+base64 = { workspace = true }
+flareite-core = { workspace = true }
+flareite-process = { workspace = true }
+flareite-text = { workspace = true }
+flareite-workspace = { workspace = true }
+getrandom = { workspace = true }
+pulldown-cmark = { workspace = true }
+semver = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+toml = { workspace = true }
+tracing = { workspace = true }
+wasmtime = { workspace = true }
+wit-component = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }
+wat = { workspace = true }
+
+[lints]
+workspace = true

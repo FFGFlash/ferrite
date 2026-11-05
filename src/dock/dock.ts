@@ -1339,7 +1339,7 @@ export async function openDroppedFiles(
   const [folder, ...others] = folders
   if (folder) {
     if (others.length > 0) {
-      notify('info', `Ferrite opens one folder at a time, so it opened ${baseName(folder)}.`)
+      notify('info', `Flareite opens one folder at a time, so it opened ${baseName(folder)}.`)
     }
     await openFolder(folder)
   }

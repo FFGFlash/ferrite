@@ -4,7 +4,7 @@
  * The page runs in a frame sandboxed with `allow-scripts` only: it has an
  * origin of its own, so it can't reach this document, the backend's IPC,
  * or storage, and it can't navigate, open windows, or submit forms. The
- * backend serves it from the `ferrite-webview:` protocol with a content
+ * backend serves it from the `flareite-webview:` protocol with a content
  * security policy that keeps it to its own files. The only way out is
  * `postMessage`, and only messages from this frame's window, in the
  * bridge's shape, are acted on.
@@ -35,15 +35,15 @@ import './WebviewFrame.css'
 
 /** A message between the bridge (`webview.js`) and the workbench. */
 interface BridgeMessage {
-  ferrite: 'webview'
+  flareite: 'webview'
   type: string
   data?: unknown
 }
 
 const isBridgeMessage = (data: unknown): data is BridgeMessage =>
-  typeof data === 'object' && data !== null && (data as BridgeMessage).ferrite === 'webview'
+  typeof data === 'object' && data !== null && (data as BridgeMessage).flareite === 'webview'
 
-/** A page's storage request (`ferrite.storage`). */
+/** A page's storage request (`flareite.storage`). */
 interface StorageRequest {
   id: number
   scope: string
@@ -122,7 +122,7 @@ export function WebviewFrame({ id, title, fileVersion }: WebviewFrameProps) {
 
   const post = (type: string, data?: unknown) =>
     // The page's origin is opaque, so it can't be named.
-    frame.current?.contentWindow?.postMessage({ ferrite: 'webview', type, data }, '*')
+    frame.current?.contentWindow?.postMessage({ flareite: 'webview', type, data }, '*')
 
   // Passes the page's messages on, and the extension's to the page once
   // it's ready. A new page (a new version) starts over.

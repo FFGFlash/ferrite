@@ -101,7 +101,7 @@ function RestrictedModeItem() {
   )
 }
 
-/** Errors and warnings in files, Ferrite, and extensions; opens the Problems view. */
+/** Errors and warnings in files, Flareite, and extensions; opens the Problems view. */
 function ProblemsItem() {
   const { errors, warnings } = useProblemCounts()
   const label = `Problems: ${errors} ${errors === 1 ? 'error' : 'errors'}, ${warnings} ${warnings === 1 ? 'warning' : 'warnings'}`

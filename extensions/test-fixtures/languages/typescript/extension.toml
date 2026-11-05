@@ -1,14 +1,14 @@
-# A copy of the languages of the official ferrite.typescript extension, for the
+# A copy of the languages of the official flareite.typescript extension, for the
 # editor's tests, which need real grammars. Not kept in step with it.
 id = "test.typescript"
 name = "TypeScript"
 version = "0.1.0"
 description = "TypeScript and TSX highlighting, and typescript-language-server."
-author = "Ferrite"
+author = "Flareite"
 api_version = "1"
 
 [engines]
-ferrite = ">=0.1.0"
+flareite = ">=0.1.0"
 
 [permissions]
 language_servers = true

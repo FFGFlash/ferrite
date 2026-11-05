@@ -1,15 +1,15 @@
 [package]
-name = "ferrite-benches"
-description = "Criterion benchmarks for Ferrite's text, core, file, and workspace operations."
+name = "flareite-benches"
+description = "Criterion benchmarks for Flareite's text, core, file, and workspace operations."
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 publish = false
 
 [dependencies]
-ferrite-core = { workspace = true }
-ferrite-text = { workspace = true }
-ferrite-workspace = { workspace = true }
+flareite-core = { workspace = true }
+flareite-text = { workspace = true }
+flareite-workspace = { workspace = true }
 tempfile = { workspace = true }
 
 [dev-dependencies]

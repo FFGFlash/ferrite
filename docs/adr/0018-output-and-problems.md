@@ -5,7 +5,7 @@
 
 ## Context
 
-When something goes wrong with Ferrite or an extension, the user has two places to look. One is a
+When something goes wrong with Flareite or an extension, the user has two places to look. One is a
 notification, and warnings and errors stayed on screen until dismissed, so they piled up in the
 corner. The other is the log file, which few users know about and which mixes every component
 together. An extension's `log()` output and a language server's stderr only reach that file, and
@@ -18,20 +18,20 @@ anywhere: an invalid `settings.toml` at startup was only logged.
 
 A `tracing` layer (`logging.rs`) keeps recent records in memory, in channels:
 
-- **`ferrite`:** Ferrite's own records.
+- **`flareite`:** Flareite's own records.
 - **`extension:<id>`:** records with an `extension` field (the extension's `log()` calls, and the
   host's records about it).
 - **`server:<name>`:** records with a `server` field (a language server's starts, exits, and
   stderr).
 
-Each channel keeps its newest 2,000 records, so a chatty extension can't push out Ferrite's. There
+Each channel keeps its newest 2,000 records, so a chatty extension can't push out Flareite's. There
 are at most 256 channels, and messages are cut at 8 KiB in memory. The full text stays in the log
 file.
 
-- **Levels.** The file and stderr keep their `FERRITE_LOG` filter (`info` by default). The memory
-  layer has its own per-layer filter: `info` and above for Ferrite, and every level for extensions
+- **Levels.** The file and stderr keep their `FLAREITE_LOG` filter (`info` by default). The memory
+  layer has its own per-layer filter: `info` and above for Flareite, and every level for extensions
   and servers. The filter looks only at a call site's metadata (its level and field names), so it
-  is decided once per call site. Ferrite's own debug events stay disabled and cost nothing. This
+  is decided once per call site. Flareite's own debug events stay disabled and cost nothing. This
   is how an extension's debug output and a server's stderr (logged at `debug`) appear in Output
   without a restart.
 - **Polling, not events.** `logs_read(channel, after)` returns the channel list and the records
@@ -44,7 +44,7 @@ file.
 
 ### Problems: what's wrong now, and what was reported
 
-The Problems view lists two kinds of problems, grouped by source (Settings, Ferrite, or an
+The Problems view lists two kinds of problems, grouped by source (Settings, Flareite, or an
 extension's name):
 
 - **Current problems** come from state. They are an extension that stopped or couldn't be
@@ -80,13 +80,13 @@ activity bar unless docked in the side bar, and show and hide with the terminals
 
 - Up to 2,000 records per channel are held in memory: about a few MB with many active channels.
 - Language servers' stderr lines are now formatted and stored, which costs a little for chatty
-  servers. They were formatted before only when `FERRITE_LOG` enabled `debug`.
+  servers. They were formatted before only when `FLAREITE_LOG` enabled `debug`.
 - A warning is visible for 20 s unless the user looks at Problems or the status bar counts. That's
   the trade for not piling up popups.
 
 ## File problems (2026-11-01)
 
-Problems now also lists problems in files, by file, after Ferrite's and extensions' own.
+Problems now also lists problems in files, by file, after Flareite's and extensions' own.
 
 - **What's listed.** Every open document's diagnostics, from language servers and extensions,
   and the diagnostics language servers publish for files that aren't open. Before this,
@@ -100,7 +100,7 @@ Problems now also lists problems in files, by file, after Ferrite's and extensio
   language servers' lock, then the extension host's, in the usual order). The frontend fetches
   it at startup, when a document opens or closes, and 250 ms after `diagnosticsChanged` or the
   new `problemsChanged`, so a burst of publishes while typing fetches once.
-- **The status bar** always shows the total errors and warnings (files, Ferrite, extensions) and
+- **The status bar** always shows the total errors and warnings (files, Flareite, extensions) and
   opens Problems. It replaces the active document's counts, which are gone from the language
   status (and `ExtensionHost::problem_counts` with them).
 - **Going to a problem** reveals it in its document, or opens its file at the position. Groups

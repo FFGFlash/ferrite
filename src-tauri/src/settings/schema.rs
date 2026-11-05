@@ -6,7 +6,7 @@
 //! settings that are tables of entries (theme colors, language servers,
 //! terminal profiles, keybindings) are listed but edited in the file.
 
-use ferrite_extension_host::{ConfigType, ConfigValue, ExtensionConfiguration};
+use flareite_extension_host::{ConfigType, ConfigValue, ExtensionConfiguration};
 use serde::Serialize;
 use serde_json::{Value as Json, json};
 
@@ -216,7 +216,7 @@ const SPECS: &[Spec] = &[
     path: &["extensions", "programs"],
     section: "Extensions",
     title: "Program Paths",
-    description: "Where to find a program an extension runs, by \"<extension id>.<program>\" (such as \"ferrite.git.git\"), when it isn't on the PATH.",
+    description: "Where to find a program an extension runs, by \"<extension id>.<program>\" (such as \"flareite.git.git\"), when it isn't on the PATH.",
     kind: Kind::Table,
     value: |s| json!(s.extensions.programs.keys().collect::<Vec<_>>()),
   },
@@ -564,7 +564,7 @@ pub fn to_edit(value: &toml::Value) -> toml_edit::Value {
 
 #[cfg(test)]
 mod tests {
-  use ferrite_extension_host::{ConfigProperty, ConfiguredSetting};
+  use flareite_extension_host::{ConfigProperty, ConfiguredSetting};
 
   use super::*;
 

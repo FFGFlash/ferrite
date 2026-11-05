@@ -22,9 +22,9 @@ use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use std::time::Instant;
 
-use ferrite_core::{DocumentId, Editor, ViewId};
-use ferrite_tasks::Priority;
-use ferrite_workspace::{Abandoned, FileError, load_text_file};
+use flareite_core::{DocumentId, Editor, ViewId};
+use flareite_tasks::Priority;
+use flareite_workspace::{Abandoned, FileError, load_text_file};
 use tauri::{AppHandle, Manager, WebviewWindow};
 
 use crate::events::{self, AppEvent, NoticeLevel};

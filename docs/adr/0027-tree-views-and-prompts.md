@@ -49,7 +49,7 @@ each has a header with its title, badge, and buttons, collapses, and scrolls on 
 container's badge adds up its sections'. Showing a section shows its container.
 
 The user resizes open sections by dragging the boundary between two of them (or with the
-keyboard on it, as other sashes in Ferrite). Which sections are collapsed, and the open ones'
+keyboard on it, as other sashes in Flareite). Which sections are collapsed, and the open ones'
 sizes, are saved with the layout (`state.json`) per container, so they're as the user left
 them in the next session. Sizes are kept as proportions rather than pixels: the sections keep
 their split when the side bar or window changes height. A section the layout has no size for

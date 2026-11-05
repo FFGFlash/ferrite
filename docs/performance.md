@@ -1,6 +1,6 @@
 # Performance
 
-This document describes how Ferrite's performance is measured, the baseline
+This document describes how Flareite's performance is measured, the baseline
 measured at Milestone 4, and how future optimizations should be chosen. The
 reasoning behind the architecture is in
 [ADR 0004](adr/0004-performance-foundations.md).
@@ -13,8 +13,8 @@ compare against, not claims about other machines or other editors.
 | What                                           | Command                                                                                           |
 | ---------------------------------------------- | ------------------------------------------------------------------------------------------------- |
 | Microbenchmarks (text, core, files, workspace) | `pnpm bench` (Criterion; reports in `target/criterion/`)                                          |
-| One suite or benchmark                         | `cargo bench -p ferrite-benches --bench workspace -- search`                                      |
-| Compare with a saved baseline                  | `cargo bench -p ferrite-benches -- --save-baseline m4`, later `-- --baseline m4`                  |
+| One suite or benchmark                         | `cargo bench -p flareite-benches --bench workspace -- search`                                     |
+| Compare with a saved baseline                  | `cargo bench -p flareite-benches -- --save-baseline m4`, later `-- --baseline m4`                 |
 | End-to-end: startup and idle memory            | `pnpm tauri build --no-bundle`, then `pnpm bench:app startup`                                     |
 | End-to-end: typing latency                     | `pnpm bench:app typing`                                                                           |
 | End-to-end: typing in a source file            | `pnpm bench:app typing --file path/to/file.rs --language extensions/test-fixtures/languages/rust` |
@@ -94,8 +94,8 @@ Since Milestone 8, three layers guard against regressions:
 3. **Microbenchmarks** against a saved Criterion baseline:
 
    ```sh
-   cargo bench -p ferrite-benches -- --save-baseline before
-   cargo bench -p ferrite-benches -- --baseline before
+   cargo bench -p flareite-benches -- --save-baseline before
+   cargo bench -p flareite-benches -- --baseline before
    node scripts/perf-check.mjs micro --threshold 10
    ```
 
@@ -115,13 +115,13 @@ WebView2 155.
 | Launch → frontend ready, first run            | 403 ms                          |
 | Launch → frontend ready, 5 later runs         | 401 ms median (363–472 ms)      |
 | Idle memory, whole process tree (7 processes) | 389 MB resident, 193 MB private |
-| Idle memory, Ferrite backend process          | 34 MB resident                  |
+| Idle memory, Flareite backend process         | 34 MB resident                  |
 | Backend with a 15.5 MB document open          | 67 MB resident                  |
 | Backend with a 100 MB document open           | 149 MB resident                 |
 
 Most idle memory belongs to WebView2 (browser, GPU, renderer, and utility
 processes). "Resident" double-counts pages shared between those processes;
-"private" is closer to what Ferrite costs the system. Memory with extensions
+"private" is closer to what Flareite costs the system. Memory with extensions
 is measured once extensions exist (M6).
 
 ### Editing and rendering (end to end)
@@ -194,7 +194,7 @@ The comparison below therefore runs both builds back to back.
 | Keystroke → painted, 200,000-line document | 14.5 ms p50          | 14.5 ms p50      |
 | Startup, later runs (median of 3)          | 982 ms (381–1,018)   | 349 ms           |
 | Idle memory, whole process tree            | 366 MB resident      | 365 MB resident  |
-| Binary size (`ferrite.exe`)                | 15.2 MB              | 21.7 MB          |
+| Binary size (`flareite.exe`)               | 15.2 MB              | 21.7 MB          |
 
 Grammars and highlight queries are compiled on first use, so they cost
 nothing at startup; the binary grows by the six bundled grammars. p95 values
@@ -202,7 +202,7 @@ varied between 15 and 32 ms from run to run in both builds, so they are not
 compared.
 
 Typing in the middle of a 676-line Rust file (a copy of
-`crates/ferrite-text/src/buffer.rs` in a small Cargo project):
+`crates/flareite-text/src/buffer.rs` in a small Cargo project):
 
 | Measurement                                                  | p50     | p95     | max     |
 | ------------------------------------------------------------ | ------- | ------- | ------- |
@@ -219,12 +219,12 @@ Typing in the middle of a 676-line Rust file (a copy of
 - With rust-analyzer, the backend work per keystroke is still a few
   milliseconds (sending the change is a queued write). The wider tail
   comes from CPU contention: while rust-analyzer indexes the standard
-  library it uses every core, and frames are delayed even though Ferrite's
+  library it uses every core, and frames are delayed even though Flareite's
   own timings don't change. The benchmark therefore waits until the server
   reports it is idle before measuring (`languageServerSettled` in
   `src/bench/runner.ts`).
 - Language servers dominate memory: with rust-analyzer indexed, the
-  process tree used about 2 GB resident, against about 90 MB for Ferrite's
+  process tree used about 2 GB resident, against about 90 MB for Flareite's
   own process.
 
 ## Milestone 6: WebAssembly extensions
@@ -244,7 +244,7 @@ diagnostics after every change.
 | Startup, later runs (median of 4, two series) | 454 / 465 ms    | 453 / 407 ms        | 468 ms             |
 | Idle memory, whole process tree               | 358–361 MB      | 356–359 MB          | 371 MB             |
 | Idle memory, app process                      | 33 MB           | 31–33 MB            | 44 MB              |
-| Binary size (`ferrite.exe`)                   | 20.7 MB         | 37.3 MB             | —                  |
+| Binary size (`flareite.exe`)                  | 20.7 MB         | 37.3 MB             | —                  |
 | Keystroke → painted, small document           | 13.3 ms p50     | 13.3 ms p50         | 13.3 ms p50        |
 | Keystroke → painted, p95                      | 14.0–14.1 ms    | 13.9–14.1 ms        | 13.8 ms            |
 | Backend `editor_apply` p50 / p95              | 0.115 / 0.35 ms | 0.13 / 0.37–0.40 ms | 0.18 / 0.47 ms     |
@@ -350,7 +350,7 @@ Since [ADR 0014](adr/0014-languages-only-from-extensions.md), every grammar is a
 WebAssembly module run by Tree-sitter's Wasmtime store instead of native code.
 Before removing the native grammars, both were compared on the same text in one
 release build (best of 15 runs, on the 1,370-line
-`crates/ferrite-extension-host/src/host.rs`):
+`crates/flareite-extension-host/src/host.rs`):
 
 | Measurement                             | Native | WebAssembly |
 | --------------------------------------- | ------ | ----------- |

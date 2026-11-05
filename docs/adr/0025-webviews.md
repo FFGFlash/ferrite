@@ -46,13 +46,13 @@ unchanged, and Markdown keeps its typed preview.
 ### The sandbox
 
 - **A frame with `sandbox="allow-scripts"` only.** The page's origin is opaque: it can't reach
-  the workbench's document, Ferrite's IPC, cookies, or storage, and it can't navigate the window,
+  the workbench's document, Flareite's IPC, cookies, or storage, and it can't navigate the window,
   open popups, or submit forms.
-- **A protocol of Ferrite's own**, `ferrite-webview:` (`http://ferrite-webview.localhost` on
+- **A protocol of Flareite's own**, `flareite-webview:` (`http://flareite-webview.localhost` on
   Windows), serves pages at `<origin>/<token>/<path>`. The token is 128 random bits made for one
   open tab; a request names a tab only by its token. Files are the extension's, confined to its
-  folder after following symlinks, plus the viewed file at `__ferrite/file` and Ferrite's own
-  files under `__ferrite/`.
+  folder after following symlinks, plus the viewed file at `__flareite/file` and Flareite's own
+  files under `__flareite/`.
 - **A content security policy on every response**, which a page can tighten but not loosen:
   only its own address (with its token), `data:`, and `blob:`; inline scripts and styles
   allowed; no forms, no base URL, no other frames.
@@ -64,8 +64,8 @@ unchanged, and Markdown keeps its typed preview.
 
 ### The bridge
 
-Ferrite injects a script before the page's own (`ferrite-extension-host/src/webview.js`). It
-gives the page a `ferrite` object: the viewed file's address and changes, messages both ways
+Flareite injects a script before the page's own (`flareite-extension-host/src/webview.js`). It
+gives the page a `flareite` object: the viewed file's address and changes, messages both ways
 (those sent before the page listens wait for it), tab state, storage, the theme, and tab
 actions. Messages the extension sends before the page has loaded wait in the workbench
 (`state/webviews.ts`).
@@ -78,7 +78,7 @@ actions. Messages the extension sends before the page has loaded wait in the wor
   tab is saved with the layout, and forgotten when the tab closes.
 - **Extension storage**: small JSON values in a `global` scope and one per folder (`workspace`),
   at most 1 MiB each, shared by the extension's code (the `storage` interface) and its pages
-  (`ferrite.storage`, `ferrite.workspaceStorage`). Pages hear of changes made elsewhere
+  (`flareite.storage`, `flareite.workspaceStorage`). Pages hear of changes made elsewhere
   (`onStorageChanged`). It needs no permission: it holds only what the extension put there. The
   Extensions view shows how much an extension stores, with **Clear Stored Data**.
 
@@ -89,15 +89,15 @@ its state) when shown. An extension can set `retain_when_hidden = true` to keep 
 instead: the group keeps the frame, hidden, once shown. That costs memory, so it's the
 extension's choice, as in VS Code.
 
-### Looking like Ferrite
+### Looking like Flareite
 
-- **The theme** reaches every page as CSS variables, `--ferrite-<token>` for each color token
+- **The theme** reaches every page as CSS variables, `--flareite-<token>` for each color token
   and a few others (fonts, sizes, radius, color scheme). The workbench sends them to the host,
   which puts them in pages as it serves them (no flash of other colors), and to loaded pages when
   the theme changes.
 - **Defaults** for body text, links, focus rings, selection, and scroll bars come with them, in
   `:where()`, so they have no specificity and any rule of the page's wins.
-- **The kit** (`__ferrite/kit.css`, found from any folder) is opt-in: toolbars, buttons, inputs,
+- **The kit** (`__flareite/kit.css`, found from any folder) is opt-in: toolbars, buttons, inputs,
   labels, and named icons in the text color.
 - **Named icons** are one set for tab actions and the kit, `src/components/actionIcons.json`,
   generated from Lucide by `scripts/action-icons.mjs`.
@@ -112,7 +112,7 @@ preview can have actions with commands; actions without one need a webview.
 
 ### Keyboard
 
-A focused frame gets key presses, not the workbench, so Ferrite's shortcuts would stop working
+A focused frame gets key presses, not the workbench, so Flareite's shortcuts would stop working
 in a page. The workbench sends each page the key combinations bound outside the editor and
 terminal (`webviewKeystrokes`), and the bridge passes on a press that matches one, and the next
 key of a chord, unless the page handled it (`preventDefault` in a listener on an element or the
@@ -130,7 +130,7 @@ Alternatives considered:
 - **A declarative picture viewer element.** Simple for authors, but only for pictures.
 - **HTML set only from code** (VS Code's `webview.html`). Kept as an option (`webview = true`),
   but pages in the extension's folder are easier to write and need no code at all.
-- **Workbench first for shortcuts.** Simpler, but pages couldn't use keys Ferrite binds, such as
+- **Workbench first for shortcuts.** Simpler, but pages couldn't use keys Flareite binds, such as
   Ctrl+= in the Images viewer.
 
 ## Consequences

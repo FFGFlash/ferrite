@@ -14,9 +14,9 @@
 
 use std::ops::Range;
 
-use ferrite_core::{Document, SectionHeader};
-use ferrite_syntax::{Span, SyntaxTree, highlight_lines};
-use ferrite_text::TextBuffer;
+use flareite_core::{Document, SectionHeader};
+use flareite_syntax::{Span, SyntaxTree, highlight_lines};
+use flareite_text::TextBuffer;
 use serde::Serialize;
 
 /// Columns drawn per line.
@@ -184,8 +184,8 @@ fn line_runs(text: &str, spans: &[Span], tab_size: usize) -> Vec<u32> {
 // Line ranges are naturally single-element arrays here.
 #[allow(clippy::single_range_in_vec_init)]
 mod tests {
-  use ferrite_core::{Editor, EditorConfig, EditorOp};
-  use ferrite_syntax::TokenKind;
+  use flareite_core::{Editor, EditorConfig, EditorOp};
+  use flareite_syntax::TokenKind;
 
   use super::*;
 

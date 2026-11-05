@@ -15,7 +15,7 @@ records the strategy. Numbers live in [`performance.md`](../performance.md).
 
 ### One bounded worker pool for all background work
 
-`ferrite-tasks` provides a `Scheduler`: a fixed set of worker threads
+`flareite-tasks` provides a `Scheduler`: a fixed set of worker threads
 (cores − 1, between one and four), three priorities, a bounded queue
 (256), cooperative cancellation, and **keyed replacement**. Submitting a task
 with the same key as a queued or running one cancels the older task. Indexing,
@@ -49,7 +49,7 @@ splices on its cache.
 - Scrolling transfers only newly exposed lines.
 
 The same splice log is what Tree-sitter (M5), LSP synchronization, and
-extension change notifications (M6) need, so it lives in `ferrite-text`.
+extension change notifications (M6) need, so it lives in `flareite-text`.
 
 Both sides check consistency: a client too far behind gets a full refresh, and
 an update the client can't apply makes it drop its cache and ask again. A

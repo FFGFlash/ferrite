@@ -102,7 +102,7 @@ function Dialog({ root, trusted, requestedBy }: DialogProps) {
         build scripts, hooks, and the commands its settings name.{' '}
         {trusted
           ? 'They run, as you trust it.'
-          : 'Until you trust it, Ferrite doesn’t run them here. Editing and everything else work.'}
+          : 'Until you trust it, Flareite doesn’t run them here. Editing and everything else work.'}
       </p>
       {!trusted && <p>Trust only folders you got from people you trust.</p>}
     </ModalDialog>

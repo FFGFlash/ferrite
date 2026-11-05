@@ -1,6 +1,6 @@
 ; Markdown's block structure. Adapted from the queries of
 ; tree-sitter-markdown 0.5.3 (MIT, see
-; ../../grammars/LICENSE-tree-sitter-markdown), with capture names Ferrite
+; ../../grammars/LICENSE-tree-sitter-markdown), with capture names Flareite
 ; colors. Text inside blocks (emphasis, code spans, links) is highlighted by
 ; the markdown_inline language (see injections.scm), painted over this.
 

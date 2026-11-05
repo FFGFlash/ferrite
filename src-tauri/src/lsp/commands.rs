@@ -9,18 +9,18 @@ use std::path::PathBuf;
 use std::str::Chars;
 use std::time::Duration;
 
-use ferrite_core::{DocumentId, MAX_DISPLAY_LINE_BYTES};
-use ferrite_lsp::LspError;
-use ferrite_lsp::convert::{PositionEncoding, to_offset, to_offsets, to_position, uri_to_path};
-use ferrite_lsp::lsp_types::request::{Completion, GotoDefinition, HoverRequest, References};
-use ferrite_lsp::lsp_types::{
+use flareite_core::{DocumentId, MAX_DISPLAY_LINE_BYTES};
+use flareite_lsp::LspError;
+use flareite_lsp::convert::{PositionEncoding, to_offset, to_offsets, to_position, uri_to_path};
+use flareite_lsp::lsp_types::request::{Completion, GotoDefinition, HoverRequest, References};
+use flareite_lsp::lsp_types::{
   CompletionContext, CompletionItemKind, CompletionParams, CompletionResponse, CompletionTextEdit,
   CompletionTriggerKind, GotoDefinitionParams, GotoDefinitionResponse, HoverContents, HoverParams,
   HoverProviderCapability, InsertTextFormat, MarkedString, MarkupKind, OneOf, Range,
   ReferenceContext, ReferenceParams, TextDocumentIdentifier, TextDocumentPositionParams, Uri,
 };
-use ferrite_text::{TextBuffer, map_offset_through};
-use ferrite_workspace::load_text_file;
+use flareite_text::{TextBuffer, map_offset_through};
+use flareite_workspace::load_text_file;
 use serde::Serialize;
 use tauri::{AppHandle, Manager};
 
@@ -97,7 +97,7 @@ pub(super) async fn blocking<T: Send + 'static>(
 pub(super) fn log_failure(request: &str, error: &LspError) {
   match error {
     LspError::Server { code, .. }
-      if *code == ferrite_lsp::REQUEST_CANCELLED || *code == ferrite_lsp::CONTENT_MODIFIED =>
+      if *code == flareite_lsp::REQUEST_CANCELLED || *code == flareite_lsp::CONTENT_MODIFIED =>
     {
       tracing::debug!(request, %error, "language server request superseded");
     }
@@ -620,7 +620,7 @@ fn strip_snippet(snippet: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-  use ferrite_lsp::lsp_types::{LanguageString, MarkupContent};
+  use flareite_lsp::lsp_types::{LanguageString, MarkupContent};
 
   use super::*;
 

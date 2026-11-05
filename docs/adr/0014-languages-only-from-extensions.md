@@ -5,17 +5,17 @@
 
 ## Context
 
-After [ADR 0013](0013-extension-languages.md), extensions could add languages, but Ferrite still
+After [ADR 0013](0013-extension-languages.md), extensions could add languages, but Flareite still
 compiled in seven (Rust, TypeScript, TSX, JavaScript, JSON, TOML, Python) and hard-coded three
 language servers (rust-analyzer, typescript-language-server, pyright). Users should decide which
-languages their editor has, and a language Ferrite chose for them was the one kind they couldn't
+languages their editor has, and a language Flareite chose for them was the one kind they couldn't
 remove, replace, or turn off.
 
 ## Decisions
 
 ### No built-in languages
 
-`ferrite-syntax` no longer depends on any grammar crate; its `Registry` holds only languages
+`flareite-syntax` no longer depends on any grammar crate; its `Registry` holds only languages
 from extensions. Without language extensions, every file is plain text. The seven former
 built-in languages are now example extensions in `extensions/`, one per language (TypeScript
 and TSX share one), so users take only the ones they want:
@@ -30,7 +30,7 @@ and TSX share one), so users take only the ones they want:
 | `python`     | `python`                        | `pyright`                    |
 
 - **Same highlighting.** Each extension's grammar is the prebuilt `.wasm` from the grammar's npm
-  package, at the version the crate had, and its queries are the crate's, combined as Ferrite
+  package, at the version the crate had, and its queries are the crate's, combined as Flareite
   combined them (TypeScript's queries add to JavaScript's, so the TypeScript extension carries
   its own copy of those). Before the native grammars were removed, a test compared both on real
   files from this repository: every line highlighted identically.
@@ -56,7 +56,7 @@ Alternatives considered:
 
 ### No built-in language servers
 
-`ferrite-lsp` no longer has default servers. Servers come only from language extensions (behind
+`flareite-lsp` no longer has default servers. Servers come only from language extensions (behind
 their `language-servers` permission) and from `[lsp.servers.*]` in the settings, which can still
 change or turn off an extension's server by name, or add one.
 
@@ -81,6 +81,6 @@ measured with highlighting.
 - The binary no longer contains grammar code; grammars are compiled when first used, as
   extension grammars already were. The example extensions add about 4.7 MB of `.wasm` files to
   the repository.
-- Tests that need a language load the example extensions: `ferrite-syntax` from the files, the
+- Tests that need a language load the example extensions: `flareite-syntax` from the files, the
   app from the manifests.
-- Adding or updating a language no longer touches Ferrite's code or dependencies.
+- Adding or updating a language no longer touches Flareite's code or dependencies.

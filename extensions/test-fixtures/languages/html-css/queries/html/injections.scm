@@ -2,7 +2,7 @@
 ; ../../grammars/LICENSE-tree-sitter-html).
 ;
 ; `@injection.content` is the embedded text; `injection.language` names the
-; language by id. JavaScript is bundled with Ferrite, and CSS comes from this
+; language by id. JavaScript is bundled with Flareite, and CSS comes from this
 ; extension.
 
 ((script_element

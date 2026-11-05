@@ -8,7 +8,7 @@ and the Images example is one: its page draws the picture with a choice of backg
 
 ## Context
 
-Ferrite opened only UTF-8 files of up to 256 MiB ([ADR 0004](0004-performance-foundations.md)).
+Flareite opened only UTF-8 files of up to 256 MiB ([ADR 0004](0004-performance-foundations.md)).
 Anything else failed with an error: a Latin-1 or Shift JIS text file, a 300 MB log, and an image
 someone clicked in the explorer. Other editors open text in other encodings, and VS Code shows a
 binary file in a tab that asks before opening it as text. Images are the most common files people
@@ -30,7 +30,7 @@ A document has a `TextEncoding`: an `encoding_rs` encoding and whether the file 
 mark. It's detected on load and used on save, so text the user didn't edit is written back byte
 for byte.
 
-- **Detection** (`ferrite-workspace/src/encoding.rs`): a byte order mark (UTF-8, UTF-16), then
+- **Detection** (`flareite-workspace/src/encoding.rs`): a byte order mark (UTF-8, UTF-16), then
   NUL bytes in the first 8 KiB, which mean binary unless every other byte is NUL (UTF-16 without
   a mark, as VS Code detects it), then valid UTF-8, then the legacy encoding `chardetng` guesses
   from the first MiB, and finally Windows-1252.

@@ -6,7 +6,7 @@
 ## Context
 
 Editors let you collapse a block of code to its first line. VS Code folds by the language's
-syntax where it can and by indentation otherwise, and it remembers what was folded. Ferrite's
+syntax where it can and by indentation otherwise, and it remembers what was folded. Flareite's
 languages come from extensions as Tree-sitter grammars with queries (ADR 0013), so syntax-aware
 folding should come from them too.
 
@@ -43,7 +43,7 @@ Alternatives considered:
 
 ### The core owns folded regions; callers supply foldable ones
 
-`ferrite-core` doesn't depend on `ferrite-syntax`, so the fold operations take the document's
+`flareite-core` doesn't depend on `flareite-syntax`, so the fold operations take the document's
 foldable regions as line ranges. The app looks them up for each operation, from the query or
 from indentation (`editor/folding.rs`): only the regions around the cursors, unless the
 operation needs them all (Fold All, Fold Level).
@@ -100,7 +100,7 @@ in VS Code. `// MARK: Name` comments only label a place. `// MARK: - Name` adds 
 - A marked region folds through its `#endregion` line. Marked regions join the regions from the
   query or indentation, and Fold All Regions (Ctrl+K Ctrl+8) and Unfold All Regions (Ctrl+K Ctrl+9)
   act on them alone.
-- The markers (`RegionMarkers` in `ferrite-core`) are kept per document and updated from the line
+- The markers (`RegionMarkers` in `flareite-core`) are kept per document and updated from the line
   splices, so a keystroke rereads only the lines it changed. Documents over 16 MiB, like for
   highlighting, have none.
 - The minimap labels named regions and `MARK:` comments. The labels are 9 px, as in VS Code, and

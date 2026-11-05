@@ -1,4 +1,4 @@
-//! Integrated terminals: the commands over `ferrite-terminal`.
+//! Integrated terminals: the commands over `flareite-terminal`.
 //!
 //! Each terminal sends its output through a `Channel` given when it's
 //! created, or when the frontend attaches again after the window reloads
@@ -9,8 +9,8 @@ use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::{Duration, Instant};
 
-use ferrite_terminal::profiles::{self, Profile};
-use ferrite_terminal::{
+use flareite_terminal::profiles::{self, Profile};
+use flareite_terminal::{
   Sink, Terminal, TerminalError, TerminalEvent, TerminalOptions, TerminalSize,
 };
 use serde::Serialize;
@@ -24,7 +24,7 @@ use crate::workspace::WorkspaceState;
 /// The most terminals open at once.
 const MAX_TERMINALS: usize = 32;
 /// How long detected profiles are reused before looking again (shells get
-/// installed while Ferrite runs).
+/// installed while Flareite runs).
 const PROFILES_FRESH_FOR: Duration = Duration::from_secs(30);
 
 #[derive(Debug, Clone, Serialize)]
@@ -145,7 +145,7 @@ impl From<TerminalError> for CommandError {
 fn environment(app: &AppHandle) -> Vec<(String, String)> {
   let mut env = vec![
     ("COLORTERM".to_owned(), "truecolor".to_owned()),
-    ("TERM_PROGRAM".to_owned(), "ferrite".to_owned()),
+    ("TERM_PROGRAM".to_owned(), "flareite".to_owned()),
     (
       "TERM_PROGRAM_VERSION".to_owned(),
       app.package_info().version.to_string(),
@@ -280,7 +280,7 @@ pub struct TerminalPlatform {
 #[tauri::command]
 pub fn terminal_platform() -> TerminalPlatform {
   TerminalPlatform {
-    windows_build: ferrite_terminal::windows_build(),
+    windows_build: flareite_terminal::windows_build(),
   }
 }
 
@@ -337,7 +337,7 @@ pub fn terminal_resize(
 }
 
 /// The frontend has drawn `units` of a terminal's output (UTF-16 code
-/// units); see `ferrite_terminal::flow`.
+/// units); see `flareite_terminal::flow`.
 #[tauri::command]
 pub fn terminal_acknowledge(state: State<'_, TerminalState>, id: u64, units: usize) {
   if let Ok(terminal) = state.get(id) {

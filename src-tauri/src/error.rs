@@ -1,5 +1,5 @@
-use ferrite_core::CoreError;
-use ferrite_workspace::FileError;
+use flareite_core::CoreError;
+use flareite_workspace::FileError;
 use serde::Serialize;
 
 /// Error returned to the frontend: a stable machine-readable `code` and a

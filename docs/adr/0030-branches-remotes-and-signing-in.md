@@ -8,7 +8,7 @@
 The fifth stage of the Git extension adds branches and remotes as VS Code has them: a branch
 picker from the status bar, creating, renaming, deleting, and merging branches, publishing them,
 fetching, pulling, pushing, and syncing with a status bar button, fetching in the background, and
-Git's commands in an output channel. The user chose VS Code's picker, signing in within Ferrite
+Git's commands in an output channel. The user chose VS Code's picker, signing in within Flareite
 rather than relying on credential helpers alone, background fetching off by default but offered,
 a sync button that confirms the first time, and an output channel.
 
@@ -21,12 +21,12 @@ password, and a clock to fetch every few minutes by.
 
 Git asks for credentials by running the program in `GIT_ASKPASS` with the question, reading the
 answer from its output; SSH does the same with `SSH_ASKPASS`. A program the manifest declares
-with `askpass = true` runs with both naming Ferrite's own executable (`Embedder::askpass_program`)
-and with an address and token in `FERRITE_ASKPASS_*`. Run that way, the executable doesn't start
+with `askpass = true` runs with both naming Flareite's own executable (`Embedder::askpass_program`)
+and with an address and token in `FLAREITE_ASKPASS_*`. Run that way, the executable doesn't start
 the editor: `askpass::client_main`, first in `main`, sends the question over a local TCP
 connection to the host, which asks the user in the command palette and replies. Using the
 editor's executable needs nothing installed beside it, which matters as nothing ships with
-Ferrite yet. A token per extension lets only its programs ask and names it; the answer goes to
+Flareite yet. A token per extension lets only its programs ask and names it; the answer goes to
 the program, never to the extension's code. Questions about passwords, passphrases, PINs, and
 tokens hide what's typed. Unanswered questions are withdrawn after five minutes.
 
@@ -66,6 +66,6 @@ and fetches only when `autofetch` is on: turning it on needs no restart.
 
 - Any extension's declared program that uses `GIT_ASKPASS` or `SSH_ASKPASS` can sign in; other
   programs aren't affected.
-- The askpass server listens on a local port while Ferrite runs, after the first such program
+- The askpass server listens on a local port while Flareite runs, after the first such program
   starts; only holders of a token are asked anything.
 - Merging can stop with conflicts; resolving them is the seventh stage.

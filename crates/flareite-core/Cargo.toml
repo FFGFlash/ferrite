@@ -1,0 +1,18 @@
+[package]
+name = "flareite-core"
+description = "Flareite editor core: documents, selections, editing operations, undo history, and dirty state."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+flareite-text = { workspace = true }
+flareite-workspace = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }
+
+[lints]
+workspace = true

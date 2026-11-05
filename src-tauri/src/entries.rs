@@ -10,7 +10,7 @@
 
 use std::path::{Component, Path, PathBuf};
 
-use ferrite_workspace::{EntryError, copy_entry, delete_entry, move_entry, rename_entry};
+use flareite_workspace::{EntryError, copy_entry, delete_entry, move_entry, rename_entry};
 use serde::Serialize;
 use tauri::{AppHandle, Manager, WebviewWindow};
 
@@ -83,7 +83,7 @@ async fn blocking<T: Send + 'static>(
 
 /// Points the documents of a renamed or moved file (or of the files in a
 /// The files of documents `ids`.
-fn moved_paths(app: &AppHandle, ids: &[ferrite_core::DocumentId]) -> Vec<String> {
+fn moved_paths(app: &AppHandle, ids: &[flareite_core::DocumentId]) -> Vec<String> {
   let state = app.state::<EditorState>();
   let editor = state.lock();
   ids
@@ -315,7 +315,7 @@ mod tests {
 
   #[test]
   fn only_paths_in_the_open_folder_are_accepted() {
-    let root = std::env::temp_dir().join("ferrite-root");
+    let root = std::env::temp_dir().join("flareite-root");
     let at = |path: PathBuf| path.display().to_string();
     let file = root.join("src").join("a.rs");
     assert_eq!(inside(&root, &at(file.clone()), false).ok(), Some(file));
@@ -324,7 +324,7 @@ mod tests {
     for outside in [
       root.join("..").join("x"),
       root.join("src").join("..").join("..").join("x"),
-      std::env::temp_dir().join("ferrite-rooted"),
+      std::env::temp_dir().join("flareite-rooted"),
       PathBuf::from("src"),
     ] {
       assert!(

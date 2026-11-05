@@ -5,7 +5,7 @@
 
 ## Context
 
-Milestone 3 turns Ferrite into a usable programming editor: a file explorer, a command palette,
+Milestone 3 turns Flareite into a usable programming editor: a file explorer, a command palette,
 search and replace, theme tokens, persistent layout, and keyboard shortcuts. These features need
 workspace-wide services (directory listing, a file index, search, file watching), a settings
 system, and a way to name and bind actions. The brief requires background work that never
@@ -44,7 +44,7 @@ Ignored files are **shown dimmed** in the explorer (you can still open build out
 When a watched file changes, a clean document reloads in place. Only the changed middle section
 is replaced, so cursors and scroll position stay meaningful, and the reload can be undone. A
 dirty document is never modified; the user is notified, and the save-time conflict check from
-M2 asks before overwriting. Ferrite's own saves are recognized by their recorded stamp and
+M2 asks before overwriting. Flareite's own saves are recognized by their recorded stamp and
 ignored.
 
 ### Replace across files is deferred
@@ -55,7 +55,7 @@ the change can be undone, closed files must be written atomically with conflict 
 user needs a preview and a way to cancel partway. That's better built on M4's background-task
 scheduling than squeezed into M3.
 
-### Settings as a TOML file edited in Ferrite
+### Settings as a TOML file edited in Flareite
 
 Settings are a validated `settings.toml` in the config directory, opened as a normal document;
 saving applies them. This needs no settings UI yet, is easy to diff and share, and reuses the
@@ -87,6 +87,6 @@ event system. A channel is part of IPC, so the webview's capability still grants
   built, and Go to File reports that indexing is still running.
 - Watching a whole tree recursively can hit OS limits (inotify on Linux). Watching then fails
   with a logged warning, and the workspace works without live updates.
-- Settings are only re-read when saved from Ferrite; editing `settings.toml` in another program
+- Settings are only re-read when saved from Flareite; editing `settings.toml` in another program
   takes effect after a restart (the settings file isn't watched).
 - Files outside the open folder aren't watched; their conflicts are still caught at save time.

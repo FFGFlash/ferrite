@@ -19,7 +19,7 @@ const HEX_COLOR = /^#(?:[0-9a-f]{3,4}|[0-9a-f]{6}|[0-9a-f]{8})$/i
 export const themeKind = createStore<ThemeKind>('dark')
 /**
  * Colors the theme and the user set for extensions' colors
- * (`<extension id>.<name>`, such as `ferrite.git.modified`), which aren't
+ * (`<extension id>.<name>`, such as `flareite.git.modified`), which aren't
  * CSS variables: the code that draws them looks them up (`extensionColor`).
  */
 export const extensionColorOverrides = createStore<Readonly<Record<string, string>>>({})

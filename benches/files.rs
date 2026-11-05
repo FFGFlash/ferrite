@@ -5,10 +5,10 @@ use std::hint::black_box;
 use std::time::Duration;
 
 use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
-use ferrite_benches::code_text;
-use ferrite_core::Editor;
-use ferrite_text::TextBuffer;
-use ferrite_workspace::{TextEncoding, load_text_file, save_text_file};
+use flareite_benches::code_text;
+use flareite_core::Editor;
+use flareite_text::TextBuffer;
+use flareite_workspace::{TextEncoding, load_text_file, save_text_file};
 
 const MB: usize = 1024 * 1024;
 

@@ -1,15 +1,15 @@
-# A copy of the languages of the official ferrite.markdown extension (without
+# A copy of the languages of the official flareite.markdown extension (without
 # its preview, which is code), for the editor's tests, which need real
 # grammars. Not kept in step with it.
 id = "test.markdown"
 name = "Markdown"
 version = "0.1.0"
 description = "Markdown highlighting."
-author = "Ferrite"
+author = "Flareite"
 api_version = "1"
 
 [engines]
-ferrite = ">=0.1.0"
+flareite = ">=0.1.0"
 
 [[languages]]
 id = "markdown"

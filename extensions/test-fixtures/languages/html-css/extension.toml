@@ -1,16 +1,16 @@
-# A copy of the languages of the official ferrite.html-css extension, for the
+# A copy of the languages of the official flareite.html-css extension, for the
 # editor's tests, which need real grammars. Not kept in step with it.
 id = "test.html-css"
 name = "HTML & CSS"
 version = "0.1.0"
 description = "HTML, CSS and SVG: highlighting (with CSS and JavaScript inside HTML and SVG) and language servers."
-author = "Ferrite"
+author = "Flareite"
 api_version = "1"
 
 [engines]
-ferrite = ">=0.1.0"
+flareite = ">=0.1.0"
 
-# Ferrite starts the servers below only once you allow this.
+# Flareite starts the servers below only once you allow this.
 [permissions]
 language_servers = true
 
@@ -51,7 +51,7 @@ folds = "queries/svg/folds.scm"
 injections = "queries/svg/injections.scm"
 block_comment = ["<!--", "-->"]
 
-# `npm install -g vscode-langservers-extracted` provides both servers. Ferrite
+# `npm install -g vscode-langservers-extracted` provides both servers. Flareite
 # looks for them on the PATH and shows "not installed" in the status bar if
 # they're missing; highlighting works either way.
 [[language_servers]]

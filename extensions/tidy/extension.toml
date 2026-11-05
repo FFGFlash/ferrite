@@ -3,7 +3,7 @@ id = "example.tidy"
 name = "Tidy"
 version = "0.1.0"
 description = "Flags trailing whitespace and overlong lines, and trims trailing whitespace in documents, files, and folders."
-author = "Ferrite"
+author = "Flareite"
 icon = "icon.svg"
 api_version = "1"
 # Built by `cargo build --release` in extensions/. Installed extensions keep
@@ -12,7 +12,7 @@ entrypoint = "../target/wasm32-unknown-unknown/release/tidy.wasm"
 activation = ["on-startup"]
 
 [engines]
-ferrite = ">=0.1.0"
+flareite = ">=0.1.0"
 
 [permissions]
 documents_read = true

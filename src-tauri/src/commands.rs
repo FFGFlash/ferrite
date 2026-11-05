@@ -8,7 +8,7 @@
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
-use ferrite_extension_host::preview::{LinkTarget, link_target};
+use flareite_extension_host::preview::{LinkTarget, link_target};
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, State};
 use tauri_plugin_clipboard_manager::ClipboardExt;
@@ -192,7 +192,7 @@ mod tests {
   #[test]
   fn app_info_serializes_with_camel_case_fields() {
     let info = AppInfo {
-      name: "Ferrite".into(),
+      name: "Flareite".into(),
       version: "0.1.0".into(),
       os: "windows",
       arch: "x86_64",
@@ -200,6 +200,6 @@ mod tests {
     };
     let json = serde_json::to_value(&info).expect("serializable");
     assert_eq!(json["tauriVersion"], "2.0.0");
-    assert_eq!(json["name"], "Ferrite");
+    assert_eq!(json["name"], "Flareite");
   }
 }

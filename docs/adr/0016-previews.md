@@ -20,7 +20,7 @@ still holds.
 ### A contribution type for formatted text, in API 1.2
 
 Manifests declare `[[previews]]` (an id and a tab icon). Three functions join the `workbench`
-interface in `ferrite:extension@1.2.0`: `show-preview`, `set-preview-content`, and
+interface in `flareite:extension@1.2.0`: `show-preview`, `set-preview-content`, and
 `close-preview`. One preview type can have many open previews, keyed by a string the extension
 picks (Markdown uses the document's id).
 
@@ -81,7 +81,7 @@ terminals (ADR 0012). `state/previews.ts` follows the backend's list, and the do
 `extensions/markdown` has two languages, `markdown` and `markdown_inline`, from
 tree-sitter-markdown 0.5.3's prebuilt grammars. The block grammar injects the inline one into
 paragraphs, headings, and cells, and code fences into their language. Its queries use the
-capture names Ferrite colors, so emphasis gets a color rather than a style. Its code renders
+capture names Flareite colors, so emphasis gets a color rather than a style. Its code renders
 with pulldown-cmark on **Open Preview** (`Ctrl+Shift+V`) and **Open Preview to the Side**
 (`Ctrl+K V`), and again on every change to the document.
 

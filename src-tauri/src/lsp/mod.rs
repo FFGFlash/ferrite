@@ -26,20 +26,20 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::thread;
 
-use ferrite_core::{Document, DocumentId};
-use ferrite_lsp::convert::{content_changes, full_change, path_to_uri, to_offsets, uri_to_path};
-use ferrite_lsp::lsp_types::notification::{
+use flareite_core::{Document, DocumentId};
+use flareite_lsp::convert::{content_changes, full_change, path_to_uri, to_offsets, uri_to_path};
+use flareite_lsp::lsp_types::notification::{
   DidChangeTextDocument, DidCloseTextDocument, DidOpenTextDocument, DidSaveTextDocument,
 };
-use ferrite_lsp::lsp_types::{
+use flareite_lsp::lsp_types::{
   DiagnosticSeverity, DidChangeTextDocumentParams, DidCloseTextDocumentParams,
   DidOpenTextDocumentParams, DidSaveTextDocumentParams, NumberOrString, PublishDiagnosticsParams,
   TextDocumentIdentifier, TextDocumentItem, TextDocumentSyncKind, Uri,
   VersionedTextDocumentIdentifier,
 };
-use ferrite_lsp::{LanguageServer, ServerConfig, ServerEvent, find_root};
-use ferrite_syntax::Language;
-use ferrite_text::{TextBuffer, TextSnapshot, Version, map_offset_through};
+use flareite_lsp::{LanguageServer, ServerConfig, ServerEvent, find_root};
+use flareite_syntax::Language;
+use flareite_text::{TextBuffer, TextSnapshot, Version, map_offset_through};
 use serde::Serialize;
 use tauri::{AppHandle, Manager};
 
@@ -893,7 +893,7 @@ impl LspState {
 
 #[cfg(test)]
 mod tests {
-  use ferrite_lsp::lsp_types::{
+  use flareite_lsp::lsp_types::{
     Diagnostic as LspDiagnostic, Position as LspPosition, Range as LspRange,
   };
 

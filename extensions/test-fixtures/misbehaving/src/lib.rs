@@ -2,12 +2,12 @@
 //! asked to. The host's integration tests run its commands and check that
 //! the host stays healthy. Outcomes are reported with `show_message`.
 
-use ferrite_extension_api::types::{
+use flareite_extension_api::types::{
   Activation, CommandContext, ConfigValue, Diagnostic, DocumentChange, DocumentId, DocumentInfo,
   LogLevel, MessageLevel, Position, PreviewElement, PreviewNode, Range, Severity, StatusItem,
   TextEdit, ViewItem,
 };
-use ferrite_extension_api::{Guest, export_extension, host, viewers, workbench};
+use flareite_extension_api::{Guest, export_extension, host, viewers, workbench};
 
 fn text_setting(key: &str) -> String {
   match host::configuration(key) {

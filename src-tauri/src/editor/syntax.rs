@@ -23,12 +23,12 @@ use std::ops::Range;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::{Duration, Instant};
 
-use ferrite_core::{Document, DocumentId, MAX_DISPLAY_LINE_BYTES, ViewId};
-use ferrite_syntax::{
+use flareite_core::{Document, DocumentId, MAX_DISPLAY_LINE_BYTES, ViewId};
+use flareite_syntax::{
   Language, Registry, Span, SyntaxTree, apply_edits, deadline, fold_ranges, highlight_lines, parse,
 };
-use ferrite_tasks::Priority;
-use ferrite_text::{TextBuffer, TextSnapshot, Version};
+use flareite_tasks::Priority;
+use flareite_text::{TextBuffer, TextSnapshot, Version};
 use serde::Serialize;
 use tauri::{AppHandle, Manager};
 
@@ -551,8 +551,8 @@ fn spawn_parse(app: &AppHandle, id: DocumentId, job: ParseJob) {
 // Chunk ranges are naturally single-element arrays here.
 #[allow(clippy::single_range_in_vec_init)]
 mod tests {
-  use ferrite_syntax::TokenKind;
-  use ferrite_text::{ChangeSet, Edit};
+  use flareite_syntax::TokenKind;
+  use flareite_text::{ChangeSet, Edit};
 
   use super::*;
 
