@@ -374,11 +374,11 @@ watch, and watches stop with the extension.
 ```rust
 fn run_command(command: String, _: CommandContext) -> Result<(), String> {
   match command.as_str() {
-    "example.git.start" => {
+    "ferrite.git.start" => {
       let folder = workspace::folder().ok_or("no folder is open")?;
-      workspace::watch(&folder.path, "example.git.changed").map_err(|e| format!("{e:?}"))?;
+      workspace::watch(&folder.path, "ferrite.git.changed").map_err(|e| format!("{e:?}"))?;
     }
-    "example.git.changed" => {
+    "ferrite.git.changed" => {
       let changes = workspace::changes().ok_or("not run for changes")?;
       // ... look again at changes.paths ...
     }
@@ -952,7 +952,7 @@ you can zoom, on a background you choose. Webviews are API 1.5
 
 ```toml
 [[commands]]
-id = "example.images.details"
+id = "ferrite.images.details"
 title = "Image Details"
 hidden = true
 
@@ -961,7 +961,7 @@ id = "svg"
 title = "Image Viewer"
 patterns = ["*.svg"]
 webview = "media/viewer.html"          # a page in the extension's folder; or `true`, and set it from code
-on_message = "example.images.details"  # optional: run when the page sends a message
+on_message = "ferrite.images.details"  # optional: run when the page sends a message
 retain_when_hidden = false             # optional: keep the page loaded while its tab is hidden
 priority = "option"
 
@@ -969,7 +969,7 @@ priority = "option"
 id = "fit"
 title = "Fit"
 icon = "fit"                           # a named icon, or an SVG or PNG file in the folder
-# command = "example.images.fit"       # optional: run with the tab as argument, instead of telling the page
+# command = "ferrite.images.fit"       # optional: run with the tab as argument, instead of telling the page
 ```
 
 A preview takes the same keys under `[[previews]]`, and opens with `show-preview` as before. A
@@ -1104,10 +1104,10 @@ let id = prompts::confirm(
     buttons: vec!["Discard File".into()],
     destructive: true,
   },
-  "example.git.answered",
+  "ferrite.git.answered",
 )
 .map_err(|e| format!("{e:?}"))?;
-// ... remember what `id` was for; in example.git.answered:
+// ... remember what `id` was for; in ferrite.git.answered:
 if let Some(answer) = prompts::answer()
   && answer.value == AnswerValue::Button(0)
 {
@@ -1125,7 +1125,7 @@ The manifest declares the schemes it provides, each with the command that provid
 ```toml
 [[text_providers]]
 scheme = "git"                  # 2 to 32 lowercase letters, digits, +, -, or .
-command = "example.git.provide" # one of the extension's commands
+command = "ferrite.git.provide" # one of the extension's commands
 ```
 
 An address is the scheme, a colon, and whatever the extension likes: Git's are
@@ -1139,7 +1139,7 @@ When the editor needs a text, it runs the provider's command, during which
 empty. A command that doesn't answer fails the request.
 
 ```rust
-"example.git.provide" => {
+"ferrite.git.provide" => {
   if let Some(uri) = documents::requested() {
     let text = read_version(&uri); // e.g. `git cat-file blob HEAD:src/main.rs` with processes::run
     documents::provide(&uri, text.as_deref()).map_err(|e| format!("{e:?}"))?;
@@ -1195,8 +1195,8 @@ next or previous change. **Revert Selected Ranges** reverts the changes the sele
 
 ```toml
 [quick_diff]
-original = "example.git.original"    # names a file's original
-apply = "example.git.stage"          # optional: applies changes to an original
+original = "ferrite.git.original"    # names a file's original
+apply = "ferrite.git.stage"          # optional: applies changes to an original
 apply_title = "Stage"                # with apply: what applying is called
 ```
 

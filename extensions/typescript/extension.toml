@@ -1,7 +1,7 @@
 # TypeScript and TSX: highlighting from Tree-sitter grammars compiled to
 # WebAssembly, and typescript-language-server. No code. See
 # docs/extensions.md#languages.
-id = "example.typescript"
+id = "ferrite.typescript"
 name = "TypeScript"
 version = "0.1.0"
 description = "TypeScript and TSX highlighting, and typescript-language-server."

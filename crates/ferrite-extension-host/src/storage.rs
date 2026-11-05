@@ -301,14 +301,14 @@ mod tests {
     let storage = Storage::new(Some(dir.path().to_path_buf()));
     storage
       .set(
-        "example.images",
+        "ferrite.images",
         &Scope::Global,
         "background",
         Some("\"white\"".into()),
       )
       .expect("set");
     storage
-      .set("example.images", &folder, "zoom", Some("2".into()))
+      .set("ferrite.images", &folder, "zoom", Some("2".into()))
       .expect("set");
     assert_eq!(
       storage.get("example.other", &Scope::Global, "background"),
@@ -316,7 +316,7 @@ mod tests {
     );
     assert_eq!(
       storage.get(
-        "example.images",
+        "ferrite.images",
         &Scope::Workspace("/projects/b".into()),
         "zoom"
       ),
@@ -326,21 +326,21 @@ mod tests {
     let later = Storage::new(Some(dir.path().to_path_buf()));
     assert_eq!(
       later
-        .get("example.images", &Scope::Global, "background")
+        .get("ferrite.images", &Scope::Global, "background")
         .as_deref(),
       Some("\"white\"")
     );
-    assert_eq!(later.keys("example.images", &folder), ["zoom"]);
-    assert!(later.usage("example.images") > 0);
+    assert_eq!(later.keys("ferrite.images", &folder), ["zoom"]);
+    assert!(later.usage("ferrite.images") > 0);
 
     later
-      .set("example.images", &folder, "zoom", None)
+      .set("ferrite.images", &folder, "zoom", None)
       .expect("remove");
-    assert_eq!(later.get("example.images", &folder, "zoom"), None);
-    later.clear("example.images").expect("clear");
-    assert_eq!(later.usage("example.images"), 0);
+    assert_eq!(later.get("ferrite.images", &folder, "zoom"), None);
+    later.clear("ferrite.images").expect("clear");
+    assert_eq!(later.usage("ferrite.images"), 0);
     assert_eq!(
-      later.get("example.images", &Scope::Global, "background"),
+      later.get("ferrite.images", &Scope::Global, "background"),
       None
     );
   }
@@ -377,13 +377,13 @@ mod tests {
 
     // Clearing an extension's storage forgets its tabs too.
     let storage = Storage::new(Some(dir.path().to_path_buf()));
-    storage.set_tab_state("example.images.svg/a.svg", Some("1".into()));
-    storage.set_tab_state("example.imagesx.svg/b.svg", Some("2".into()));
-    storage.clear("example.images").expect("clear");
+    storage.set_tab_state("ferrite.images.svg/a.svg", Some("1".into()));
+    storage.set_tab_state("ferrite.imagesx.svg/b.svg", Some("2".into()));
+    storage.clear("ferrite.images").expect("clear");
     let later = Storage::new(Some(dir.path().to_path_buf()));
-    assert_eq!(later.tab_state("example.images.svg/a.svg"), None);
+    assert_eq!(later.tab_state("ferrite.images.svg/a.svg"), None);
     assert_eq!(
-      later.tab_state("example.imagesx.svg/b.svg").as_deref(),
+      later.tab_state("ferrite.imagesx.svg/b.svg").as_deref(),
       Some("2")
     );
   }

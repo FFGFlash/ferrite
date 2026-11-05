@@ -13,7 +13,7 @@ const { registerCommands } = await import('../commands/registry')
 const webviews = await import('../state/webviews')
 const { WebviewFrame } = await import('./WebviewFrame')
 
-const ID = 'example.images.svg//w/cat.svg'
+const ID = 'ferrite.images.svg//w/cat.svg'
 const URL = 'http://ferrite-webview.localhost/abc/media/viewer.html'
 
 /** A message from `source`, as the page's bridge sends them. */

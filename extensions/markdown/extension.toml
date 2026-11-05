@@ -2,7 +2,7 @@
 # (no code needed for that), and a preview, which is code: it renders the
 # document with pulldown-cmark and fills in a preview tab as you type. See
 # docs/extensions.md#previews.
-id = "example.markdown"
+id = "ferrite.markdown"
 name = "Markdown"
 version = "0.1.0"
 description = "Markdown highlighting, and a preview of the rendered page."
@@ -19,20 +19,20 @@ ferrite = ">=0.1.0"
 documents_read = true
 
 [[commands]]
-id = "example.markdown.preview"
+id = "ferrite.markdown.preview"
 title = "Open Preview"
 
 [[commands]]
-id = "example.markdown.previewToSide"
+id = "ferrite.markdown.previewToSide"
 title = "Open Preview to the Side"
 
 [[keybindings]]
-command = "example.markdown.preview"
+command = "ferrite.markdown.preview"
 key = "mod+shift+v"
 when = "editorFocus"
 
 [[keybindings]]
-command = "example.markdown.previewToSide"
+command = "ferrite.markdown.previewToSide"
 key = "mod+k v"
 when = "editorFocus"
 

@@ -1,0 +1,19 @@
+id = "ferrite.xml"
+name = "XML"
+version = "0.1.0"
+description = "XML: highlighting."
+author = "Ferrite"
+api_version = "1"
+
+[engines]
+ferrite = ">=0.1.0"
+
+[[languages]]
+id = "xml"
+name = "XML"
+file_extensions = ["xml", "xsd", "xsl", "xslt", "xhtml", "wsdl"]
+grammar = "grammars/tree-sitter-xml.wasm"
+highlights = "queries/xml/highlights.scm"
+folds = "queries/xml/folds.scm"
+injections = "queries/xml/injections.scm"
+block_comment = ["<!--", "-->"]

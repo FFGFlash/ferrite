@@ -2,7 +2,7 @@
 # or AVIF file shows the picture, on a background and at a size the toolbar
 # chooses, with its format, size in pixels, and file size. SVG files open as
 # text, and in the viewer with Reopen Editor With. See docs/extensions.md#webviews.
-id = "example.images"
+id = "ferrite.images"
 name = "Images"
 version = "0.1.0"
 description = "Shows image files as pictures you can zoom, on the background you choose."
@@ -16,7 +16,7 @@ ferrite = ">=0.1.0"
 
 # Run when a viewer's page asks for its picture's details.
 [[commands]]
-id = "example.images.details"
+id = "ferrite.images.details"
 title = "Image Details"
 hidden = true
 
@@ -26,7 +26,7 @@ id = "image"
 title = "Image Viewer"
 patterns = ["*.png", "*.apng", "*.{jpg,jpeg,jpe,jfif}", "*.gif", "*.webp", "*.bmp", "*.ico", "*.avif"]
 webview = "media/viewer.html"
-on_message = "example.images.details"
+on_message = "ferrite.images.details"
 
 # SVG is text people edit, so the viewer is only an option for it.
 [[viewers]]
@@ -34,5 +34,5 @@ id = "svg"
 title = "Image Viewer"
 patterns = ["*.svg"]
 webview = "media/viewer.html"
-on_message = "example.images.details"
+on_message = "ferrite.images.details"
 priority = "option"

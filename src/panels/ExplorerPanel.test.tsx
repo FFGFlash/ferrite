@@ -206,7 +206,7 @@ describe('ExplorerPanel', () => {
     const color = { description: '', dark: '#e2c08d', light: '#895503' }
     applyStatuses([
       {
-        id: 'example.git',
+        id: 'ferrite.git',
         name: 'Git',
         state: 'active',
         permissions: [],
@@ -224,8 +224,8 @@ describe('ExplorerPanel', () => {
           languageServers: [],
           programs: [],
           colors: [
-            { ...color, name: 'modified', id: 'example.git.modified' },
-            { ...color, name: 'untracked', id: 'example.git.untracked', dark: '#73c991' },
+            { ...color, name: 'modified', id: 'ferrite.git.modified' },
+            { ...color, name: 'untracked', id: 'ferrite.git.untracked', dark: '#73c991' },
           ],
         },
       } as never,
@@ -233,7 +233,7 @@ describe('ExplorerPanel', () => {
     const mark = (path: string, badge: string, name: string, inherit = false) => ({
       path,
       badge,
-      color: `example.git.${name}`,
+      color: `ferrite.git.${name}`,
       tooltip: name === 'modified' ? 'Modified' : 'Untracked',
       faded: false,
       inherit,
@@ -242,7 +242,7 @@ describe('ExplorerPanel', () => {
     })
     fileMarksStore.set([
       {
-        extension: 'example.git',
+        extension: 'ferrite.git',
         marks: [mark('/w/src/main.rs', 'M', 'modified'), mark('/w/target', 'U', 'untracked', true)],
       },
     ])
@@ -267,7 +267,7 @@ describe('ExplorerPanel', () => {
       await user.click(within(tree).getByText('target'))
       await within(tree).findByText('out.txt')
       expect(row('out.txt')?.querySelector('.explorer-tree__mark')).toHaveTextContent('U')
-      act(() => extensionColorOverrides.set({ 'example.git.untracked': '#00ff00' }))
+      act(() => extensionColorOverrides.set({ 'ferrite.git.untracked': '#00ff00' }))
       expect(row('out.txt')?.style.getPropertyValue('--explorer-mark-color')).toBe('#00ff00')
 
       // A problem's color wins, and both badges show.

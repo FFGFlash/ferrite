@@ -1226,10 +1226,10 @@ fn the_language_examples_load_and_declare_their_languages_and_servers() {
   // Servers wait for the user's permission.
   assert!(host.language_servers().is_empty());
   for id in [
-    "example.rust",
-    "example.typescript",
-    "example.javascript",
-    "example.python",
+    "ferrite.rust",
+    "ferrite.typescript",
+    "ferrite.javascript",
+    "ferrite.python",
   ] {
     host.set_permissions(id, &[Permission::LanguageServers]);
   }
@@ -1269,7 +1269,7 @@ fn the_html_css_example_contributes_languages_and_servers_once_allowed() {
   let host = ExtensionHost::new(fake.clone(), options);
   host.load();
   let status = &host.statuses()[0];
-  assert_eq!(status.id, "example.html-css");
+  assert_eq!(status.id, "ferrite.html-css");
   assert_eq!(
     status.state,
     ExtensionState::AwaitingPermission,
@@ -1299,7 +1299,7 @@ fn the_html_css_example_contributes_languages_and_servers_once_allowed() {
   assert!(languages[2].grammar.is_file());
   assert!(host.language_servers().is_empty());
 
-  host.set_permissions("example.html-css", &[Permission::LanguageServers]);
+  host.set_permissions("ferrite.html-css", &[Permission::LanguageServers]);
   fake.wait_for("a state change", |n| {
     matches!(n, Notification::ExtensionsChanged)
   });
@@ -1309,10 +1309,10 @@ fn the_html_css_example_contributes_languages_and_servers_once_allowed() {
   assert_eq!(servers[0].command, "vscode-html-language-server");
   assert_eq!(servers[1].languages, ["css"]);
 
-  host.set_permissions("example.html-css", &[]);
+  host.set_permissions("ferrite.html-css", &[]);
   assert!(host.language_servers().is_empty());
   assert_eq!(host.statuses()[0].state, ExtensionState::Ready, "decided");
-  host.set_enabled("example.html-css", false);
+  host.set_enabled("ferrite.html-css", false);
   assert!(host.languages().is_empty());
 }
 
@@ -1398,13 +1398,13 @@ fn markdown_example_previews_documents_as_they_change() {
   s.host.load();
   let run = |command: &str, document| {
     s.host
-      .run_command(&format!("example.markdown.{command}"), document, None)
+      .run_command(&format!("ferrite.markdown.{command}"), document, None)
       .expect("queued")
       .wait()
   };
   run("previewToSide", Some(id)).expect("previewed");
 
-  let preview = format!("example.markdown.preview/{}", id.get());
+  let preview = format!("ferrite.markdown.preview/{}", id.get());
   s.fake.wait_for("show", |n| {
     *n == Notification::ShowPreview {
       id: preview.clone(),
@@ -1497,14 +1497,14 @@ fn markdown_previews_only_markdown_documents() {
   s.host.load();
   let error = s
     .host
-    .run_command("example.markdown.preview", Some(id), None)
+    .run_command("ferrite.markdown.preview", Some(id), None)
     .expect("queued")
     .wait()
     .expect_err("not Markdown");
   assert_eq!(error, "Untitled isn't a Markdown file.");
   let error = s
     .host
-    .run_command("example.markdown.preview", None, None)
+    .run_command("ferrite.markdown.preview", None, None)
     .expect("queued")
     .wait()
     .expect_err("no document");
@@ -1534,7 +1534,7 @@ fn the_images_example_shows_files_in_a_webview_and_answers_its_page() {
   assert_eq!(status.error, None);
   let viewers = &status.contributions.viewers;
   assert_eq!(viewers.len(), 2);
-  assert_eq!(viewers[0].full_id, "example.images.image");
+  assert_eq!(viewers[0].full_id, "ferrite.images.image");
   assert!(viewers[0].patterns.contains(&"*.png".to_owned()));
   assert_eq!(viewers[0].command, None, "the page loads the picture");
 
@@ -1544,11 +1544,11 @@ fn the_images_example_shows_files_in_a_webview_and_answers_its_page() {
   std::fs::write(&path, PNG_HEADER).expect("write");
 
   s.host
-    .open_viewer("example.images.image", &path)
+    .open_viewer("ferrite.images.image", &path)
     .expect("opens")
     .wait()
     .expect("nothing to run");
-  let id = ferrite_extension_host::viewer_id("example.images.image", &path);
+  let id = ferrite_extension_host::viewer_id("ferrite.images.image", &path);
   assert!(s.host.previews().is_empty(), "viewers aren't previews");
 
   // The page, with the bridge, and the picture it shows.
@@ -1602,7 +1602,7 @@ fn the_images_example_shows_files_in_a_webview_and_answers_its_page() {
   std::fs::write(&other, b"not really a PNG").expect("write");
   let error = s
     .host
-    .open_viewer("example.images.missing", &other)
+    .open_viewer("ferrite.images.missing", &other)
     .err()
     .expect("no such viewer");
   assert!(error.contains("No extension provides"), "{error}");

@@ -128,16 +128,16 @@ describe('documents store', () => {
 
     const imagesExtension = (priority: 'default' | 'option') =>
       ({
-        id: 'example.images',
+        id: 'ferrite.images',
         state: 'inactive',
         contributions: {
           viewers: [
             {
               id: 'image',
-              fullId: 'example.images.image',
+              fullId: 'ferrite.images.image',
               title: 'Image Viewer',
               patterns: ['*.png'],
-              command: 'example.images.show',
+              command: 'ferrite.images.show',
               priority,
             },
           ],
@@ -148,7 +148,7 @@ describe('documents store', () => {
       extensionsStore.set([imagesExtension('default')])
       expect(await documents.openPath('/w/cat.PNG')).toBeNull()
       expect(ipc.openDocument).not.toHaveBeenCalled()
-      expect(shown).toEqual([null, { viewer: 'example.images.image', path: '/w/cat.PNG' }])
+      expect(shown).toEqual([null, { viewer: 'ferrite.images.image', path: '/w/cat.PNG' }])
     })
 
     it('asks before opening a binary file as text, unless told to', async () => {

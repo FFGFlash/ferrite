@@ -260,7 +260,7 @@ mod tests {
   #[test]
   fn programs_questions_are_asked_and_answered() {
     let (host, notifications) = host();
-    let env = host.shared().askpass_env("example.git");
+    let env = host.shared().askpass_env("ferrite.git");
     assert_eq!(
       var(&env, "GIT_ASKPASS"),
       PathBuf::from("/bin/ferrite").display().to_string()
@@ -269,7 +269,7 @@ mod tests {
     let addr = var(&env, ADDR_VAR).to_owned();
     let token = var(&env, TOKEN_VAR).to_owned();
     assert_eq!(
-      host.shared().askpass_env("example.git"),
+      host.shared().askpass_env("ferrite.git"),
       env,
       "one token per extension"
     );

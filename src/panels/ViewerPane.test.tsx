@@ -20,13 +20,13 @@ const { previewChanged } = await import('../state/previews')
 const viewers = await import('../state/viewers')
 const { ViewerPane } = await import('./ViewerPane')
 
-const VIEWER = 'example.images.image'
+const VIEWER = 'ferrite.images.image'
 const PATH = '/w/cat.png'
 const ID = `${VIEWER}/${PATH}`
 
 const images = (state: ExtensionStatus['state'] = 'active') =>
   ({
-    id: 'example.images',
+    id: 'ferrite.images',
     name: 'Images',
     state,
     contributions: {
@@ -36,7 +36,7 @@ const images = (state: ExtensionStatus['state'] = 'active') =>
           fullId: VIEWER,
           title: 'Image Viewer',
           patterns: ['*.png'],
-          command: 'example.images.show',
+          command: 'ferrite.images.show',
           priority: 'default',
         },
       ],

@@ -103,12 +103,12 @@ mod tests {
 
   #[test]
   fn timers_wait_unless_cancelled() {
-    let timer = Timer::new(1, "example.git".into());
+    let timer = Timer::new(1, "ferrite.git".into());
     let started = Instant::now();
     assert!(timer.waiter(Duration::from_millis(50))());
     assert!(started.elapsed() >= Duration::from_millis(50));
 
-    let timer = Timer::new(2, "example.git".into());
+    let timer = Timer::new(2, "ferrite.git".into());
     let wait = timer.waiter(Duration::from_secs(60));
     let waiting = std::thread::spawn(wait);
     timer.cancel();

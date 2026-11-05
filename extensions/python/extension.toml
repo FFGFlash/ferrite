@@ -1,6 +1,6 @@
 # Python: highlighting from a Tree-sitter grammar compiled to WebAssembly, and
 # Pyright. No code. See docs/extensions.md#languages.
-id = "example.python"
+id = "ferrite.python"
 name = "Python"
 version = "0.1.0"
 description = "Python highlighting, and Pyright for diagnostics, hover, definitions, and completion."

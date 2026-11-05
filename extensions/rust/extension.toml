@@ -1,6 +1,6 @@
 # Rust: highlighting from a Tree-sitter grammar compiled to WebAssembly, and
 # rust-analyzer. No code. See docs/extensions.md#languages.
-id = "example.rust"
+id = "ferrite.rust"
 name = "Rust"
 version = "0.1.0"
 description = "Rust highlighting, and rust-analyzer for diagnostics, hover, definitions, and completion."

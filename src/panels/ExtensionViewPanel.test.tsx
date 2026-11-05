@@ -59,7 +59,7 @@ const content = (overrides: Partial<ViewContent>): ViewContent => ({
 
 const view = (id: string, overrides: Partial<ViewContribution> = {}): ViewContribution => ({
   id,
-  fullId: `example.git.${id}`,
+  fullId: `ferrite.git.${id}`,
   title: id,
   icon: 'list',
   container: null,
@@ -71,7 +71,7 @@ const view = (id: string, overrides: Partial<ViewContribution> = {}): ViewContri
 
 const menu = (command: string, overrides: Partial<MenuContribution>): MenuContribution => ({
   location: 'view/item',
-  command: `example.git.${command}`,
+  command: `ferrite.git.${command}`,
   group: '',
   forFiles: true,
   forFolders: false,
@@ -88,7 +88,7 @@ const menu = (command: string, overrides: Partial<MenuContribution>): MenuContri
 function contribute(views: ViewContribution[], menus: MenuContribution[] = []): void {
   extensionsStore.set([
     {
-      id: 'example.git',
+      id: 'ferrite.git',
       name: 'Git',
       state: 'active',
       commands: menus.map(item => ({
@@ -101,7 +101,7 @@ function contribute(views: ViewContribution[], menus: MenuContribution[] = []): 
         menus,
         views,
         viewContainers: [
-          { id: 'scm', fullId: 'example.git.scm', title: 'Source Control', icon: 'list' },
+          { id: 'scm', fullId: 'ferrite.git.scm', title: 'Source Control', icon: 'list' },
         ],
         colors: [],
       },
@@ -192,7 +192,7 @@ describe('ExtensionViewPanel', () => {
 
     // One item's button: just that item.
     await user.click(within(row('a.rs')).getByRole('button', { name: 'stage' }))
-    expect(ipc.runViewCommand).toHaveBeenLastCalledWith('example.git.stage', '/w/a.rs', ['/w/a.rs'])
+    expect(ipc.runViewCommand).toHaveBeenLastCalledWith('ferrite.git.stage', '/w/a.rs', ['/w/a.rs'])
     expect(within(row('group')).queryByRole('button', { name: 'stage' })).toBeNull()
 
     // Shift-click selects a range; a menu on one of them is for all of them.
@@ -205,7 +205,7 @@ describe('ExtensionViewPanel', () => {
     const entries = contextMenuStore.get()?.entries ?? []
     expect(entries.map(item => item?.label)).toEqual(['discard'])
     await act(async () => entries[0]?.run())
-    expect(ipc.runViewCommand).toHaveBeenLastCalledWith('example.git.discard', '/w/b.rs', [
+    expect(ipc.runViewCommand).toHaveBeenLastCalledWith('ferrite.git.discard', '/w/b.rs', [
       '/w/a.rs',
       '/w/b.rs',
       '/w/c.rs',
@@ -214,7 +214,7 @@ describe('ExtensionViewPanel', () => {
 
     // The header: buttons, and the "…" menu with what its flags allow.
     await user.click(screen.getByRole('button', { name: 'refresh' }))
-    expect(ipc.runViewCommand).toHaveBeenLastCalledWith('example.git.refresh', null, [])
+    expect(ipc.runViewCommand).toHaveBeenLastCalledWith('ferrite.git.refresh', null, [])
     await user.click(screen.getByRole('button', { name: 'More Actions…' }))
     expect(contextMenuStore.get()?.entries.map(item => item?.label)).toEqual(['commitAll'])
     act(() => contextMenuStore.set(null))
@@ -258,7 +258,7 @@ describe('ExtensionViewPanel', () => {
 
   it('asks for the children of an item opened without any', async () => {
     const user = userEvent.setup()
-    const commits = view('commits', { onExpand: 'example.git.expand' })
+    const commits = view('commits', { onExpand: 'ferrite.git.expand' })
     contribute([commits])
     vi.mocked(ipc.getViewContent).mockResolvedValue(
       content({ items: [entry('abc123', null, { expandable: true, label: 'Fix it' })] }),
@@ -293,7 +293,7 @@ describe('ExtensionViewPanel', () => {
   it('has a text box that runs its command, and a welcome message while empty', async () => {
     const user = userEvent.setup()
     const changes = view('box', {
-      input: { placeholder: 'Message (Ctrl+Enter to commit)', command: 'example.git.commit' },
+      input: { placeholder: 'Message (Ctrl+Enter to commit)', command: 'ferrite.git.commit' },
     })
     contribute([changes])
     // A new object each time, as from the backend.
@@ -302,7 +302,7 @@ describe('ExtensionViewPanel', () => {
         welcome: {
           text: 'Not a repository.\n\nInitialize one?',
           buttons: [
-            { label: 'Initialize Repository', command: 'example.git.init', argument: null },
+            { label: 'Initialize Repository', command: 'ferrite.git.init', argument: null },
           ],
         },
       }),
@@ -313,7 +313,7 @@ describe('ExtensionViewPanel', () => {
     await user.keyboard('{Control>}{Enter}{/Control}')
     expect(ipc.setViewInput).toHaveBeenLastCalledWith(changes.fullId, 'Fix it')
     await waitFor(() =>
-      expect(ipc.runExtensionCommand).toHaveBeenCalledWith('example.git.commit', null, null),
+      expect(ipc.runExtensionCommand).toHaveBeenCalledWith('ferrite.git.commit', null, null),
     )
 
     // The extension empties it after committing. The content it had last
@@ -323,13 +323,13 @@ describe('ExtensionViewPanel', () => {
 
     expect(screen.getByText('Initialize one?')).toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: 'Initialize Repository' }))
-    expect(ipc.runExtensionCommand).toHaveBeenLastCalledWith('example.git.init', null, null)
+    expect(ipc.runExtensionCommand).toHaveBeenLastCalledWith('ferrite.git.init', null, null)
   })
 
   it("shows a container's views as sections that collapse, with their badges", async () => {
     const user = userEvent.setup()
-    const changes = view('sectionA', { title: 'Changes', container: 'example.git.scm' })
-    const commits = view('sectionB', { title: 'Commits', container: 'example.git.scm' })
+    const changes = view('sectionA', { title: 'Changes', container: 'ferrite.git.scm' })
+    const commits = view('sectionB', { title: 'Commits', container: 'ferrite.git.scm' })
     contribute([changes, commits])
     vi.mocked(ipc.getViewContent).mockImplementation(async id =>
       content(
@@ -344,7 +344,7 @@ describe('ExtensionViewPanel', () => {
       .mockReturnValue({ height: 200 } as DOMRect)
     layoutStore.set(DEFAULT_LAYOUT)
     try {
-      const { unmount } = render(<ExtensionContainerPanel container="example.git.scm" />)
+      const { unmount } = render(<ExtensionContainerPanel container="ferrite.git.scm" />)
       const toggle = await screen.findByRole('button', { name: 'Changes 3' })
       expect(toggle).toHaveAttribute('aria-expanded', 'true')
       expect(await screen.findByText('First commit')).toBeInTheDocument()
@@ -354,7 +354,7 @@ describe('ExtensionViewPanel', () => {
       const sash = screen.getByRole('separator', { name: 'Resize Commits' })
       expect(sash).toHaveAttribute('aria-valuenow', '200')
       fireEvent.keyDown(sash, { key: 'ArrowUp' })
-      expect(layoutStore.get().sections['example.git.scm']?.sizes).toEqual({
+      expect(layoutStore.get().sections['ferrite.git.scm']?.sizes).toEqual({
         [changes.fullId]: 184,
         [commits.fullId]: 216,
       })
@@ -366,11 +366,11 @@ describe('ExtensionViewPanel', () => {
       expect(screen.queryByText('First commit')).toBeNull()
       expect(screen.getByText('x.rs')).toBeInTheDocument()
       expect(screen.queryByRole('separator')).toBeNull()
-      expect(layoutStore.get().sections['example.git.scm']?.collapsed).toEqual([commits.fullId])
+      expect(layoutStore.get().sections['ferrite.git.scm']?.collapsed).toEqual([commits.fullId])
 
       // Shown again (as in the next session), it's as it was left.
       unmount()
-      render(<ExtensionContainerPanel container="example.git.scm" />)
+      render(<ExtensionContainerPanel container="ferrite.git.scm" />)
       expect(await screen.findByRole('button', { name: 'Commits' })).toHaveAttribute(
         'aria-expanded',
         'false',
@@ -387,17 +387,17 @@ describe('ExtensionViewPanel', () => {
   it('hides a section its manifest hides until the extension shows it', async () => {
     const repositories = view('repos', {
       title: 'Repositories',
-      container: 'example.git.scm',
+      container: 'ferrite.git.scm',
       hidden: true,
     })
-    const changes = view('sectionA', { title: 'Changes', container: 'example.git.scm' })
+    const changes = view('sectionA', { title: 'Changes', container: 'ferrite.git.scm' })
     contribute([repositories, changes])
     let shown: boolean | null = null
     vi.mocked(ipc.getViewContent).mockImplementation(async id =>
       content(id === repositories.fullId ? { visible: shown } : {}),
     )
     layoutStore.set(DEFAULT_LAYOUT)
-    render(<ExtensionContainerPanel container="example.git.scm" />)
+    render(<ExtensionContainerPanel container="ferrite.git.scm" />)
     expect(await screen.findByRole('button', { name: 'Changes' })).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Repositories' })).toBeNull()
 
@@ -407,9 +407,9 @@ describe('ExtensionViewPanel', () => {
   })
 
   it('resizes only the two sections either side of a boundary', async () => {
-    const changes = view('sectionA', { title: 'Changes', container: 'example.git.scm' })
-    const commits = view('sectionB', { title: 'Commits', container: 'example.git.scm' })
-    const stashes = view('sectionC', { title: 'Stashes', container: 'example.git.scm' })
+    const changes = view('sectionA', { title: 'Changes', container: 'ferrite.git.scm' })
+    const commits = view('sectionB', { title: 'Commits', container: 'ferrite.git.scm' })
+    const stashes = view('sectionC', { title: 'Stashes', container: 'ferrite.git.scm' })
     contribute([changes, commits, stashes])
     vi.mocked(ipc.getViewContent).mockResolvedValue(content({ items: [] }))
     // Measured heights needn't match shares (they include borders, say):
@@ -420,18 +420,18 @@ describe('ExtensionViewPanel', () => {
     layoutStore.set({
       ...DEFAULT_LAYOUT,
       sections: {
-        'example.git.scm': {
+        'ferrite.git.scm': {
           collapsed: [],
           sizes: { [changes.fullId]: 1, [commits.fullId]: 1, [stashes.fullId]: 2 },
         },
       },
     })
     try {
-      render(<ExtensionContainerPanel container="example.git.scm" />)
+      render(<ExtensionContainerPanel container="ferrite.git.scm" />)
       const sash = await screen.findByRole('separator', { name: 'Resize Commits' })
       fireEvent.keyDown(sash, { key: 'ArrowUp' })
       // Scaled to pixels, Stashes keeps half.
-      expect(layoutStore.get().sections['example.git.scm']?.sizes).toEqual({
+      expect(layoutStore.get().sections['ferrite.git.scm']?.sizes).toEqual({
         [changes.fullId]: 184,
         [commits.fullId]: 216,
         [stashes.fullId]: 400,

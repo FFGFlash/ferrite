@@ -95,8 +95,8 @@ impl Guest for Markdown {
 
   fn run_command(command: String, context: CommandContext) -> Result<(), String> {
     let beside = match command.as_str() {
-      "example.markdown.preview" => false,
-      "example.markdown.previewToSide" => true,
+      "ferrite.markdown.preview" => false,
+      "ferrite.markdown.previewToSide" => true,
       other => return Err(format!("unknown command {other}")),
     };
     let Some(id) = context.document else {

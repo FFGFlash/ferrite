@@ -132,7 +132,7 @@ impl Guest for Images {
 
   fn run_command(command: String, _context: CommandContext) -> Result<(), String> {
     match command.as_str() {
-      "example.images.details" => answer(),
+      "ferrite.images.details" => answer(),
       other => Err(format!("unknown command {other}")),
     }
   }

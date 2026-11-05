@@ -24,16 +24,16 @@ describe('parseLayout', () => {
 
   it("restores view containers' sections, dropping what isn't valid", () => {
     const sections = {
-      'example.git.scm': {
-        collapsed: ['example.git.commits', 7],
-        sizes: { 'example.git.changes': 320, 'example.git.commits': -1, 'bad': 'x' },
+      'ferrite.git.scm': {
+        collapsed: ['ferrite.git.commits', 7],
+        sizes: { 'ferrite.git.changes': 320, 'ferrite.git.commits': -1, 'bad': 'x' },
       },
       'broken': 'not an object',
     }
     expect(parseLayout({ sections }).sections).toEqual({
-      'example.git.scm': {
-        collapsed: ['example.git.commits'],
-        sizes: { 'example.git.changes': 320 },
+      'ferrite.git.scm': {
+        collapsed: ['ferrite.git.commits'],
+        sizes: { 'ferrite.git.changes': 320 },
       },
     })
     expect(parseLayout({ sections: [1] }).sections).toEqual({})
