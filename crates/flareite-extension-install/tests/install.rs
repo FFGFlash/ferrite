@@ -440,3 +440,30 @@ fn the_client_works_from_an_async_runtime_on_a_blocking_thread() {
   });
   assert_eq!(releases, Ok(Vec::new()));
 }
+
+/// Manifests carry only `major.minor.patch`, so an alpha of 1.0.0 installs as
+/// 1.0.0; the release 1.0.0 is still an update to it.
+#[test]
+fn a_prerelease_is_updated_by_the_release_it_leads_to() {
+  let server = Server::start();
+  let dir = tempfile::tempdir().expect("temp dir");
+  let installer = installer(dir.path());
+  let alpha = release(&server, "v1.0.0-alpha.1", &package("test.hello", "1.0.0"));
+  let staged = fetch(&server.client(), &installer, &alpha).expect("staged");
+  installer
+    .install(staged, &Source::new(repo(), alpha.tag.clone(), None))
+    .expect("installed");
+  let installed = installer.find("test.hello").expect("installed");
+  assert_eq!(installed.version, semver::Version::new(1, 0, 0));
+
+  let final_release = release(&server, "v1.0.0", &package("test.hello", "1.0.0"));
+  assert!(is_update(&final_release, &installed));
+  assert!(!is_update(&alpha, &installed));
+
+  // Copied in by hand, there's no tag: the manifest's version is all there is.
+  let by_hand = flareite_extension_install::Installed {
+    source: None,
+    ..installed
+  };
+  assert!(!is_update(&final_release, &by_hand));
+}

@@ -20,7 +20,10 @@ release, and asked for the official repositories to publish their releases thems
 The package is the extension's folder, zipped, with `extension.toml` at its root (or in its one
 top-level folder). One fixed asset name keeps it unambiguous, whatever else a release has.
 Versions are tags (`v1.2.0`), which the official repositories' workflow requires to match the
-manifest.
+manifest. Manifests carry only `major.minor.patch`: a prerelease is the tag with its name added
+(`v1.2.0-alpha.1`) and the manifest unchanged. So an installed extension's version for updates is
+the tag it came from, not its manifest's, or `v1.2.0` wouldn't count as newer than the alpha
+before it.
 
 ### Checked before it's asked about, asked about before it's installed
 

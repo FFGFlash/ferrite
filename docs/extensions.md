@@ -1568,9 +1568,12 @@ extension's folder, zipped, with `extension.toml` at its root (or in its one top
 its entrypoint inside it. Flareite installs it with **Extensions: Install Extension from
 GitHub…** and your repository's name.
 
-- **Versions.** Tag releases with the manifest's version (`v1.2.0` for `version = "1.2.0"`);
-  updates compare the newest release's tag with the installed version. Prereleases are listed
-  but never installed as updates. Releases without an `extension.zip` are skipped.
+- **Versions.** Tag releases with the manifest's version (`v1.2.0` for `version = "1.2.0"`). For
+  a prerelease, add its name to the tag and keep the manifest as it is: `v1.2.0-alpha.1` with
+  `version = "1.2.0"`. Prereleases are listed to choose from but never offered as updates. Updates
+  compare the newest release's tag with the tag the extension was installed from (or its
+  manifest's version, if it was copied in by hand), so `v1.2.0` updates `v1.2.0-alpha.1`.
+  Releases without an `extension.zip` are skipped.
 - **Checks.** The download must match the SHA-256 digest GitHub reports for the asset, be at
   most 100 MiB, and unpack to at most 256 MiB in 10,000 files, with no links and nothing outside
   its folder. The manifest is then checked as an installed extension's is.
@@ -1580,10 +1583,10 @@ GitHub…** and your repository's name.
   `extension.toml` of each repository's newest release.
 
 The official extensions publish with a workflow (`.github/workflows/release.yml` in each of their
-repositories) that runs when a `v*` tag is pushed. It checks the tag against the manifest's
-version, builds the extension if it has code (with the API from this repository, checked out
+repositories) that runs when a `v*` tag is pushed. It checks the tag's `major.minor.patch`
+against the manifest's version, builds the extension if it has code (with the API from this repository, checked out
 beside it), packs the extension's files with the `.wasm` beside the manifest, and creates the
-release with `extension.zip`. Tags with a hyphen (`v1.3.0-beta.1`) become prereleases. Copy it to
+release with `extension.zip`. Prerelease tags (`v1.3.0-alpha.1`) become prereleases. Copy it to
 publish yours the same way.
 
 ## Testing

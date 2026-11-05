@@ -65,10 +65,11 @@ CI runs the Rust checks on Windows, macOS, and Linux. Files use LF line endings
 Releases are built by `.github/workflows/release.yml` when a version tag is pushed:
 
 1. Set the version in `Cargo.toml` (`[workspace.package]`) and `package.json`, and commit.
-2. Tag the commit and push the tag: `git tag v0.2.0 && git push origin v0.2.0`. A tag with a
-   hyphen (`v0.3.0-beta.1`) makes a prerelease, which has no `.msi` (MSI versions must be
-   numbers).
-3. The workflow checks that the tag matches both versions, runs all of CI on the commit, drafts a
+2. Tag the commit and push the tag: `git tag v0.2.0 && git push origin v0.2.0`. For a prerelease,
+   add its name to the tag and leave the versions alone: `v0.2.0-alpha.1` publishes 0.2.0's code
+   as a prerelease. The app then reports 0.2.0, which keeps it able to run extensions that need
+   `>=0.2.0` (semver puts `0.2.0-alpha.1` before `0.2.0`).
+3. The workflow checks that the tag's `major.minor.patch` matches both versions, runs all of CI on the commit, drafts a
    release with notes generated from the commits, builds the installers on Windows, macOS
    (universal), and Linux (on Ubuntu 22.04, for older distributions) and uploads them, and then
    publishes the release.

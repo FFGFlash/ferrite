@@ -63,13 +63,21 @@ fn reset_text(reset: Option<u64>) -> String {
 
 /// Whether `release` is newer than the installed extension: by version if
 /// its tag names one, else by being another tag than the one installed.
+///
+/// Manifests carry `major.minor.patch` only, so a prerelease (tag
+/// `v1.0.0-alpha.1`) installs with the version of the release it leads to
+/// (`1.0.0`). The installed version is therefore the tag it came from, when
+/// that names one, so `v1.0.0` is an update to it.
 pub fn is_update(release: &Release, installed: &Installed) -> bool {
+  let source = installed.source.as_ref();
   match release.version() {
-    Some(version) => version > installed.version,
-    None => installed
-      .source
-      .as_ref()
-      .is_some_and(|source| source.tag != release.tag),
+    Some(version) => {
+      let current = source
+        .and_then(|source| tag_version(&source.tag))
+        .unwrap_or_else(|| installed.version.clone());
+      version > current
+    }
+    None => source.is_some_and(|source| source.tag != release.tag),
   }
 }
 

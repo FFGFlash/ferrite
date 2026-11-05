@@ -1,7 +1,9 @@
 # Publishes Flareite when a version tag is pushed (git tag v0.2.0 && git push
-# origin v0.2.0). The tag must match the version in Cargo.toml and
-# package.json; tags with a hyphen (v0.3.0-beta.1) are published as
-# prereleases.
+# origin v0.2.0). The tag's major.minor.patch must match the version in
+# Cargo.toml and package.json. A tag with a prerelease after it
+# (v0.2.0-alpha.1) is published as a prerelease of that version: the
+# manifests keep 0.2.0, so the app reports 0.2.0, and extensions that
+# require >=0.2.0 run in it (semver puts 0.2.0-alpha.1 before 0.2.0).
 #
 # 1. CI runs on the tagged commit (the whole of ci.yml).
 # 2. A draft release is created, with notes generated from the commits.
@@ -43,11 +45,14 @@ jobs:
           set -euo pipefail
           cargo=$(sed -n '/^\[workspace.package\]/,/^\[/s/^version = "\(.*\)"$/\1/p' Cargo.toml)
           node=$(node -p "require('./package.json').version")
-          if [ "v$cargo" != "$GITHUB_REF_NAME" ] || [ "$node" != "$cargo" ]; then
-            echo "::error::The tag $GITHUB_REF_NAME must match the version in Cargo.toml ($cargo) and package.json ($node)."
+          tag="${GITHUB_REF_NAME#v}"
+          # v0.2.0-alpha.1 releases 0.2.0's code as a prerelease.
+          base="${tag%%[-+]*}"
+          if [ "$base" != "$cargo" ] || [ "$node" != "$cargo" ]; then
+            echo "::error::The tag $GITHUB_REF_NAME must be v$cargo, or a prerelease of it (v$cargo-alpha.1), to match Cargo.toml ($cargo) and package.json ($node)."
             exit 1
           fi
-          if [[ "$cargo" == *-* ]]; then
+          if [[ "$tag" == *-* ]]; then
             echo "prerelease=true" >> "$GITHUB_OUTPUT"
           else
             echo "prerelease=false" >> "$GITHUB_OUTPUT"
@@ -90,8 +95,7 @@ jobs:
           - name: Windows
             os: windows-2025
             targets: ''
-            # MSI versions must be numbers, so prereleases get only the .exe.
-            args: ${{ needs.version.outputs.prerelease == 'true' && '--bundles nsis' || '' }}
+            args: ''
           - name: macOS
             os: macos-15
             targets: aarch64-apple-darwin,x86_64-apple-darwin
