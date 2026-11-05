@@ -1,8 +1,16 @@
 import { CircleAlert, Settings } from 'lucide-react'
-import type { KeyboardEvent, MouseEvent } from 'react'
+import { useEffect, type KeyboardEvent, type MouseEvent } from 'react'
 import { executeCommand } from '../commands/registry'
 import { openContextMenu } from '../components/contextMenuState'
+import type { CatalogEntry } from '../ipc/extensionInstall'
 import type { ExtensionStatus } from '../ipc/extensions'
+import {
+  catalogStore,
+  installBusy,
+  installRelease,
+  loadCatalog,
+  sourcesStore,
+} from '../state/extensionInstall'
 import { extensionsStore, openExtension } from '../state/extensions'
 import { useStore } from '../state/store'
 import { ExtensionIcon, duration, manageEntries, stateLabels, troubled } from './extensionInfo'
@@ -11,34 +19,126 @@ import './ExtensionsPanel.css'
 /**
  * Installed and development extensions, one row each: icon, name,
  * description, author, and how long it took to start. Choosing one opens
- * its page (README, permissions, and the rest).
+ * its page (README, permissions, and the rest). Below them, the official
+ * extensions not installed yet, to install from their GitHub releases.
  */
 export function ExtensionsPanel() {
   const extensions = useStore(extensionsStore)
-  if (extensions.length === 0) {
-    return (
-      <div className="extensions-panel__empty">
-        <p>No extensions are installed.</p>
-        <p>
-          Put extension folders in the <code>extensions</code> folder next to your settings file, or
-          load one you are developing.
-        </p>
-        <button
-          type="button"
-          className="extensions-panel__button"
-          onClick={() => void executeCommand('extensions.addDevelopment')}
-        >
-          Load Development Extension…
-        </button>
-      </div>
-    )
+  useEffect(() => {
+    void loadCatalog()
+  }, [])
+  return (
+    <div className="extensions-panel">
+      {extensions.length === 0 ? (
+        <div className="extensions-panel__empty">
+          <p>No extensions are installed.</p>
+          <p>
+            Install one below or from a GitHub repository, put extension folders in the{' '}
+            <code>extensions</code> folder next to your settings file, or load one you are
+            developing.
+          </p>
+          <p className="extensions-panel__buttons">
+            <button
+              type="button"
+              className="extensions-panel__button"
+              onClick={() => void executeCommand('extensions.installFromGitHub')}
+            >
+              Install from GitHub…
+            </button>
+            <button
+              type="button"
+              className="extensions-panel__button"
+              onClick={() => void executeCommand('extensions.addDevelopment')}
+            >
+              Load Development Extension…
+            </button>
+          </p>
+        </div>
+      ) : (
+        <ul className="extensions-panel__list" aria-label="Extensions" onKeyDown={onListKeys}>
+          {extensions.map(extension => (
+            <ExtensionRow key={extension.id} extension={extension} />
+          ))}
+        </ul>
+      )}
+      <Catalog installed={extensions} />
+    </div>
+  )
+}
+
+/** The official extensions that aren't installed, each with an Install button. */
+function Catalog({ installed }: { installed: readonly ExtensionStatus[] }) {
+  const catalog = useStore(catalogStore)
+  const busy = useStore(installBusy)
+  if (catalog.state === 'idle') {
+    return null
+  }
+  const ids = new Set(installed.map(extension => extension.id))
+  const available =
+    catalog.state === 'loaded' ? catalog.entries.filter(entry => !ids.has(entry.id)) : []
+  if (catalog.state === 'loaded' && available.length === 0) {
+    return null
   }
   return (
-    <ul className="extensions-panel" aria-label="Extensions" onKeyDown={onListKeys}>
-      {extensions.map(extension => (
-        <ExtensionRow key={extension.id} extension={extension} />
-      ))}
-    </ul>
+    <section className="extensions-catalog" aria-labelledby="extensions-catalog-heading">
+      <h2 id="extensions-catalog-heading" className="extensions-catalog__heading">
+        Official Extensions
+      </h2>
+      {catalog.state === 'loading' && <p className="extensions-panel__empty">Loading…</p>}
+      {catalog.state === 'failed' && (
+        <div className="extensions-panel__empty">
+          <p role="alert">The official extensions couldn't be listed. {catalog.message}</p>
+          <button
+            type="button"
+            className="extensions-panel__button"
+            onClick={() => void loadCatalog(true)}
+          >
+            Try Again
+          </button>
+        </div>
+      )}
+      {available.length > 0 && (
+        <ul className="extensions-panel__list" aria-label="Official extensions to install">
+          {available.map(entry => (
+            <CatalogRow key={`${entry.repo} ${entry.id}`} entry={entry} busy={busy} />
+          ))}
+        </ul>
+      )}
+    </section>
+  )
+}
+
+function CatalogRow({ entry, busy }: { entry: CatalogEntry; busy: boolean }) {
+  const title = [
+    `${entry.name} ${entry.version}`,
+    entry.author ? `${entry.id} · by ${entry.author}` : entry.id,
+    entry.description,
+    `From ${entry.repo} (release ${entry.tag})`,
+  ]
+    .filter(Boolean)
+    .join('\n')
+  return (
+    <li className="catalog-row" title={title}>
+      <span className="extension-row__text">
+        <span className="extension-row__line">
+          <span className="extension-row__name">{entry.name}</span>
+          <span className="extension-row__time">{entry.version}</span>
+        </span>
+        <span className="extension-row__description">{entry.description || ' '}</span>
+        <span className="extension-row__line">
+          <span className="extension-row__author">{entry.author ?? entry.id}</span>
+        </span>
+      </span>
+      <button
+        type="button"
+        className="extensions-panel__button"
+        aria-label={`Install ${entry.name}`}
+        disabled={busy}
+        onClick={() => void installRelease(entry.repo, entry.tag)}
+      >
+        Install
+      </button>
+    </li>
   )
 }
 
@@ -85,6 +185,7 @@ export function rowTooltip(extension: ExtensionStatus): string {
 
 function ExtensionRow({ extension }: { extension: ExtensionStatus }) {
   const { activationMs } = extension.usage
+  const update = useStore(sourcesStore)[extension.id]?.update ?? null
   const showMenu = (x: number, y: number) => openContextMenu(x, y, manageEntries(extension))
   const onContextMenu = (event: MouseEvent) => {
     event.preventDefault()
@@ -109,6 +210,11 @@ function ExtensionRow({ extension }: { extension: ExtensionStatus }) {
           <span className="extension-row__line">
             <span className="extension-row__name">{extension.name}</span>
             {extension.development && <span className="extension-row__badge">dev</span>}
+            {update && !extension.development && (
+              <span className="extension-row__badge" title={`${update} is available`}>
+                update
+              </span>
+            )}
             {activationMs !== null && (
               <span className="extension-row__time" aria-hidden="true">
                 {duration(activationMs)}
@@ -152,6 +258,15 @@ function ExtensionRow({ extension }: { extension: ExtensionStatus }) {
 export function ExtensionsActions() {
   return (
     <>
+      <button
+        type="button"
+        className="dock-action"
+        title="Install Extension from GitHub…"
+        aria-label="Install Extension from GitHub"
+        onClick={() => void executeCommand('extensions.installFromGitHub')}
+      >
+        ⤓
+      </button>
       <button
         type="button"
         className="dock-action"

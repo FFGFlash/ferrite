@@ -1,0 +1,27 @@
+[package]
+name = "flareite-extension-install"
+description = "Installing extensions from GitHub releases: finding releases and catalogs, downloading and checking packages, and installing, updating, and removing extensions."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+flareite-extension-host = { workspace = true }
+reqwest = { workspace = true }
+semver = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+sha2 = { workspace = true }
+tempfile = { workspace = true }
+thiserror = { workspace = true }
+toml = { workspace = true }
+tracing = { workspace = true }
+zip = { workspace = true }
+
+[dev-dependencies]
+# Writing packages.
+zip = { workspace = true }
+
+[lints]
+workspace = true

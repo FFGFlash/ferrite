@@ -13,6 +13,7 @@ mod editor;
 mod entries;
 mod error;
 mod events;
+mod extension_install;
 mod extensions;
 mod file_drop;
 mod languages;
@@ -45,6 +46,7 @@ pub fn run() {
     .manage(perf::Perf::default())
     .manage(lsp::LspState::default())
     .manage(extensions::ExtensionsState::default())
+    .manage(extension_install::InstallState::default())
     .manage(languages::LanguagesState::default())
     .manage(terminal::TerminalState::default())
     .manage(file_drop::DropState::default())
@@ -269,6 +271,12 @@ pub fn run() {
       extensions::extension_set_enabled,
       extensions::extension_restart,
       extensions::extension_add_development,
+      extension_install::extension_releases,
+      extension_install::extension_install,
+      extension_install::extension_uninstall,
+      extension_install::extension_catalog,
+      extension_install::extension_sources,
+      extension_install::extension_check_updates,
       perf::perf_stats,
       bench::bench_config,
       bench::bench_generate,

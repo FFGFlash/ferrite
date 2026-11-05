@@ -1554,8 +1554,37 @@ extensions/
     tidy.wasm
 ```
 
+Users install extensions from GitHub releases (see [Publishing](#publishing)), which puts each in
+a folder named by its id with `.flareite-install.json`, a record of the repository and release it
+came from, for updates. Copying a folder in by hand works too.
+
 If an installed extension and a development extension share an id, the development extension
 wins. Set `extensions.enabled = false` to load none.
+
+## Publishing
+
+Publish an extension as a GitHub release with an asset named **`extension.zip`**: the
+extension's folder, zipped, with `extension.toml` at its root (or in its one top-level folder) and
+its entrypoint inside it. Flareite installs it with **Extensions: Install Extension from
+GitHub…** and your repository's name.
+
+- **Versions.** Tag releases with the manifest's version (`v1.2.0` for `version = "1.2.0"`);
+  updates compare the newest release's tag with the installed version. Prereleases are listed
+  but never installed as updates. Releases without an `extension.zip` are skipped.
+- **Checks.** The download must match the SHA-256 digest GitHub reports for the asset, be at
+  most 100 MiB, and unpack to at most 256 MiB in 10,000 files, with no links and nothing outside
+  its folder. The manifest is then checked as an installed extension's is.
+- **Listing.** Repositories with the `flareite-extension` topic are listed in the Extensions view
+  for users who add their owner to `extensions.catalog` (the official ones are under
+  `FlareiteLabs`). The list shows the name, version, description, and author from the
+  `extension.toml` of each repository's newest release.
+
+The official extensions publish with a workflow (`.github/workflows/release.yml` in each of their
+repositories) that runs when a `v*` tag is pushed. It checks the tag against the manifest's
+version, builds the extension if it has code (with the API from this repository, checked out
+beside it), packs the extension's files with the `.wasm` beside the manifest, and creates the
+release with `extension.zip`. Tags with a hyphen (`v1.3.0-beta.1`) become prereleases. Copy it to
+publish yours the same way.
 
 ## Testing
 

@@ -454,6 +454,17 @@ fn extensions_wait_for_permission_and_denied_permissions_are_enforced() {
 }
 
 #[test]
+fn forgotten_decisions_are_asked_for_again() {
+  let s = setup("tidy", "tidy", Some(ALL), "", |m| m);
+  s.host.set_enabled("example.tidy", false);
+  assert_eq!(state_of(&s.host).0, ExtensionState::Disabled);
+  // As when it's uninstalled and installed again.
+  s.host.forget_decisions("example.tidy");
+  s.host.load();
+  assert_eq!(state_of(&s.host).0, ExtensionState::AwaitingPermission);
+}
+
+#[test]
 fn document_changes_are_sent_as_incremental_utf8_changes() {
   let s = misbehaving("");
   let id = s.fake.open(&s.host, "héllo\nworld");

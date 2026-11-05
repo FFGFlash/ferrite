@@ -1,7 +1,41 @@
-.extensions-panel {
+.extensions-panel__list {
   margin: 0;
   padding: 0 0 var(--space-2);
   list-style: none;
+}
+
+.extensions-panel__buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.extensions-panel__button:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.extensions-catalog__heading {
+  margin: var(--space-2) 0 var(--space-1);
+  padding: 0 var(--space-3);
+  color: var(--color-text-muted);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+/* The same height as an installed extension's row. */
+.catalog-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  height: 62px;
+  padding: 0 var(--space-3);
+}
+
+.catalog-row:hover {
+  background: var(--color-list-hover-background);
 }
 
 .extensions-panel__empty {

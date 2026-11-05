@@ -22,6 +22,7 @@ tauri-build = { workspace = true }
 flareite-core = { workspace = true }
 flareite-diff = { workspace = true }
 flareite-extension-host = { workspace = true }
+flareite-extension-install = { workspace = true }
 flareite-lsp = { workspace = true }
 flareite-syntax = { workspace = true }
 flareite-tasks = { workspace = true }

@@ -18,6 +18,7 @@ import {
   type Permission,
   type PreviewContent,
 } from '../ipc/extensions'
+import { installBusy, sourcesStore, update } from '../state/extensionInstall'
 import { extensionsStore, useExtensionUsage } from '../state/extensions'
 import { reportError } from '../state/notifications'
 import { extensionChannel, showOutput } from '../state/output'
@@ -78,6 +79,8 @@ export function ExtensionPage({ id }: { id: string }) {
   const extension = useStore(extensionsStore).find(candidate => candidate.id === id)
   const usage = useExtensionUsage().get(id) ?? extension?.usage
   const readme = useReadme(extension)
+  const source = useStore(sourcesStore)[id]
+  const busy = useStore(installBusy)
   const loadImage = useCallback((path: string) => getExtensionReadmeImage(id, path), [id])
   if (!extension || !usage) {
     return <p className="panel-empty">This extension is no longer loaded.</p>
@@ -109,6 +112,11 @@ export function ExtensionPage({ id }: { id: string }) {
             )}
             <span className="extension-page__id">{extension.id}</span>
           </p>
+          {source && !extension.development && (
+            <p className="extension-page__meta">
+              Installed from {source.repository} (release {source.tag})
+            </p>
+          )}
           {extension.description && (
             <p className="extension-page__description">{extension.description}</p>
           )}
@@ -126,9 +134,19 @@ export function ExtensionPage({ id }: { id: string }) {
           </p>
           {!invalid && (
             <div className="extension-page__actions">
+              {source?.update && !extension.development && (
+                <button
+                  type="button"
+                  className="extension-page__button extension-page__button--primary"
+                  disabled={busy}
+                  onClick={() => void update(source)}
+                >
+                  Update to {source.update}
+                </button>
+              )}
               <button
                 type="button"
-                className="extension-page__button extension-page__button--primary"
+                className={`extension-page__button${source?.update && !extension.development ? '' : ' extension-page__button--primary'}`}
                 onClick={() => toggleEnabled(extension)}
               >
                 {disabled ? 'Enable' : 'Disable'}

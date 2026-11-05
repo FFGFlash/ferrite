@@ -19,6 +19,7 @@ import {
 } from '../state/documents'
 import { viewersFor } from '../state/viewers'
 import { addDevelopmentExtension, reloadExtensions } from '../ipc/extensions'
+import { checkForUpdates, installFromGitHub } from '../state/extensionInstall'
 import {
   listEncodings,
   listLanguages,
@@ -741,6 +742,18 @@ export const builtinCommands: Command[] = [
       await reloadExtensions()
       notify('info', 'Extensions reloaded.')
     },
+  },
+  {
+    id: 'extensions.installFromGitHub',
+    category: 'Extensions',
+    title: 'Install Extension from GitHub…',
+    run: installFromGitHub,
+  },
+  {
+    id: 'extensions.checkForUpdates',
+    category: 'Extensions',
+    title: 'Check for Extension Updates',
+    run: () => checkForUpdates(),
   },
   {
     id: 'extensions.addDevelopment',

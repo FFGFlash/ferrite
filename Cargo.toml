@@ -13,6 +13,7 @@ license = "MIT OR Apache-2.0"
 flareite-core = { path = "crates/flareite-core" }
 flareite-diff = { path = "crates/flareite-diff" }
 flareite-extension-host = { path = "crates/flareite-extension-host" }
+flareite-extension-install = { path = "crates/flareite-extension-install" }
 flareite-lsp = { path = "crates/flareite-lsp" }
 flareite-process = { path = "crates/flareite-process" }
 flareite-syntax = { path = "crates/flareite-syntax" }
@@ -43,6 +44,13 @@ open = "5.4.5"
 nucleo-matcher = "0.3.1"
 portable-pty = "0.9.0"
 regex-automata = "0.4.18"
+# Installing extensions from GitHub. The version Tauri already uses, with
+# rustls and the operating system's certificates.
+reqwest = { version = "0.13.5", default-features = false, features = [
+  "blocking",
+  "rustls",
+  "system-proxy",
+] }
 regex-cursor = "0.1.5"
 regex-syntax = "0.8.11"
 semver = "1.0.28"
@@ -94,6 +102,8 @@ win32job = "2.0.3"
 # The version Tauri already uses.
 windows-version = "0.1.7"
 wit-component = { version = "0.262.0", default-features = false }
+# Extension packages: reading (and, in tests, writing) deflated zip files.
+zip = { version = "9.3.0", default-features = false, features = ["deflate-flate2-zlib-rs"] }
 
 [workspace.lints.rust]
 unsafe_code = "deny"

@@ -2009,6 +2009,17 @@ impl ExtensionHost {
     self.update_decision(id, |decision, _| decision.disabled = !enabled);
   }
 
+  /// Forgets the user's decisions about an extension (its permissions, and
+  /// whether it's turned off), as when it's uninstalled: installed again,
+  /// it asks again. Takes effect for a loaded extension when it next loads.
+  pub fn forget_decisions(&self, id: &str) {
+    self
+      .shared
+      .lock()
+      .decisions
+      .set(id, crate::permissions::Decision::default());
+  }
+
   fn update_decision(&self, id: &str, change: impl FnOnce(&mut Decision, &[Permission])) {
     let mut outbox = Outbox::default();
     {

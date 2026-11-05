@@ -151,8 +151,8 @@ edit. Without any, files are plain text. A file's language comes from its name a
 status bar; click it (or run **View: Change Language Mode**, `Ctrl+K M`) to choose another one,
 plain text, or to go back to detecting it. The choice lasts while the file is open. A language
 extension brings a Tree-sitter grammar compiled to WebAssembly for highlighting, and usually
-declares a language server. The official ones (`flareite.*`) each have a repository of their own;
-all but Markdown have no code to build:
+declares a language server. The official ones (`flareite.*`) each have a repository of their
+own:
 
 | Extension               | Languages                        | Language server                   | Install the server with                                |
 | ----------------------- | -------------------------------- | --------------------------------- | ------------------------------------------------------ |
@@ -165,11 +165,9 @@ all but Markdown have no code to build:
 | XML                     | XML                              | —                                 |                                                        |
 | Markdown                | Markdown                         | —                                 |                                                        |
 
-Load one with **Extensions: Load Development Extension…** (choose its folder, such as a checkout
-of the Rust extension), or install it by copying its folder into the `extensions` folder next to
-`settings.toml`. Flareite asks before running an extension's language server; highlighting
-works either way. Markdown's highlighting needs no build either; its preview does (see
-[Extensions](#extensions)).
+Install one from the **Official Extensions** in the Extensions view (see
+[Installing extensions](#installing-extensions)). Flareite asks before running an extension's
+language server; highlighting works either way.
 
 With a language server, Flareite also shows errors and warnings as you type (squiggles, and in
 **View: Problems** with every file's, counted in the status bar), shows type information and documentation when the pointer rests on a
@@ -234,9 +232,37 @@ cd extensions && cargo build --release
 Then run **Extensions: Load Development Extension…** and choose an extension's folder, such as
 `extensions/todos`. The official extensions with code build the same way in their own
 repositories (`cargo build --release`), which expect this one checked out beside them as
-`editor`, for the extension API. To install
-an extension, copy its folder (manifest and `.wasm`) into the `extensions` folder next to
-`settings.toml`. See [`docs/extensions.md`](docs/extensions.md) for writing your own.
+`editor`, for the extension API. See [`docs/extensions.md`](docs/extensions.md) for writing your
+own.
+
+### Installing extensions
+
+Extensions are installed from their GitHub releases:
+
+- **Official Extensions**, below the installed ones in the Extensions view, lists the official
+  extensions you don't have, each with an **Install** button. They're the repositories of the
+  owners in `extensions.catalog` (`["FlareiteLabs"]` unless you change it) that have the
+  `flareite-extension` topic. The list is fetched from GitHub when the view first opens in a
+  session; `catalog = []` turns it off.
+- **Extensions: Install Extension from GitHub…** (the ⤓ button in the view's header) asks for a
+  repository (`owner/name` or its address), then lists its releases to choose one, newest first.
+
+Flareite downloads the release's `extension.zip`, checks it against the digest GitHub publishes
+for it, unpacks it, and checks its manifest. Then it asks, showing the extension's name, version,
+author, and the permissions it requests, before installing it into the `extensions` folder next
+to `settings.toml`. It still asks before the extension uses any of those permissions.
+
+- **Updates.** **Extensions: Check for Extension Updates** looks for newer releases of the
+  extensions installed from GitHub, marks them in the Extensions view, and offers to install
+  them. An extension's gear menu and page have **Update to …** once one is found, and
+  **Install Another Version…** to choose any release.
+- **Uninstalling.** **Uninstall…** in an extension's gear menu deletes its folder, with the
+  values it stored and the permissions you gave it; its settings stay in `settings.toml`.
+- **By hand.** Copying an extension's folder (manifest and `.wasm`) into the `extensions` folder
+  installs it too.
+
+Flareite uses the network only for these, never in the background. GitHub allows 60 requests an
+hour without signing in; listing the official extensions takes one for each of them.
 
 ## Customizing
 

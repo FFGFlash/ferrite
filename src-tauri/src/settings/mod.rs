@@ -101,6 +101,11 @@ const TEMPLATE: &str = r##"# Flareite settings. Uncomment a line to change it; s
 # Folders of extensions under development, loaded in place:
 # development = ["C:/code/my-extension"]
 #
+# GitHub owners whose extensions (repositories with the "flareite-extension"
+# topic) the Extensions view lists to install; [] lists none and asks GitHub
+# nothing until you install one by its repository:
+# catalog = ["FlareiteLabs"]
+#
 # Settings that extensions declare, by extension id:
 # [extensions.settings."example.tidy"]
 # max_line_length = 120
@@ -187,6 +192,8 @@ pub struct ExtensionsSettings {
   pub settings: BTreeMap<String, toml::Table>,
   /// Paths of programs extensions run, by `<extension id>.<program>`.
   pub programs: BTreeMap<String, String>,
+  /// GitHub owners whose extensions the Extensions view lists to install.
+  pub catalog: Vec<String>,
 }
 
 impl Default for ExtensionsSettings {
@@ -196,6 +203,7 @@ impl Default for ExtensionsSettings {
       development: Vec::new(),
       settings: BTreeMap::new(),
       programs: BTreeMap::new(),
+      catalog: vec!["FlareiteLabs".into()],
     }
   }
 }

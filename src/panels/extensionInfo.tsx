@@ -11,6 +11,13 @@ import {
   type ExtensionStatus,
 } from '../ipc/extensions'
 import { writeClipboardText } from '../ipc/workspace'
+import {
+  chooseRelease,
+  installBusy,
+  sourcesStore,
+  uninstall,
+  update,
+} from '../state/extensionInstall'
 import { openExtension, useExtensionIcon } from '../state/extensions'
 import { reportError } from '../state/notifications'
 import { extensionChannel, showOutput } from '../state/output'
@@ -116,12 +123,38 @@ export function restart(extension: ExtensionStatus): void {
   act('Restarting the extension', () => restartExtension(extension.id))
 }
 
+/** Updating, choosing another release, and uninstalling: for installed extensions. */
+function installEntries(extension: ExtensionStatus): MenuEntry[] {
+  if (extension.development) {
+    return []
+  }
+  const source = sourcesStore.get()[extension.id]
+  const busy = installBusy.get()
+  return [
+    null,
+    ...(source?.update
+      ? [{ label: `Update to ${source.update}`, run: () => void update(source), disabled: busy }]
+      : []),
+    ...(source
+      ? [
+          {
+            label: 'Install Another Version…',
+            run: () => void chooseRelease(source.repository),
+            disabled: busy,
+          },
+        ]
+      : []),
+    { label: 'Uninstall…', run: () => void uninstall(extension), disabled: busy },
+  ]
+}
+
 /** The extension's actions, for its manage menu. */
 export function manageEntries(extension: ExtensionStatus, onPage = false): MenuEntry[] {
   if (extension.state === 'invalid') {
     return [
       ...(onPage ? [] : [{ label: 'Show Details', run: () => openExtension(extension.id) }]),
       { label: 'Copy Folder Path', run: () => copy(extension.path) },
+      ...installEntries(extension),
     ]
   }
   const disabled = extension.state === 'disabled'
@@ -136,6 +169,7 @@ export function manageEntries(extension: ExtensionStatus, onPage = false): MenuE
     { label: 'Show Log', run: () => showOutput(extensionChannel(extension.id)) },
     null,
     { label: 'Copy Extension ID', run: () => copy(extension.id) },
+    ...installEntries(extension),
   ]
 }
 

@@ -20,6 +20,7 @@ import {
   showExtensionMessage,
   viewChanged,
 } from './extensions'
+import { refreshSources } from './extensionInstall'
 import { notify } from './notifications'
 import { previewChanged, refreshPreviews, showPreviewRequested } from './previews'
 import { fileProblemsChanged, refreshSettingsProblem } from './problems'
@@ -139,6 +140,7 @@ export function handleEvent(event: AppEvent): void {
       break
     case 'extensionsChanged':
       void refreshExtensions()
+      void refreshSources()
       void refreshViewBadges()
       // Their settings, themes, and icon themes.
       refreshSettingsIfLoaded()

@@ -13,7 +13,18 @@ vi.mock('../ipc/extensions', () => ({
   listExtensions: vi.fn(() => new Promise(() => {})),
 }))
 
+vi.mock('../ipc/extensionInstall', () => ({
+  getExtensionCatalog: vi.fn(() => Promise.resolve([])),
+  installExtension: vi.fn(() => Promise.resolve(null)),
+  listExtensionReleases: vi.fn(),
+  listExtensionSources: vi.fn(() => Promise.resolve([])),
+  uninstallExtension: vi.fn(() => Promise.resolve(false)),
+  checkExtensionUpdates: vi.fn(() => Promise.resolve([])),
+}))
+
 const ipc = await import('../ipc/extensions')
+const install = await import('../ipc/extensionInstall')
+const { catalogStore, sourcesStore } = await import('../state/extensionInstall')
 const { extensionsStore } = await import('../state/extensions')
 const { setPageHandler } = await import('../state/viewRequests')
 const { contextMenuStore } = await import('../components/contextMenuState')
@@ -79,6 +90,9 @@ const tidy: ExtensionStatus = {
   },
 }
 
+/** Tidy installed from GitHub (its own path, so its icon loads separately). */
+const installedTidy: ExtensionStatus = { ...tidy, development: false, path: '/installed/tidy' }
+
 const broken: ExtensionStatus = {
   ...tidy,
   id: '/ext/broken',
@@ -101,6 +115,82 @@ describe('ExtensionsPanel', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     contextMenuStore.set(null)
+    catalogStore.set({ state: 'idle' })
+    sourcesStore.set({})
+  })
+
+  it('lists the official extensions that are not installed, to install', async () => {
+    const user = userEvent.setup()
+    vi.mocked(install.getExtensionCatalog).mockResolvedValue([
+      {
+        repo: 'FlareiteLabs/flareite-git-ext',
+        id: 'flareite.git',
+        name: 'Git',
+        description: 'Source control.',
+        author: 'Flareite',
+        version: '0.5.0',
+        tag: 'v0.5.0',
+      },
+      {
+        repo: 'FlareiteLabs/flareite-tidy-ext',
+        id: 'example.tidy',
+        name: 'Tidy',
+        description: 'Installed already.',
+        author: 'Flareite',
+        version: '0.1.0',
+        tag: 'v0.1.0',
+      },
+    ])
+    extensionsStore.set([installedTidy])
+    render(<ExtensionsPanel />)
+    const official = await screen.findByRole('list', { name: 'Official extensions to install' })
+    const rows = within(official).getAllByRole('listitem')
+    expect(rows).toHaveLength(1)
+    expect(rows[0]).toHaveTextContent('Git0.5.0Source control.Flareite')
+    expect(install.getExtensionCatalog).toHaveBeenCalledWith(false)
+    await user.click(within(official).getByRole('button', { name: 'Install Git' }))
+    expect(install.installExtension).toHaveBeenCalledWith('FlareiteLabs/flareite-git-ext', 'v0.5.0')
+  })
+
+  it('says why the official extensions could not be listed, and tries again', async () => {
+    const user = userEvent.setup()
+    vi.mocked(install.getExtensionCatalog).mockRejectedValueOnce(new Error('Offline.'))
+    extensionsStore.set([installedTidy])
+    render(<ExtensionsPanel />)
+    expect(await screen.findByRole('alert')).toHaveTextContent('Offline.')
+    await user.click(screen.getByRole('button', { name: 'Try Again' }))
+    expect(install.getExtensionCatalog).toHaveBeenLastCalledWith(true)
+  })
+
+  it('marks updates, and offers updating, other versions, and uninstalling', async () => {
+    const user = userEvent.setup()
+    extensionsStore.set([installedTidy])
+    sourcesStore.set({
+      'example.tidy': {
+        id: 'example.tidy',
+        repository: 'FlareiteLabs/flareite-tidy-ext',
+        tag: 'v0.1.0',
+        update: 'v0.2.0',
+      },
+    })
+    render(<ExtensionsPanel />)
+    expect(screen.getByRole('button', { name: 'Tidy' })).toHaveTextContent('update')
+    await user.click(screen.getByRole('button', { name: 'Manage Tidy' }))
+    const labels = (contextMenuStore.get()?.entries ?? []).map(entry => entry?.label)
+    expect(labels.slice(-3)).toEqual(['Update to v0.2.0', 'Install Another Version…', 'Uninstall…'])
+    const updateEntry = contextMenuStore.get()?.entries.find(e => e?.label === 'Update to v0.2.0')
+    act(() => void updateEntry?.run())
+    expect(install.installExtension).toHaveBeenCalledWith(
+      'FlareiteLabs/flareite-tidy-ext',
+      'v0.2.0',
+    )
+
+    // A development extension is the developer's to remove.
+    act(() => contextMenuStore.set(null))
+    extensionsStore.set([{ ...installedTidy, development: true }])
+    await user.click(screen.getByRole('button', { name: 'Manage Tidy' }))
+    const devLabels = (contextMenuStore.get()?.entries ?? []).map(entry => entry?.label)
+    expect(devLabels).not.toContain('Uninstall…')
   })
 
   it('explains how to add extensions when there are none', () => {

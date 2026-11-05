@@ -33,7 +33,7 @@ use crate::lsp::{DiagnosticDto, DiagnosticMessageDto};
 use crate::settings::{self, Settings, SettingsState};
 use crate::workspace::WorkspaceState;
 
-const EXTENSIONS_DIR: &str = "extensions";
+pub(crate) const EXTENSIONS_DIR: &str = "extensions";
 const PERMISSIONS_FILE: &str = "extension-permissions.json";
 /// Extensions' stored values and webview tabs' states, in the local data
 /// directory.
@@ -324,7 +324,7 @@ impl Embedder for AppEmbedder {
   }
 }
 
-fn config_dir(app: &AppHandle) -> Option<PathBuf> {
+pub(crate) fn config_dir(app: &AppHandle) -> Option<PathBuf> {
   app.path().app_config_dir().ok()
 }
 
@@ -405,7 +405,12 @@ pub fn init(app: &AppHandle, load: bool) {
 
 /// Applies changed extension settings.
 pub fn settings_changed(app: &AppHandle, previous: &Settings, settings: &Settings) {
-  if previous.extensions == settings.extensions {
+  // The catalog is the Extensions view's; the host doesn't use it.
+  let unchanged = settings::ExtensionsSettings {
+    catalog: settings.extensions.catalog.clone(),
+    ..previous.extensions.clone()
+  } == settings.extensions;
+  if unchanged {
     return;
   }
   if let Some(host) = app.state::<ExtensionsState>().host() {

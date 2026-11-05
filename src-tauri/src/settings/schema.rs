@@ -213,6 +213,14 @@ const SPECS: &[Spec] = &[
     value: |s| json!(s.extensions.development),
   },
   Spec {
+    path: &["extensions", "catalog"],
+    section: "Extensions",
+    title: "Catalog",
+    description: "GitHub owners whose extensions (repositories with the \"flareite-extension\" topic) the Extensions view lists to install. Empty lists none.",
+    kind: Kind::List,
+    value: |s| json!(s.extensions.catalog),
+  },
+  Spec {
     path: &["extensions", "programs"],
     section: "Extensions",
     title: "Program Paths",

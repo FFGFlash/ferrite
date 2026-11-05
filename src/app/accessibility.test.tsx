@@ -8,6 +8,7 @@ import { Breadcrumbs } from '../editor/Breadcrumbs'
 import { EditorView } from '../editor/EditorView'
 import type { EditorTransport } from '../editor/session'
 import type { WireView } from '../ipc/editor'
+import { catalogStore } from '../state/extensionInstall'
 import { extensionsStore } from '../state/extensions'
 import { DEFAULT_LAYOUT, layoutStore } from '../state/layout'
 import { notifications, notify } from '../state/notifications'
@@ -113,6 +114,21 @@ describe('accessibility (axe)', () => {
         },
       },
     ])
+    // Official extensions to install, below the installed ones.
+    catalogStore.set({
+      state: 'loaded',
+      entries: [
+        {
+          repo: 'FlareiteLabs/flareite-git-ext',
+          id: 'flareite.git',
+          name: 'Git',
+          description: 'Source control.',
+          author: 'Flareite',
+          version: '0.5.0',
+          tag: 'v0.5.0',
+        },
+      ],
+    })
     render(<Workbench appInfo={null} />)
     expect(await axeViolations()).toEqual([])
 
@@ -120,6 +136,7 @@ describe('accessibility (axe)', () => {
       await user.click(screen.getByRole('button', { name }))
       expect(await axeViolations(), name).toEqual([])
     }
+    expect(screen.getByRole('button', { name: 'Install Git' })).toBeInTheDocument()
     // An extension's page, from its row.
     await user.click(screen.getByRole('button', { name: /^Tidy/ }))
     expect(await screen.findByRole('article', { name: 'Tidy' })).toBeInTheDocument()
