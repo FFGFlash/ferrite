@@ -170,7 +170,10 @@ async fn blocking<T: Send + 'static>(
     .map_err(install_error)
 }
 
-fn client(app: &AppHandle) -> Result<Client, CommandError> {
+/// The GitHub client, made the first time it's needed. Call it only on a
+/// blocking thread (in [`blocking`]): reqwest's blocking client starts and
+/// stops a runtime of its own, which panics on Tauri's async runtime.
+fn client(app: &AppHandle) -> Result<Client, InstallError> {
   app
     .state::<InstallState>()
     .client
@@ -182,7 +185,7 @@ fn client(app: &AppHandle) -> Result<Client, CommandError> {
       Client::new(&user_agent).map_err(|error| error.to_string())
     })
     .clone()
-    .map_err(|message| CommandError::new("network", message))
+    .map_err(InstallError::Network)
 }
 
 fn installer(app: &AppHandle) -> Result<Installer, CommandError> {
@@ -227,9 +230,8 @@ pub async fn extension_releases(
   repository: String,
 ) -> Result<ReleasesDto, CommandError> {
   let repo = Repo::parse(&repository).map_err(install_error)?;
-  let client = client(&app)?;
   let asked = repo.clone();
-  let releases = blocking(move || client.releases(&asked)).await?;
+  let releases = blocking(move || client(&app)?.releases(&asked)).await?;
   Ok(ReleasesDto {
     repository: repo.to_string(),
     releases: releases.iter().map(ReleaseDto::from).collect(),
@@ -292,11 +294,11 @@ pub async fn extension_install(
   let state = app.state::<InstallState>();
   let _busy = Busy::take(&state.busy)?;
   let repo = Repo::parse(&repository).map_err(install_error)?;
-  let client = client(&app)?;
   let installer = installer(&app)?;
   let (release, staged) = {
-    let (repo, installer) = (repo.clone(), installer.clone());
+    let (repo, installer, handle) = (repo.clone(), installer.clone(), app.clone());
     blocking(move || {
+      let client = client(&handle)?;
       let releases = client.releases(&repo)?;
       let release = match tag {
         Some(tag) => releases
@@ -424,9 +426,10 @@ pub async fn extension_catalog(
   {
     return Ok(entries.clone());
   }
-  let client = client(&app)?;
   let asked = owners.clone();
+  let handle = app.clone();
   let entries = blocking(move || {
+    let client = client(&handle)?;
     let mut entries = Vec::new();
     for owner in &asked {
       entries.extend(client.catalog(owner)?);
@@ -463,9 +466,10 @@ pub async fn extension_sources(app: AppHandle) -> Result<Vec<SourceDto>, Command
 /// Looks for newer releases of the extensions installed from GitHub.
 #[tauri::command]
 pub async fn extension_check_updates(app: AppHandle) -> Result<Vec<UpdateDto>, CommandError> {
-  let client = client(&app)?;
   let installer = installer(&app)?;
+  let handle = app.clone();
   let updates = blocking(move || {
+    let client = client(&handle)?;
     let mut updates = Vec::new();
     for installed in installer.installed() {
       let Some(source) = &installed.source else {

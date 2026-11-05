@@ -20,6 +20,9 @@ tracing = { workspace = true }
 zip = { workspace = true }
 
 [dev-dependencies]
+# Running the client from an async runtime, as the app does. The version
+# Tauri already uses.
+tokio = { version = "1.54.1", features = ["rt-multi-thread"] }
 # Writing packages.
 zip = { workspace = true }
 

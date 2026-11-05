@@ -418,3 +418,25 @@ fn unsafe_or_broken_packages_are_refused() {
   let staged = fetch(&server.client(), &installer, &latest).expect("nested");
   assert_eq!(staged.summary.name, "Hello");
 }
+
+/// The app's commands are async: the client must be made, used, and
+/// dropped on a blocking thread, since it runs a runtime of its own.
+#[test]
+fn the_client_works_from_an_async_runtime_on_a_blocking_thread() {
+  let server = Server::start();
+  server.route(RELEASES, 200, "[]");
+  let (api, raw) = (server.base.clone(), format!("{}/raw", server.base));
+  let runtime = tokio::runtime::Builder::new_multi_thread()
+    .enable_all()
+    .build()
+    .expect("runtime");
+  let releases = runtime.block_on(async move {
+    tokio::task::spawn_blocking(move || {
+      let client = Client::with_hosts("Flareite-tests", &api, &raw)?;
+      client.releases(&repo())
+    })
+    .await
+    .expect("no panic")
+  });
+  assert_eq!(releases, Ok(Vec::new()));
+}

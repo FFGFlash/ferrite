@@ -240,6 +240,10 @@ pub struct Client {
 impl Client {
   /// A client for github.com. `user_agent` names the editor and its
   /// version, as GitHub asks.
+  ///
+  /// Its requests block, and it runs a Tokio runtime of its own, so make it
+  /// and use it off any async runtime (in `spawn_blocking`, say): made or
+  /// dropped on one, it panics.
   pub fn new(user_agent: &str) -> Result<Self, InstallError> {
     Self::with_hosts(user_agent, API, RAW)
   }
