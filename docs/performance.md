@@ -10,18 +10,18 @@ compare against, not claims about other machines or other editors.
 
 ## How to measure
 
-| What                                           | Command                                                                          |
-| ---------------------------------------------- | -------------------------------------------------------------------------------- |
-| Microbenchmarks (text, core, files, workspace) | `pnpm bench` (Criterion; reports in `target/criterion/`)                         |
-| One suite or benchmark                         | `cargo bench -p ferrite-benches --bench workspace -- search`                     |
-| Compare with a saved baseline                  | `cargo bench -p ferrite-benches -- --save-baseline m4`, later `-- --baseline m4` |
-| End-to-end: startup and idle memory            | `pnpm tauri build --no-bundle`, then `pnpm bench:app startup`                    |
-| End-to-end: typing latency                     | `pnpm bench:app typing`                                                          |
-| End-to-end: typing in a source file            | `pnpm bench:app typing --file path/to/file.rs --language extensions/rust`        |
-| End-to-end, with your extensions loaded        | add `--extensions` (runs skip extensions otherwise)                              |
-| End-to-end: large-document scrolling           | `pnpm bench:app scroll`                                                          |
-| End-to-end: opening a file                     | `pnpm bench:app open --file path/to/file`                                        |
-| Live statistics while using the app            | Command palette → **Developer: Toggle Performance Overlay**                      |
+| What                                           | Command                                                                                           |
+| ---------------------------------------------- | ------------------------------------------------------------------------------------------------- |
+| Microbenchmarks (text, core, files, workspace) | `pnpm bench` (Criterion; reports in `target/criterion/`)                                          |
+| One suite or benchmark                         | `cargo bench -p ferrite-benches --bench workspace -- search`                                      |
+| Compare with a saved baseline                  | `cargo bench -p ferrite-benches -- --save-baseline m4`, later `-- --baseline m4`                  |
+| End-to-end: startup and idle memory            | `pnpm tauri build --no-bundle`, then `pnpm bench:app startup`                                     |
+| End-to-end: typing latency                     | `pnpm bench:app typing`                                                                           |
+| End-to-end: typing in a source file            | `pnpm bench:app typing --file path/to/file.rs --language extensions/test-fixtures/languages/rust` |
+| End-to-end, with your extensions loaded        | add `--extensions` (runs skip extensions otherwise)                                               |
+| End-to-end: large-document scrolling           | `pnpm bench:app scroll`                                                                           |
+| End-to-end: opening a file                     | `pnpm bench:app open --file path/to/file`                                                         |
+| Live statistics while using the app            | Command palette → **Developer: Toggle Performance Overlay**                                       |
 
 The end-to-end harness (`scripts/bench.mjs`) launches the release build with
 `--bench <name>`. The frontend drives the real editor (IPC, React rendering,

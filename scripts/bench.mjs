@@ -7,7 +7,8 @@
  *   node scripts/bench.mjs typing         # keystroke-to-paint latency
  *                                         (--file F also types into F, e.g.
  *                                         a source file; add --language
- *                                         extensions/rust to highlight it)
+ *                                         extensions/test-fixtures/languages/rust
+ *                                         to highlight it)
  *   node scripts/bench.mjs scroll         # page-jump scrolling, 200k lines
  *   node scripts/bench.mjs open --file F  # open a file until first paint
  *   node scripts/bench.mjs all            # startup, typing, and scroll

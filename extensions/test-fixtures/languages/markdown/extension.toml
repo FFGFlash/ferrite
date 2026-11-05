@@ -1,0 +1,33 @@
+# A copy of the languages of the official ferrite.markdown extension (without
+# its preview, which is code), for the editor's tests, which need real
+# grammars. Not kept in step with it.
+id = "test.markdown"
+name = "Markdown"
+version = "0.1.0"
+description = "Markdown highlighting."
+author = "Ferrite"
+api_version = "1"
+
+[engines]
+ferrite = ">=0.1.0"
+
+[[languages]]
+id = "markdown"
+name = "Markdown"
+file_extensions = ["md", "markdown", "mdown", "mkd", "mkdn"]
+grammar = "grammars/tree-sitter-markdown.wasm"
+highlights = "queries/markdown/highlights.scm"
+folds = "queries/markdown/folds.scm"
+# Highlights inline text with markdown_inline, and code fences as their
+# language.
+injections = "queries/markdown/injections.scm"
+block_comment = ["<!--", "-->"]
+
+# The text inside paragraphs, headings, and table cells, which the Markdown
+# grammar leaves to this one. It has no files of its own.
+[[languages]]
+id = "markdown_inline"
+name = "Markdown (inline)"
+grammar = "grammars/tree-sitter-markdown_inline.wasm"
+highlights = "queries/markdown_inline/highlights.scm"
+injections = "queries/markdown_inline/injections.scm"

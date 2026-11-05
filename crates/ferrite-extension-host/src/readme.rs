@@ -1,18 +1,14 @@
 //! Extensions' READMEs, shown on their pages in the workbench.
 //!
-//! The Markdown is turned into preview nodes by the Markdown example
-//! extension's own renderer (compiled in here from its source, against the
-//! host's copy of the same types), then checked and resolved like any
-//! preview: links and pictures are found from the extension's folder, and
-//! nothing becomes markup.
+//! The Markdown is turned into preview nodes by the editor's renderer (the
+//! one extensions call with `workbench::render-markdown`), then checked and
+//! resolved like any preview: links and pictures are found from the
+//! extension's folder, and nothing becomes markup.
 
 use std::path::Path;
 
-use crate::bindings::ferrite::extension::types;
+use crate::markdown;
 use crate::preview::{self, PreviewContent};
-
-#[path = "../../../extensions/markdown/src/render.rs"]
-mod render;
 
 /// Largest README shown.
 pub const MAX_README_BYTES: u64 = 1024 * 1024;
@@ -30,7 +26,7 @@ pub fn render(path: &Path, dir: &Path) -> Result<PreviewContent, String> {
   }
   let bytes = std::fs::read(path).map_err(|error| error.to_string())?;
   let text = String::from_utf8_lossy(&bytes);
-  let converted = preview::convert(render::render(&text), Some(dir))
+  let converted = preview::convert(markdown::render(&text), Some(dir))
     .map_err(|error| format!("the README can't be shown: {error:?}"))?;
   Ok(converted.content)
 }

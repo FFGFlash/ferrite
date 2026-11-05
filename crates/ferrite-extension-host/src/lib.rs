@@ -33,6 +33,7 @@ mod host;
 pub mod icons;
 pub mod keys;
 pub mod manifest;
+mod markdown;
 pub mod marks;
 mod permissions;
 pub mod preview;

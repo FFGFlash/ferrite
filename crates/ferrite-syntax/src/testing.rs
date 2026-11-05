@@ -1,4 +1,5 @@
-//! The example language extensions in `extensions/`, for tests.
+//! The languages in `extensions/test-fixtures/languages/` (copies of the
+//! official extensions' grammars and queries), for tests.
 
 use std::path::Path;
 
@@ -139,7 +140,7 @@ pub(crate) fn registry_without_folds() -> Registry {
 }
 
 fn build(folds: bool) -> Registry {
-  let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../extensions");
+  let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../extensions/test-fixtures/languages");
   let definitions = EXAMPLES.iter().map(
     |&(folder, id, extensions, grammar, grammar_name, highlights, injections)| {
       let dir = root.join(folder);

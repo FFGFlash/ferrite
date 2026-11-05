@@ -1,9 +1,10 @@
 //! Integration tests: real extensions, built from `extensions/` for
 //! `wasm32-unknown-unknown`, running in the host against an editor core.
 //!
-//! `example.tidy` is the example extension; `test.misbehaving` breaks rules
-//! and exceeds limits on request, and every test checks that the host (and
-//! the document) survive it.
+//! `example.tidy` and `example.todos` are example extensions; the fixtures
+//! in `extensions/test-fixtures/` exercise the rest of the API, and
+//! `test.misbehaving` breaks rules and exceeds limits on request, and every
+//! test checks that the host (and the document) survive it.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -1170,10 +1171,9 @@ fn the_icons_example_contributes_an_icon_theme() {
 }
 
 #[test]
-fn the_language_examples_load_and_declare_their_languages_and_servers() {
-  let examples = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../extensions");
-  // Markdown has code too, which must be built.
-  wasm_dir();
+fn language_extensions_load_and_declare_their_languages_and_servers() {
+  let examples =
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("../../extensions/test-fixtures/languages");
   let folders = [
     "rust",
     "typescript",
@@ -1226,10 +1226,10 @@ fn the_language_examples_load_and_declare_their_languages_and_servers() {
   // Servers wait for the user's permission.
   assert!(host.language_servers().is_empty());
   for id in [
-    "ferrite.rust",
-    "ferrite.typescript",
-    "ferrite.javascript",
-    "ferrite.python",
+    "test.rust",
+    "test.typescript",
+    "test.javascript",
+    "test.python",
   ] {
     host.set_permissions(id, &[Permission::LanguageServers]);
   }
@@ -1252,8 +1252,9 @@ fn the_language_examples_load_and_declare_their_languages_and_servers() {
 }
 
 #[test]
-fn the_html_css_example_contributes_languages_and_servers_once_allowed() {
-  let example = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../extensions/html-css");
+fn a_language_extension_contributes_languages_and_servers_once_allowed() {
+  let example =
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("../../extensions/test-fixtures/languages/html-css");
   let dir = tempfile::tempdir().expect("temp dir");
   let fake = Arc::new(Fake::default());
   let options = HostOptions {
@@ -1269,7 +1270,7 @@ fn the_html_css_example_contributes_languages_and_servers_once_allowed() {
   let host = ExtensionHost::new(fake.clone(), options);
   host.load();
   let status = &host.statuses()[0];
-  assert_eq!(status.id, "ferrite.html-css");
+  assert_eq!(status.id, "test.html-css");
   assert_eq!(
     status.state,
     ExtensionState::AwaitingPermission,
@@ -1299,7 +1300,7 @@ fn the_html_css_example_contributes_languages_and_servers_once_allowed() {
   assert!(languages[2].grammar.is_file());
   assert!(host.language_servers().is_empty());
 
-  host.set_permissions("ferrite.html-css", &[Permission::LanguageServers]);
+  host.set_permissions("test.html-css", &[Permission::LanguageServers]);
   fake.wait_for("a state change", |n| {
     matches!(n, Notification::ExtensionsChanged)
   });
@@ -1309,10 +1310,10 @@ fn the_html_css_example_contributes_languages_and_servers_once_allowed() {
   assert_eq!(servers[0].command, "vscode-html-language-server");
   assert_eq!(servers[1].languages, ["css"]);
 
-  host.set_permissions("ferrite.html-css", &[]);
+  host.set_permissions("test.html-css", &[]);
   assert!(host.language_servers().is_empty());
   assert_eq!(host.statuses()[0].state, ExtensionState::Ready, "decided");
-  host.set_enabled("ferrite.html-css", false);
+  host.set_enabled("test.html-css", false);
   assert!(host.languages().is_empty());
 }
 
@@ -1368,24 +1369,15 @@ fn todos_example_highlights_lists_and_counts_markers() {
   );
 }
 
-/// The Markdown example without its languages, which need grammar files
-/// the test doesn't install; the fake embedder knows `.md` files anyway.
-fn markdown() -> Setup {
-  setup(
-    "markdown",
-    "markdown",
+#[test]
+fn previews_show_rendered_markdown_and_follow_their_documents() {
+  let s = setup(
+    "pages",
+    "test-fixtures/pages",
     Some(&[Permission::DocumentsRead]),
     "",
-    |manifest| {
-      let languages = manifest.find("[[languages]]").expect("languages");
-      manifest[..languages].to_owned()
-    },
-  )
-}
-
-#[test]
-fn markdown_example_previews_documents_as_they_change() {
-  let s = markdown();
+    |m| m,
+  );
   let docs = s._dir.path().join("docs");
   std::fs::create_dir_all(&docs).expect("mkdir");
   let path = docs.join("README.md");
@@ -1398,13 +1390,13 @@ fn markdown_example_previews_documents_as_they_change() {
   s.host.load();
   let run = |command: &str, document| {
     s.host
-      .run_command(&format!("ferrite.markdown.{command}"), document, None)
+      .run_command(&format!("test.pages.{command}"), document, None)
       .expect("queued")
       .wait()
   };
   run("previewToSide", Some(id)).expect("previewed");
 
-  let preview = format!("ferrite.markdown.preview/{}", id.get());
+  let preview = format!("test.pages.preview/{}", id.get());
   s.fake.wait_for("show", |n| {
     *n == Notification::ShowPreview {
       id: preview.clone(),
@@ -1418,7 +1410,7 @@ fn markdown_example_previews_documents_as_they_change() {
     s.host.previews(),
     [PreviewInfo {
       id: preview.clone(),
-      extension: "Markdown".into(),
+      extension: "Pages".into(),
       title: "Preview README.md".into(),
       icon: "book".into(),
       document: Some(id.get()),
@@ -1490,28 +1482,6 @@ fn markdown_example_previews_documents_as_they_change() {
   assert!(s.host.preview_content(&preview).is_none());
 }
 
-#[test]
-fn markdown_previews_only_markdown_documents() {
-  let s = markdown();
-  let id = s.fake.open(&s.host, "# Untitled");
-  s.host.load();
-  let error = s
-    .host
-    .run_command("ferrite.markdown.preview", Some(id), None)
-    .expect("queued")
-    .wait()
-    .expect_err("not Markdown");
-  assert_eq!(error, "Untitled isn't a Markdown file.");
-  let error = s
-    .host
-    .run_command("ferrite.markdown.preview", None, None)
-    .expect("queued")
-    .wait()
-    .expect_err("no document");
-  assert!(error.contains("Open a Markdown file"), "{error}");
-  assert!(s.host.previews().is_empty());
-}
-
 /// A 3 × 2 PNG with alpha: the signature, the IHDR chunk, and the end.
 const PNG_HEADER: &[u8] =
   b"\x89PNG\r\n\x1a\n\0\0\0\rIHDR\0\0\0\x03\0\0\0\x02\x08\x06\0\0\0\0\0\0\0\0\0\0\0IEND";
@@ -1527,16 +1497,22 @@ fn webview_address(url: &str) -> (String, String) {
 }
 
 #[test]
-fn the_images_example_shows_files_in_a_webview_and_answers_its_page() {
-  let s = setup("images", "images", None, "", |m| m);
+fn viewers_show_files_in_a_webview_that_extensions_answer() {
+  let s = setup(
+    "pages",
+    "test-fixtures/pages",
+    Some(&[Permission::DocumentsRead]),
+    "",
+    |m| m,
+  );
   s.host.load();
   let status = &s.host.statuses()[0];
   assert_eq!(status.error, None);
   let viewers = &status.contributions.viewers;
-  assert_eq!(viewers.len(), 2);
-  assert_eq!(viewers[0].full_id, "ferrite.images.image");
-  assert!(viewers[0].patterns.contains(&"*.png".to_owned()));
-  assert_eq!(viewers[0].command, None, "the page loads the picture");
+  assert_eq!(viewers.len(), 1);
+  assert_eq!(viewers[0].full_id, "test.pages.file");
+  assert_eq!(viewers[0].patterns, ["*.png"]);
+  assert_eq!(viewers[0].command, None, "the page loads the file");
 
   let pictures = s._dir.path().join("my pictures");
   std::fs::create_dir_all(&pictures).expect("mkdir");
@@ -1544,14 +1520,14 @@ fn the_images_example_shows_files_in_a_webview_and_answers_its_page() {
   std::fs::write(&path, PNG_HEADER).expect("write");
 
   s.host
-    .open_viewer("ferrite.images.image", &path)
+    .open_viewer("test.pages.file", &path)
     .expect("opens")
     .wait()
     .expect("nothing to run");
-  let id = ferrite_extension_host::viewer_id("ferrite.images.image", &path);
+  let id = ferrite_extension_host::viewer_id("test.pages.file", &path);
   assert!(s.host.previews().is_empty(), "viewers aren't previews");
 
-  // The page, with the bridge, and the picture it shows.
+  // The page, with the bridge, and the file it shows.
   let info = s.host.webview(&id).expect("a webview");
   let (token, page) = webview_address(&info.url);
   assert_eq!(page, "media/viewer.html");
@@ -1559,6 +1535,11 @@ fn the_images_example_shows_files_in_a_webview_and_answers_its_page() {
   let html = String::from_utf8(html.body).expect("utf-8");
   assert!(html.contains("__ferrite/webview.js"), "{html}");
   assert!(html.contains("viewer.js"));
+  let script = s
+    .host
+    .webview_resource(&token, "media/viewer.js")
+    .expect("the script");
+  assert_eq!(script.mime, "text/javascript");
   let picture = s
     .host
     .webview_resource(&token, "__ferrite/file")
@@ -1573,14 +1554,11 @@ fn the_images_example_shows_files_in_a_webview_and_answers_its_page() {
       .is_err()
   );
 
-  // The page asks for the details; the extension answers it.
+  // The page asks for the size; the extension answers it.
   s.host
-    .webview_message(&id, r#"{"type":"details"}"#.into())
+    .webview_message(&id, r#"{"type":"size"}"#.into())
     .expect("sent");
-  let answer = format!(
-    r#"{{"details":"PNG · 3 × 2 pixels · 8-bit RGBA · {} bytes","width":3,"height":2}}"#,
-    PNG_HEADER.len()
-  );
+  let answer = format!(r#"{{"size":{}}}"#, PNG_HEADER.len());
   s.fake.wait_for("the answer", |n| {
     *n == Notification::WebviewMessage {
       id: id.clone(),
@@ -1598,11 +1576,9 @@ fn the_images_example_shows_files_in_a_webview_and_answers_its_page() {
       .expect_err("closed")
       .contains("isn't open")
   );
-  let other = pictures.join("other.png");
-  std::fs::write(&other, b"not really a PNG").expect("write");
   let error = s
     .host
-    .open_viewer("ferrite.images.missing", &other)
+    .open_viewer("test.pages.missing", &path)
     .err()
     .expect("no such viewer");
   assert!(error.contains("No extension provides"), "{error}");
@@ -1807,1386 +1783,4 @@ fn the_processes_permission_names_the_programs() {
     "{}",
     processes.description
   );
-}
-
-/// Runs git in `dir`; `None` if git isn't installed.
-fn git(dir: &Path, args: &[&str]) -> Option<String> {
-  let output = Command::new("git")
-    .args(["-c", "user.name=Test", "-c", "user.email=test@example.com"])
-    .args(args)
-    .current_dir(dir)
-    .output()
-    .ok()?;
-  assert!(
-    output.status.success(),
-    "git {args:?}: {}",
-    String::from_utf8_lossy(&output.stderr)
-  );
-  Some(String::from_utf8_lossy(&output.stdout).into_owned())
-}
-
-/// Waits for the git extension's marks to satisfy `wanted`.
-fn wait_for_marks(s: &Setup, wanted: impl Fn(&[ferrite_extension_host::FileMark]) -> bool) {
-  let deadline = Instant::now() + Duration::from_secs(30);
-  loop {
-    let marks = s.host.file_marks();
-    let current = marks
-      .first()
-      .map(|marks| marks.marks.as_slice())
-      .unwrap_or_default();
-    if wanted(current) {
-      return;
-    }
-    assert!(
-      Instant::now() < deadline,
-      "marks never matched: {current:#?}"
-    );
-    std::thread::sleep(Duration::from_millis(50));
-  }
-}
-
-/// The ids of a view's items.
-fn view_ids(s: &Setup, view: &str) -> Vec<String> {
-  s.host
-    .view_content(view)
-    .items
-    .into_iter()
-    .map(|item| item.id)
-    .collect()
-}
-
-/// Waits for a view's items to satisfy `wanted`.
-fn wait_for_view(s: &Setup, view: &str, what: &str, wanted: impl Fn(&[String]) -> bool) {
-  let deadline = Instant::now() + Duration::from_secs(30);
-  loop {
-    let ids = view_ids(s, view);
-    if wanted(&ids) {
-      return;
-    }
-    assert!(
-      Instant::now() < deadline,
-      "timed out waiting for {what}: {ids:#?}"
-    );
-    std::thread::sleep(Duration::from_millis(50));
-  }
-}
-
-/// Waits for a prompt and returns it.
-fn wait_for_prompt(s: &Setup) -> ferrite_extension_host::Prompt {
-  match s
-    .fake
-    .wait_for("a prompt", |n| matches!(n, Notification::Prompt(_)))
-  {
-    Notification::Prompt(prompt) => prompt,
-    _ => unreachable!(),
-  }
-}
-
-fn git_extension() -> Option<(Setup, PathBuf)> {
-  // Discarding deletes untracked files permanently here, rather than
-  // filling the Recycle Bin of whoever runs the tests.
-  let s = setup(
-    "git",
-    "git",
-    Some(&[
-      Permission::DocumentsRead,
-      Permission::DocumentsWrite,
-      Permission::FilesRead,
-      Permission::FilesWrite,
-      Permission::Processes,
-    ]),
-    "[\"ferrite.git\"]\ndiscard_untracked = \"delete\"\n",
-    |m| m,
-  );
-  let repo = ferrite_workspace::normalize_path(s._dir.path()).join("repo");
-  std::fs::create_dir_all(repo.join("src")).expect("mkdir");
-  if git(&repo, &["init", "-q", "-b", "main"]).is_none() {
-    eprintln!("git isn't installed; skipping");
-    return None;
-  }
-  // For the extension's commits too: CI machines have no identity set.
-  git(&repo, &["config", "user.name", "Test"]);
-  git(&repo, &["config", "user.email", "test@example.com"]);
-  Some((s, repo))
-}
-
-#[test]
-fn the_git_extension_marks_changed_files_and_shows_the_branch() {
-  let Some((s, repo)) = git_extension() else {
-    return;
-  };
-  std::fs::write(repo.join("src").join("main.rs"), "fn main() {}\n").expect("write");
-  std::fs::write(repo.join("README.md"), "# Repo\n").expect("write");
-  std::fs::create_dir_all(repo.join("docs")).expect("mkdir");
-  std::fs::write(repo.join("docs").join("guide.md"), "Guide\n").expect("write");
-  git(&repo, &["add", "."]);
-  git(&repo, &["commit", "-q", "-m", "first"]);
-  std::fs::write(repo.join("src").join("main.rs"), "fn main() { run(); }\n").expect("write");
-  // Deleted files aren't in the explorer, so nothing is marked for them.
-  std::fs::remove_file(repo.join("docs").join("guide.md")).expect("delete");
-  std::fs::create_dir_all(repo.join("scratch")).expect("mkdir");
-  std::fs::write(repo.join("scratch").join("notes.txt"), "notes").expect("write");
-  *s.fake.folder.lock().unwrap_or_else(PoisonError::into_inner) = Some(repo.clone());
-  s.host.load();
-
-  let main = repo.join("src").join("main.rs").display().to_string();
-  let notes = repo.join("scratch").join("notes.txt").display().to_string();
-  wait_for_marks(&s, |marks| marks.len() == 2);
-  let marks = s.host.file_marks();
-  let marks = &marks[0].marks;
-  let modified = marks
-    .iter()
-    .find(|mark| mark.path == main)
-    .expect("main.rs");
-  assert_eq!(modified.badge.as_deref(), Some("M"));
-  assert_eq!(modified.color.as_deref(), Some("ferrite.git.modified"));
-  let untracked = marks
-    .iter()
-    .find(|mark| mark.path == notes)
-    .expect("notes.txt");
-  assert_eq!(untracked.badge.as_deref(), Some("U"));
-  let docs = repo.join("docs").display().to_string();
-  assert!(
-    marks.iter().all(|mark| !mark.path.starts_with(&docs)),
-    "{marks:#?}"
-  );
-  let branch = &s.host.status_items()[0].content;
-  assert_eq!(branch.text, "main*");
-
-  // A commit outside Ferrite: the change to .git is noticed.
-  git(&repo, &["add", "src", "docs"]);
-  git(&repo, &["commit", "-q", "-m", "second"]);
-  s.host.files_changed(&[repo.join(".git").join("index")]);
-  wait_for_marks(&s, |marks| marks.len() == 1 && marks[0].path == notes);
-
-  // In a folder the user stops trusting, Git doesn't run and shows nothing.
-  *s.fake
-    .untrusted
-    .lock()
-    .unwrap_or_else(PoisonError::into_inner) = true;
-  s.host.folder_changed();
-  let deadline = Instant::now() + Duration::from_secs(30);
-  while !s.host.file_marks().is_empty() || !s.host.status_items().is_empty() {
-    assert!(Instant::now() < deadline, "marks stayed");
-    std::thread::sleep(Duration::from_millis(50));
-  }
-}
-
-#[test]
-fn the_git_extension_stages_commits_and_lists_history() {
-  let Some((s, repo)) = git_extension() else {
-    return;
-  };
-  let changes = "ferrite.git.changes";
-  let commits = "ferrite.git.commits";
-  std::fs::write(repo.join("src").join("main.rs"), "fn main() {}\n").expect("write");
-  git(&repo, &["add", "."]);
-  git(&repo, &["commit", "-q", "-m", "first"]);
-  std::fs::write(repo.join("src").join("main.rs"), "fn main() { run(); }\n").expect("write");
-  std::fs::write(repo.join("notes.txt"), "notes").expect("write");
-  *s.fake.folder.lock().unwrap_or_else(PoisonError::into_inner) = Some(repo.clone());
-  s.host.load();
-
-  wait_for_view(&s, changes, "changes", |ids| {
-    ids.contains(&"changes:src/main.rs".to_owned()) && ids.contains(&"changes:notes.txt".to_owned())
-  });
-  assert_eq!(s.host.view_content(changes).badge, 2);
-  assert!(
-    s.host
-      .view_content(changes)
-      .flags
-      .contains(&"repository".to_owned())
-  );
-  wait_for_view(&s, commits, "the first commit", |ids| ids.len() == 1);
-
-  // Stage one file from its button, and commit it with the message box.
-  s.host
-    .run_view_command(
-      "ferrite.git.stage",
-      Some("src/main.rs".into()),
-      vec!["src/main.rs".into()],
-    )
-    .expect("runs")
-    .wait()
-    .expect("stages");
-  wait_for_view(&s, changes, "the staged file", |ids| {
-    ids.contains(&"staged:src/main.rs".to_owned())
-  });
-  s.host.set_view_input(changes, "Run it".into());
-  s.host
-    .run_command("ferrite.git.commit", None, None)
-    .expect("runs")
-    .wait()
-    .expect("commits");
-  wait_for_view(&s, commits, "the new commit", |ids| ids.len() == 2);
-  assert_eq!(
-    s.host.view_content(changes).input,
-    "",
-    "the message box is emptied"
-  );
-  let log = git(&repo, &["log", "--format=%s"]).expect("git");
-  assert_eq!(log.lines().collect::<Vec<_>>(), vec!["Run it", "first"]);
-
-  // Its files, when it's opened in the Commits view.
-  let newest = view_ids(&s, commits)[0].clone();
-  s.host
-    .expand_view_item(commits, &newest)
-    .expect("runs")
-    .wait()
-    .expect("lists");
-  assert!(view_ids(&s, commits).contains(&format!("{newest}/src/main.rs")));
-
-  // Its details, in a tab.
-  s.host
-    .run_view_command(
-      "ferrite.git.commitDetails",
-      Some(newest.clone()),
-      vec![newest.clone()],
-    )
-    .expect("runs")
-    .wait()
-    .expect("shows");
-  let tab = format!("ferrite.git.commit/{newest}");
-  assert!(s.host.previews().iter().any(|preview| preview.id == tab));
-  let texts: Vec<String> = s
-    .host
-    .preview_content(&tab)
-    .expect("open")
-    .nodes
-    .iter()
-    .filter_map(|node| match &node.element {
-      PreviewElement::Text { text } => Some(text.clone()),
-      _ => None,
-    })
-    .collect();
-  assert!(texts.contains(&"Run it".to_owned()), "{texts:?}");
-  assert!(texts.contains(&"1 changed file".to_owned()), "{texts:?}");
-
-  // Nothing staged: committing asks whether to commit everything.
-  std::fs::write(
-    repo.join("src").join("main.rs"),
-    "fn main() { run(); run(); }\n",
-  )
-  .expect("write");
-  s.host.files_changed(&[repo.join("src").join("main.rs")]);
-  wait_for_view(&s, changes, "the new change", |ids| {
-    ids.contains(&"changes:src/main.rs".to_owned())
-  });
-  s.host.set_view_input(changes, "Everything".into());
-  s.host
-    .run_command("ferrite.git.commit", None, None)
-    .expect("runs")
-    .wait()
-    .expect("asks");
-  let prompt = wait_for_prompt(&s);
-  assert!(matches!(
-    &prompt.kind,
-    ferrite_extension_host::PromptKind::Confirm { buttons, .. } if buttons[0] == "Yes"
-  ));
-  s.host.prompt_answered(
-    prompt.id,
-    ferrite_extension_host::PromptReply::Button { index: 0 },
-  );
-  wait_for_view(&s, commits, "the commit of everything", |ids| {
-    ids.len() == 3
-  });
-  wait_for_view(&s, changes, "no changes", |ids| ids.is_empty());
-  let files = git(&repo, &["show", "--name-only", "--format=", "HEAD"]).expect("git");
-  let mut files: Vec<&str> = files.lines().collect();
-  files.sort_unstable();
-  assert_eq!(files, vec!["notes.txt", "src/main.rs"]);
-
-  // Undo it: its changes are staged again, and its message is back.
-  s.host
-    .run_command("ferrite.git.undoCommit", None, None)
-    .expect("runs")
-    .wait()
-    .expect("undoes");
-  wait_for_view(&s, commits, "the undone commit", |ids| ids.len() == 2);
-  wait_for_view(&s, changes, "staged changes", |ids| {
-    ids.contains(&"staged:notes.txt".to_owned())
-  });
-  assert_eq!(s.host.view_content(changes).input, "Everything");
-}
-
-/// Waits for an `OpenDiff` notification and returns its sides and title.
-fn wait_for_diff(s: &Setup) -> (String, String, String) {
-  match s
-    .fake
-    .wait_for("a diff", |n| matches!(n, Notification::OpenDiff { .. }))
-  {
-    Notification::OpenDiff {
-      original,
-      modified,
-      title,
-    } => (original, modified, title),
-    _ => unreachable!(),
-  }
-}
-
-#[test]
-fn the_git_extension_shows_changes_in_diffs() {
-  let Some((s, repo)) = git_extension() else {
-    return;
-  };
-  let changes = "ferrite.git.changes";
-  let commits = "ferrite.git.commits";
-  std::fs::write(repo.join("src").join("main.rs"), "one\n").expect("write");
-  git(&repo, &["add", "."]);
-  git(&repo, &["commit", "-q", "-m", "first"]);
-  std::fs::write(repo.join("src").join("main.rs"), "two\n").expect("write");
-  *s.fake.folder.lock().unwrap_or_else(PoisonError::into_inner) = Some(repo.clone());
-  s.host.load();
-  wait_for_view(&s, changes, "the change", |ids| {
-    ids.contains(&"changes:src/main.rs".to_owned())
-  });
-
-  // A change not staged compares the index with the file.
-  let main = repo.join("src").join("main.rs").display().to_string();
-  s.host
-    .run_view_command(
-      "ferrite.git.openChange",
-      Some("src/main.rs".into()),
-      vec!["src/main.rs".into()],
-    )
-    .expect("runs")
-    .wait()
-    .expect("opens");
-  assert_eq!(
-    wait_for_diff(&s),
-    (
-      "git::src/main.rs".to_owned(),
-      main.clone(),
-      "main.rs (Working Tree)".to_owned()
-    )
-  );
-
-  // The extension provides the versions.
-  let text = |uri: &str| s.host.provide_text(uri).expect("provides");
-  assert_eq!(text("git::src/main.rs").as_deref(), Some("one\n"));
-  assert_eq!(text("git:HEAD:src/main.rs").as_deref(), Some("one\n"));
-  assert_eq!(text("git:~empty:src/main.rs").as_deref(), Some(""));
-  assert_eq!(text("git:HEAD:missing.rs"), None);
-  assert!(
-    s.host.provide_text("nope:x").is_err(),
-    "no one provides nope:"
-  );
-
-  // Staging changes the index: diffs showing it are told.
-  git(&repo, &["add", "."]);
-  s.host.files_changed(&[repo.join(".git").join("index")]);
-  let refreshed = s.fake.wait_for("provided texts changed", |n| {
-    matches!(n, Notification::ProvidedChanged(_))
-  });
-  assert_eq!(
-    refreshed,
-    Notification::ProvidedChanged(vec!["git::*".into(), "git:HEAD:*".into()])
-  );
-  assert_eq!(text("git::src/main.rs").as_deref(), Some("two\n"));
-  wait_for_view(&s, changes, "the staged change", |ids| {
-    ids.contains(&"staged:src/main.rs".to_owned())
-  });
-  s.host
-    .run_view_command(
-      "ferrite.git.openStagedChange",
-      Some("src/main.rs".into()),
-      vec!["src/main.rs".into()],
-    )
-    .expect("runs")
-    .wait()
-    .expect("opens");
-  let (original, modified, title) = wait_for_diff(&s);
-  assert_eq!(
-    (original.as_str(), modified.as_str(), title.as_str()),
-    (
-      "git:HEAD:src/main.rs",
-      "git::src/main.rs",
-      "main.rs (Index)"
-    )
-  );
-
-  // A commit's file compares the commit with its parent.
-  git(&repo, &["commit", "-q", "-m", "second"]);
-  let hash = git(&repo, &["rev-parse", "HEAD"])
-    .expect("git")
-    .trim()
-    .to_owned();
-  s.host.files_changed(&[repo.join(".git").join("HEAD")]);
-  wait_for_view(&s, commits, "the second commit", |ids| ids.len() == 2);
-  let file = format!("{hash}/src/main.rs");
-  s.host
-    .run_view_command(
-      "ferrite.git.openCommitChange",
-      Some(file.clone()),
-      vec![file],
-    )
-    .expect("runs")
-    .wait()
-    .expect("opens");
-  let (original, modified, title) = wait_for_diff(&s);
-  assert_eq!(original, format!("git:{hash}^:src/main.rs"));
-  assert_eq!(modified, format!("git:{hash}:src/main.rs"));
-  assert_eq!(title, format!("main.rs ({})", &hash[..7]));
-  assert_eq!(text(&original).as_deref(), Some("one\n"));
-  assert_eq!(text(&modified).as_deref(), Some("two\n"));
-}
-
-#[test]
-fn the_git_extension_names_originals_and_stages_changes() {
-  let Some((s, repo)) = git_extension() else {
-    return;
-  };
-  let changes = "ferrite.git.changes";
-  std::fs::write(repo.join("src").join("main.rs"), "a\nb\nc\n").expect("write");
-  git(&repo, &["add", "."]);
-  git(&repo, &["commit", "-q", "-m", "first"]);
-  std::fs::write(repo.join("src").join("main.rs"), "a\nB\nc\nd\n").expect("write");
-  std::fs::write(repo.join("notes.txt"), "notes").expect("write");
-  *s.fake.folder.lock().unwrap_or_else(PoisonError::into_inner) = Some(repo.clone());
-  s.host.load();
-  wait_for_view(&s, changes, "the changes", |ids| {
-    ids.contains(&"changes:src/main.rs".to_owned())
-  });
-
-  // A tracked file's original is its index version; an untracked one has none.
-  let main = repo.join("src").join("main.rs").display().to_string();
-  let notes = repo.join("notes.txt").display().to_string();
-  assert_eq!(
-    s.host.original_of(&main).as_deref(),
-    Some("git::src/main.rs")
-  );
-  assert_eq!(s.host.original_of(&notes), None);
-  assert_eq!(
-    s.host.apply_title("git::src/main.rs").as_deref(),
-    Some("Stage")
-  );
-  assert_eq!(s.host.apply_title("nope:x"), None);
-
-  // Staging one change: the index takes the text the editor made.
-  s.host
-    .apply_to_original("git::src/main.rs", "a\nB\nc\n".into())
-    .expect("stages");
-  assert_eq!(
-    git(&repo, &["show", ":src/main.rs"]).as_deref(),
-    Some("a\nB\nc\n")
-  );
-  s.fake.wait_for(
-    "originals changed",
-    |n| matches!(n, Notification::OriginalsChanged(paths) if paths.is_empty()),
-  );
-  wait_for_view(&s, changes, "a staged and an unstaged change", |ids| {
-    ids.contains(&"staged:src/main.rs".to_owned())
-      && ids.contains(&"changes:src/main.rs".to_owned())
-  });
-
-  // Only the index can be staged into.
-  s.host
-    .apply_to_original("git:HEAD:src/main.rs", "x\n".into())
-    .expect("runs");
-  s.fake.wait_for_message("Only changes to the index");
-  assert_eq!(
-    git(&repo, &["show", "HEAD:src/main.rs"]).as_deref(),
-    Some("a\nb\nc\n")
-  );
-}
-
-/// The text of one of the git extension's status bar items, if it shows.
-fn status_text(s: &Setup, id: &str) -> Option<String> {
-  s.host
-    .status_items()
-    .into_iter()
-    .find(|item| item.id == format!("ferrite.git.{id}"))
-    .map(|item| item.content.text)
-}
-
-/// Waits for a status bar item to show `text`.
-fn wait_for_status(s: &Setup, id: &str, text: &str) {
-  let deadline = Instant::now() + Duration::from_secs(30);
-  while status_text(s, id).as_deref() != Some(text) {
-    assert!(
-      Instant::now() < deadline,
-      "{id} shows {:?}, not {text:?}",
-      status_text(s, id)
-    );
-    std::thread::sleep(Duration::from_millis(50));
-  }
-}
-
-#[test]
-fn the_git_extension_works_with_branches_and_remotes() {
-  let Some((s, repo)) = git_extension() else {
-    return;
-  };
-  let remote = repo.parent().expect("a parent").join("remote.git");
-  git(
-    repo.parent().expect("a parent"),
-    &["init", "-q", "--bare", "-b", "main", "remote.git"],
-  );
-  std::fs::write(repo.join("src").join("main.rs"), "fn main() {}\n").expect("write");
-  git(&repo, &["add", "."]);
-  git(&repo, &["commit", "-q", "-m", "first"]);
-  git(
-    &repo,
-    &["remote", "add", "origin", &remote.display().to_string()],
-  );
-  git(&repo, &["push", "-q", "-u", "origin", "main"]);
-  *s.fake.folder.lock().unwrap_or_else(PoisonError::into_inner) = Some(repo.clone());
-  s.host.load();
-  let head = |dir: &Path, rev: &str| {
-    git(dir, &["rev-parse", rev])
-      .expect("git")
-      .trim()
-      .to_owned()
-  };
-  let on_branch = |name: &str| {
-    let deadline = Instant::now() + Duration::from_secs(30);
-    while git(&repo, &["rev-parse", "--abbrev-ref", "HEAD"])
-      .expect("git")
-      .trim()
-      != name
-    {
-      assert!(Instant::now() < deadline, "{name} isn't checked out");
-      std::thread::sleep(Duration::from_millis(50));
-    }
-  };
-
-  // The sync button: in step with origin/main, then a commit ahead.
-  wait_for_status(&s, "sync", "0↓ 0↑");
-  std::fs::write(repo.join("src").join("main.rs"), "fn main() { run(); }\n").expect("write");
-  git(&repo, &["commit", "-q", "-am", "second"]);
-  s.host.files_changed(&[repo.join(".git").join("HEAD")]);
-  wait_for_status(&s, "sync", "0↓ 1↑");
-  assert_eq!(status_text(&s, "branch").as_deref(), Some("main"));
-
-  // Push: the remote has the commit, and Ferrite offers to fetch in the
-  // background, once.
-  s.host
-    .run_command("ferrite.git.push", None, None)
-    .expect("runs")
-    .wait()
-    .expect("pushes");
-  let offer = wait_for_prompt(&s);
-  assert!(matches!(
-    &offer.kind,
-    ferrite_extension_host::PromptKind::Confirm { message, .. } if message.contains("git fetch")
-  ));
-  s.host.prompt_answered(
-    offer.id,
-    ferrite_extension_host::PromptReply::Button { index: 1 },
-  );
-  assert_eq!(head(&remote, "main"), head(&repo, "HEAD"));
-  s.host
-    .files_changed(&[repo.join(".git").join("refs").join("remotes")]);
-  wait_for_status(&s, "sync", "0↓ 0↑");
-
-  // A new branch, named in a prompt, follows nothing until it's published.
-  s.host
-    .run_command("ferrite.git.createBranch", None, None)
-    .expect("runs")
-    .wait()
-    .expect("asks");
-  let name = wait_for_prompt(&s);
-  s.host.prompt_answered(
-    name.id,
-    ferrite_extension_host::PromptReply::Text {
-      text: "my topic".into(),
-    },
-  );
-  on_branch("my-topic");
-  s.host.files_changed(&[repo.join(".git").join("HEAD")]);
-  wait_for_status(&s, "sync", "↑ Publish");
-  s.host
-    .run_command("ferrite.git.publish", None, None)
-    .expect("runs")
-    .wait()
-    .expect("publishes");
-  let deadline = Instant::now() + Duration::from_secs(30);
-  while git(&remote, &["branch", "--list", "my-topic"])
-    .expect("git")
-    .trim()
-    .is_empty()
-  {
-    assert!(Instant::now() < deadline, "not published");
-    std::thread::sleep(Duration::from_millis(50));
-  }
-
-  // The branch picker checks out main again.
-  s.host
-    .run_command("ferrite.git.checkout", None, None)
-    .expect("runs")
-    .wait()
-    .expect("asks");
-  let picker = wait_for_prompt(&s);
-  let ferrite_extension_host::PromptKind::Pick { items, .. } = &picker.kind else {
-    panic!("a pick: {picker:?}");
-  };
-  let labels: Vec<&str> = items.iter().map(|item| item.label.as_str()).collect();
-  assert!(labels.contains(&"+ Create New Branch…"), "{labels:?}");
-  assert!(
-    labels.contains(&"main") && labels.contains(&"origin/my-topic"),
-    "{labels:?}"
-  );
-  assert!(
-    !labels.contains(&"my-topic"),
-    "not the branch checked out: {labels:?}"
-  );
-  s.host.prompt_answered(
-    picker.id,
-    ferrite_extension_host::PromptReply::Picked {
-      value: "refs/heads/main".into(),
-    },
-  );
-  on_branch("main");
-
-  // Sync asks first, then pulls what another clone pushed, and pushes.
-  let other = repo.parent().expect("a parent").join("other");
-  git(
-    repo.parent().expect("a parent"),
-    &["clone", "-q", &remote.display().to_string(), "other"],
-  );
-  std::fs::write(other.join("notes.txt"), "notes").expect("write");
-  git(&other, &["add", "."]);
-  git(&other, &["commit", "-q", "-m", "elsewhere"]);
-  git(&other, &["push", "-q", "origin", "main"]);
-  s.host.files_changed(&[repo.join(".git").join("HEAD")]);
-  wait_for_status(&s, "sync", "0↓ 0↑");
-  s.host
-    .run_command("ferrite.git.sync", None, None)
-    .expect("runs")
-    .wait()
-    .expect("asks");
-  let confirm = wait_for_prompt(&s);
-  assert!(matches!(
-    &confirm.kind,
-    ferrite_extension_host::PromptKind::Confirm { message, .. } if message.contains("origin/main")
-  ));
-  s.host.prompt_answered(
-    confirm.id,
-    ferrite_extension_host::PromptReply::Button { index: 0 },
-  );
-  // Git writes the pulled files before it moves HEAD.
-  let deadline = Instant::now() + Duration::from_secs(30);
-  while head(&repo, "HEAD") != head(&remote, "main") {
-    assert!(Instant::now() < deadline, "not pulled");
-    std::thread::sleep(Duration::from_millis(50));
-  }
-  assert!(repo.join("notes.txt").exists());
-}
-
-/// Waits for the git extension's prompt and answers it.
-fn answer(s: &Setup, reply: ferrite_extension_host::PromptReply) -> ferrite_extension_host::Prompt {
-  let prompt = wait_for_prompt(s);
-  s.host.prompt_answered(prompt.id, reply);
-  prompt
-}
-
-fn text(text: &str) -> ferrite_extension_host::PromptReply {
-  ferrite_extension_host::PromptReply::Text { text: text.into() }
-}
-
-/// Waits for `wanted` to hold, checking every 50 ms for 30 s.
-fn eventually(what: &str, wanted: impl Fn() -> bool) {
-  let deadline = Instant::now() + Duration::from_secs(30);
-  while !wanted() {
-    assert!(Instant::now() < deadline, "timed out waiting for {what}");
-    std::thread::sleep(Duration::from_millis(50));
-  }
-}
-
-#[test]
-fn the_git_extension_graphs_stashes_and_follows_history() {
-  let Some((s, repo)) = git_extension() else {
-    return;
-  };
-  let commits = "ferrite.git.commits";
-  let stashes = "ferrite.git.stashes";
-  let history = "ferrite.git.file-history";
-  let file = repo.join("a.txt");
-  let commit = |message: &str| git(&repo, &["commit", "-q", "-am", message]);
-  std::fs::write(&file, "one\n").expect("write");
-  git(&repo, &["add", "."]);
-  commit("first");
-  // A side branch merged back: the graph forks and joins.
-  git(&repo, &["checkout", "-q", "-b", "side"]);
-  std::fs::write(repo.join("side.txt"), "side\n").expect("write");
-  git(&repo, &["add", "."]);
-  commit("on the side");
-  git(&repo, &["checkout", "-q", "main"]);
-  std::fs::write(&file, "one\ntwo\n").expect("write");
-  commit("second");
-  git(
-    &repo,
-    &[
-      "-c",
-      "user.name=T",
-      "merge",
-      "-q",
-      "--no-ff",
-      "-m",
-      "merge side",
-      "side",
-    ],
-  );
-  *s.fake.folder.lock().unwrap_or_else(PoisonError::into_inner) = Some(repo.clone());
-  s.host.load();
-
-  wait_for_view(&s, commits, "the commits", |ids| ids.len() == 4);
-  // The graph comes right after the items.
-  eventually("a graph row per commit", || {
-    s.host.view_content(commits).graph.len() == 4
-  });
-  let content = s.host.view_content(commits);
-  let merge = &content.graph[0];
-  assert_eq!(merge.parents.len(), 2);
-  assert_eq!(merge.outputs.len(), 2, "the merge opens a second lane");
-  assert_eq!(
-    content.graph[3].outputs.len(),
-    0,
-    "the first commit ends them"
-  );
-
-  // Stash a change, and pop it back.
-  std::fs::write(&file, "one\ntwo\nthree\n").expect("write");
-  s.host
-    .run_command("ferrite.git.stash", None, None)
-    .expect("runs")
-    .wait()
-    .expect("asks");
-  answer(&s, text("wip"));
-  wait_for_view(&s, stashes, "the stash", |ids| ids.len() == 1);
-  assert_eq!(s.host.view_content(stashes).items[0].label, "On main: wip");
-  assert_eq!(
-    std::fs::read_to_string(&file)
-      .expect("read")
-      .replace("\r\n", "\n"),
-    "one\ntwo\n"
-  );
-  s.host
-    .run_view_command(
-      "ferrite.git.stashPop",
-      Some("stash@{0}".into()),
-      vec!["stash@{0}".into()],
-    )
-    .expect("runs")
-    .wait()
-    .expect("pops");
-  wait_for_view(&s, stashes, "no stashes", |ids| ids.is_empty());
-  assert!(
-    std::fs::read_to_string(&file)
-      .expect("read")
-      .contains("three")
-  );
-
-  // The file's history follows the editor in use.
-  s.host.files_changed(std::slice::from_ref(&file));
-  wait_for_view(&s, "ferrite.git.changes", "the change", |ids| {
-    ids.contains(&"changes:a.txt".to_owned())
-  });
-  s.host
-    .active_file_changed(Some(ferrite_workspace::normalize_path(&file)));
-  wait_for_view(&s, history, "the file's history", |ids| ids.len() == 3);
-  let entries = s.host.view_content(history).items;
-  assert_eq!(entries[0].label, "Uncommitted Changes");
-  assert_eq!(entries[1].label, "second");
-  assert_eq!(entries[2].label, "first");
-
-  // Tag the first commit.
-  let first = view_ids(&s, commits)[3].clone();
-  s.host
-    .run_view_command(
-      "ferrite.git.createTagAt",
-      Some(first.clone()),
-      vec![first.clone()],
-    )
-    .expect("runs")
-    .wait()
-    .expect("asks");
-  answer(&s, text("v1"));
-  answer(&s, text(""));
-  eventually("the tag", || {
-    git(&repo, &["tag", "--list"]).expect("git").trim() == "v1"
-  });
-  assert_eq!(git(&repo, &["rev-parse", "v1"]).expect("git").trim(), first);
-
-  // Ignore a folder.
-  std::fs::create_dir_all(repo.join("build")).expect("mkdir");
-  let build = repo.join("build").display().to_string();
-  s.host
-    .run_command("ferrite.git.addToGitignore", None, Some(build))
-    .expect("runs")
-    .wait()
-    .expect("adds");
-  assert_eq!(
-    std::fs::read_to_string(repo.join(".gitignore")).expect("read"),
-    "build\n"
-  );
-
-  // Clone the repository into another folder, and offer to open the clone.
-  let clones = repo.parent().expect("a parent").join("clones");
-  std::fs::create_dir_all(&clones).expect("mkdir");
-  let parent = clones.display().to_string();
-  s.host
-    .run_command("ferrite.git.clone", None, None)
-    .expect("runs")
-    .wait()
-    .expect("asks");
-  answer(&s, text(&repo.display().to_string()));
-  let folder = answer(&s, text(&parent));
-  assert!(matches!(
-    folder.kind,
-    ferrite_extension_host::PromptKind::Folder { .. }
-  ));
-  let open = wait_for_prompt(&s);
-  assert!(matches!(
-    &open.kind,
-    ferrite_extension_host::PromptKind::Confirm { message, .. } if message.contains("Open the cloned")
-  ));
-  s.host.prompt_answered(
-    open.id,
-    ferrite_extension_host::PromptReply::Button { index: 0 },
-  );
-  let opened = s.fake.wait_for("the clone opened", |n| {
-    matches!(n, Notification::OpenFolder { .. })
-  });
-  let clone = ferrite_workspace::normalize_path(&clones.join("repo"));
-  assert_eq!(
-    opened,
-    Notification::OpenFolder {
-      path: clone.clone()
-    }
-  );
-  assert_eq!(
-    git(&clone, &["log", "--format=%s", "-n1"])
-      .expect("git")
-      .trim(),
-    "merge side"
-  );
-}
-
-#[test]
-fn the_git_extension_discards_changes_and_initializes_repositories() {
-  let Some((s, repo)) = git_extension() else {
-    return;
-  };
-  let changes = "ferrite.git.changes";
-  std::fs::write(repo.join("src").join("main.rs"), "fn main() {}\n").expect("write");
-  git(&repo, &["add", "."]);
-  git(&repo, &["commit", "-q", "-m", "first"]);
-  std::fs::write(repo.join("src").join("main.rs"), "changed\n").expect("write");
-  std::fs::write(repo.join("scratch.txt"), "scratch").expect("write");
-  *s.fake.folder.lock().unwrap_or_else(PoisonError::into_inner) = Some(repo.clone());
-  s.host.load();
-  wait_for_view(&s, changes, "changes", |ids| ids.len() == 3);
-
-  // Discarding asks first; the untracked file goes (permanently, as set
-  // here), and the tracked one is restored.
-  s.host
-    .run_view_command(
-      "ferrite.git.discard",
-      Some("src/main.rs".into()),
-      vec!["src/main.rs".into(), "scratch.txt".into()],
-    )
-    .expect("runs")
-    .wait()
-    .expect("asks");
-  let prompt = wait_for_prompt(&s);
-  match &prompt.kind {
-    ferrite_extension_host::PromptKind::Confirm {
-      message,
-      detail,
-      destructive,
-      ..
-    } => {
-      assert_eq!(message, "Discard the changes to 2 files?");
-      assert!(
-        detail
-          .as_deref()
-          .is_some_and(|detail| detail.contains("permanently"))
-      );
-      assert!(destructive);
-    }
-    other => panic!("not a confirmation: {other:?}"),
-  }
-  s.host.prompt_answered(
-    prompt.id,
-    ferrite_extension_host::PromptReply::Button { index: 0 },
-  );
-  wait_for_view(&s, changes, "no changes", |ids| ids.is_empty());
-  assert!(!repo.join("scratch.txt").exists());
-  assert_eq!(
-    // Git may restore it with the platform's line endings.
-    std::fs::read_to_string(repo.join("src").join("main.rs"))
-      .expect("read")
-      .replace("\r\n", "\n"),
-    "fn main() {}\n"
-  );
-
-  // A folder that isn't a repository offers to make it one.
-  let plain = ferrite_workspace::normalize_path(s._dir.path()).join("plain");
-  std::fs::create_dir_all(&plain).expect("mkdir");
-  *s.fake.folder.lock().unwrap_or_else(PoisonError::into_inner) = Some(plain.clone());
-  s.host.folder_changed();
-  let deadline = Instant::now() + Duration::from_secs(30);
-  while s.host.view_content(changes).welcome.is_none() {
-    assert!(Instant::now() < deadline, "no welcome message");
-    std::thread::sleep(Duration::from_millis(50));
-  }
-  let welcome = s.host.view_content(changes).welcome.expect("shown");
-  assert_eq!(welcome.buttons[0].command, "ferrite.git.init");
-  s.host
-    .run_command("ferrite.git.init", None, None)
-    .expect("runs")
-    .wait()
-    .expect("initializes");
-  let deadline = Instant::now() + Duration::from_secs(30);
-  while !plain.join(".git").is_dir()
-    || !s
-      .host
-      .view_content(changes)
-      .flags
-      .contains(&"repository".to_owned())
-  {
-    assert!(Instant::now() < deadline, "not initialized");
-    std::thread::sleep(Duration::from_millis(50));
-  }
-}
-
-/// Runs git, which may fail (as a merge with conflicts does).
-fn git_may_fail(dir: &Path, args: &[&str]) {
-  let _ = Command::new("git")
-    .args(["-c", "user.name=Test", "-c", "user.email=test@example.com"])
-    .args(args)
-    .current_dir(dir)
-    .output()
-    .expect("git runs");
-}
-
-fn changes_flags(s: &Setup) -> Vec<String> {
-  s.host.view_content("ferrite.git.changes").flags
-}
-
-#[test]
-fn the_git_extension_resolves_merge_conflicts() {
-  let Some((s, repo)) = git_extension() else {
-    return;
-  };
-  let changes = "ferrite.git.changes";
-  let file = repo.join("a.txt");
-  std::fs::write(&file, "one\ntwo\nthree\n").expect("write");
-  git(&repo, &["add", "."]);
-  git(&repo, &["commit", "-q", "-m", "first"]);
-  git(&repo, &["checkout", "-q", "-b", "feature"]);
-  std::fs::write(&file, "one\ntheirs\nthree\n").expect("write");
-  git(&repo, &["commit", "-q", "-am", "theirs"]);
-  git(&repo, &["checkout", "-q", "main"]);
-  std::fs::write(&file, "one\nmine\nthree\n").expect("write");
-  git(&repo, &["commit", "-q", "-am", "mine"]);
-  git_may_fail(&repo, &["merge", "feature"]);
-  *s.fake.folder.lock().unwrap_or_else(PoisonError::into_inner) = Some(repo.clone());
-  s.host.load();
-  wait_for_view(&s, changes, "the conflict", |ids| {
-    ids.contains(&"merge:a.txt".to_owned())
-  });
-  // A merge is in progress: the view says so, with Continue and Abort.
-  eventually("the merge in progress", || {
-    changes_flags(&s).contains(&"operation".to_owned())
-  });
-  assert!(
-    s.host
-      .view_content(changes)
-      .message
-      .is_some_and(|message| message.starts_with("A merge is in progress"))
-  );
-  eventually("the branch saying so", || {
-    status_text(&s, "branch").is_some_and(|text| text.ends_with("(Merging)"))
-  });
-
-  // The file's versions: their base, ours, and theirs.
-  let text = |uri: &str| s.host.provide_text(uri).expect("provides");
-  assert_eq!(text("git:~1:a.txt").as_deref(), Some("one\ntwo\nthree\n"));
-  assert_eq!(text("git:~2:a.txt").as_deref(), Some("one\nmine\nthree\n"));
-  assert_eq!(
-    text("git:~3:a.txt").as_deref(),
-    Some("one\ntheirs\nthree\n")
-  );
-
-  // Opened, its conflict shows in color with links above it.
-  let id = s.fake.open_file(&s.host, &file);
-  eventually("the conflict's links", || {
-    let editor = s.fake.editor();
-    s.host.code_lenses(editor.document(id).expect("open")).len() == 5
-  });
-  {
-    let editor = s.fake.editor();
-    let document = editor.document(id).expect("open");
-    let lenses = s.host.code_lenses(document);
-    let titles: Vec<&str> = lenses.iter().map(|lens| lens.title.as_str()).collect();
-    assert_eq!(
-      titles,
-      [
-        "Accept Current Change",
-        "Accept Incoming Change",
-        "Accept Both Changes",
-        "Compare Changes",
-        "Resolve in Merge Editor"
-      ]
-    );
-    // On the conflict's first line, the `<<<<<<<` one.
-    assert_eq!(lenses[0].offset, document.buffer().line_start(1));
-    assert_eq!(lenses[0].argument.as_deref(), Some("1"));
-    let mut keys: Vec<String> = s
-      .host
-      .decorations(document, 0..document.buffer().len())
-      .into_iter()
-      .map(|decoration| decoration.key)
-      .collect();
-    keys.sort();
-    assert_eq!(
-      keys,
-      [
-        "ferrite.git/conflict-current",
-        "ferrite.git/conflict-current-header",
-        "ferrite.git/conflict-incoming",
-        "ferrite.git/conflict-incoming-header"
-      ]
-    );
-  }
-  // Comparing the sides.
-  assert_eq!(
-    text("git:~current:a.txt").as_deref(),
-    Some("one\nmine\nthree\n")
-  );
-  assert_eq!(
-    text("git:~incoming:a.txt").as_deref(),
-    Some("one\ntheirs\nthree\n")
-  );
-
-  // Staging it with its markers asks first.
-  s.host
-    .run_view_command("ferrite.git.stage", Some("a.txt".into()), vec![])
-    .expect("runs")
-    .wait()
-    .expect("asks");
-  let prompt = answer(&s, ferrite_extension_host::PromptReply::Cancelled);
-  assert!(matches!(
-    prompt.kind,
-    ferrite_extension_host::PromptKind::Confirm { ref message, .. } if message.contains("still has merge conflicts")
-  ));
-
-  // The merge editor shows theirs and ours above the file.
-  s.host
-    .run_view_command("ferrite.git.openMergeEditor", Some("a.txt".into()), vec![])
-    .expect("runs")
-    .wait()
-    .expect("opens");
-  let merge = match s.fake.wait_for("a merge editor", |n| {
-    matches!(n, Notification::OpenMerge(_))
-  }) {
-    Notification::OpenMerge(request) => request,
-    _ => unreachable!(),
-  };
-  assert_eq!(merge.base, "git:~1:a.txt");
-  assert_eq!(merge.incoming.uri, "git:~3:a.txt");
-  assert_eq!(merge.incoming.description.as_deref(), Some("feature"));
-  assert_eq!(merge.current.uri, "git:~2:a.txt");
-  assert_eq!(merge.current.description.as_deref(), Some("main"));
-  assert_eq!(merge.result, file.display().to_string());
-  assert!(merge.reset_result, "the file has conflict markers");
-  assert_eq!(
-    merge.on_complete.as_deref(),
-    Some("ferrite.git.mergeCompleted")
-  );
-
-  // Accepting the incoming change from its link.
-  s.host
-    .run_command("ferrite.git.acceptIncoming", Some(id), Some("1".into()))
-    .expect("runs")
-    .wait()
-    .expect("accepts");
-  // Git may have checked the file out with CRLF line breaks.
-  assert_eq!(
-    s.fake.text(id).replace("\r\n", "\n"),
-    "one\ntheirs\nthree\n"
-  );
-  eventually("the links gone", || {
-    let editor = s.fake.editor();
-    s.host
-      .code_lenses(editor.document(id).expect("open"))
-      .is_empty()
-  });
-
-  // Saved and completed, it's staged; Continue makes the merge commit.
-  s.fake.save(id).expect("saves");
-  s.host
-    .run_view_command(
-      "ferrite.git.mergeCompleted",
-      Some(file.display().to_string()),
-      vec![],
-    )
-    .expect("runs")
-    .wait()
-    .expect("stages");
-  wait_for_view(&s, changes, "the resolved file staged", |ids| {
-    ids.contains(&"staged:a.txt".to_owned())
-  });
-  s.host
-    .run_view_command("ferrite.git.continueOperation", None, vec![])
-    .expect("runs")
-    .wait()
-    .expect("continues");
-  eventually("the merge committed", || {
-    !changes_flags(&s).contains(&"operation".to_owned())
-  });
-  let parents = git(&repo, &["log", "-1", "--format=%P"]).expect("git");
-  assert_eq!(parents.split_whitespace().count(), 2, "a merge commit");
-
-  // Another merge stopped for conflicts can be aborted, after asking.
-  git(&repo, &["checkout", "-q", "-b", "other", "HEAD~1"]);
-  std::fs::write(&file, "one\nother\nthree\n").expect("write");
-  git(&repo, &["commit", "-q", "-am", "other"]);
-  git(&repo, &["checkout", "-q", "main"]);
-  git_may_fail(&repo, &["merge", "other"]);
-  s.host
-    .files_changed(&[repo.join(".git").join("MERGE_HEAD")]);
-  eventually("the second merge", || {
-    changes_flags(&s).contains(&"operation".to_owned())
-  });
-  s.host
-    .run_view_command("ferrite.git.abortOperation", None, vec![])
-    .expect("runs")
-    .wait()
-    .expect("asks");
-  answer(&s, ferrite_extension_host::PromptReply::Button { index: 0 });
-  eventually("the merge aborted", || {
-    !changes_flags(&s).contains(&"operation".to_owned())
-  });
-  assert!(!repo.join(".git").join("MERGE_HEAD").exists());
-  assert_eq!(
-    std::fs::read_to_string(&file)
-      .expect("read")
-      .replace("\r\n", "\n"),
-    "one\ntheirs\nthree\n"
-  );
-}
-
-#[test]
-fn the_git_extension_rebases_and_stops_for_conflicts() {
-  let Some((s, repo)) = git_extension() else {
-    return;
-  };
-  let file = repo.join("a.txt");
-  std::fs::write(&file, "one\ntwo\n").expect("write");
-  git(&repo, &["add", "."]);
-  git(&repo, &["commit", "-q", "-m", "first"]);
-  git(&repo, &["checkout", "-q", "-b", "topic"]);
-  std::fs::write(&file, "one\ntopic\n").expect("write");
-  git(&repo, &["commit", "-q", "-am", "topic"]);
-  git(&repo, &["checkout", "-q", "main"]);
-  std::fs::write(&file, "one\nmain\n").expect("write");
-  git(&repo, &["commit", "-q", "-am", "main"]);
-  git(&repo, &["checkout", "-q", "topic"]);
-  *s.fake.folder.lock().unwrap_or_else(PoisonError::into_inner) = Some(repo.clone());
-  s.host.load();
-  eventually("the branch", || {
-    status_text(&s, "branch").is_some_and(|text| text.starts_with("topic"))
-  });
-
-  // Rebasing onto main stops for the conflict.
-  s.host
-    .run_view_command("ferrite.git.rebaseBranch", None, vec![])
-    .expect("runs")
-    .wait()
-    .expect("asks");
-  let prompt = answer(
-    &s,
-    ferrite_extension_host::PromptReply::Picked {
-      value: "refs/heads/main".into(),
-    },
-  );
-  assert!(matches!(
-    prompt.kind,
-    ferrite_extension_host::PromptKind::Pick { ref title, .. } if title.contains("rebase")
-  ));
-  s.fake
-    .wait_for_message("Rebasing stopped for merge conflicts");
-  eventually("the rebase in progress", || {
-    let flags = changes_flags(&s);
-    flags.contains(&"operation".to_owned()) && flags.contains(&"rebasing".to_owned())
-  });
-  eventually("the branch saying so", || {
-    status_text(&s, "branch").is_some_and(|text| text.ends_with("(Rebasing)"))
-  });
-
-  // Continue waits for the conflicts to be resolved.
-  s.host
-    .run_view_command("ferrite.git.continueOperation", None, vec![])
-    .expect("runs")
-    .wait()
-    .expect("refuses");
-  s.fake.wait_for_message("1 file still has merge conflicts");
-
-  // Resolved and staged, Continue finishes the rebase.
-  std::fs::write(&file, "one\nmain\ntopic\n").expect("write");
-  git(&repo, &["add", "a.txt"]);
-  s.host.files_changed(&[repo.join(".git").join("index")]);
-  wait_for_view(&s, "ferrite.git.changes", "the resolved file", |ids| {
-    ids.contains(&"staged:a.txt".to_owned())
-  });
-  s.host
-    .run_view_command("ferrite.git.continueOperation", None, vec![])
-    .expect("runs")
-    .wait()
-    .expect("continues");
-  eventually("the rebase finished", || {
-    !changes_flags(&s).contains(&"operation".to_owned())
-  });
-  let subjects = git(&repo, &["log", "--format=%s"]).expect("git");
-  assert_eq!(
-    subjects.lines().collect::<Vec<_>>(),
-    ["topic", "main", "first"]
-  );
-}
-
-/// A repository at `dir` with one committed file.
-fn new_repo(dir: &Path, file: &str, text: &str) {
-  std::fs::create_dir_all(dir).expect("mkdir");
-  git(dir, &["init", "-q", "-b", "main"]);
-  git(dir, &["config", "user.name", "Test"]);
-  git(dir, &["config", "user.email", "test@example.com"]);
-  std::fs::write(dir.join(file), text).expect("write");
-  git(dir, &["add", "."]);
-  git(dir, &["commit", "-q", "-m", "first"]);
-}
-
-#[test]
-fn the_git_extension_finds_nested_repositories() {
-  let Some((s, repo)) = git_extension() else {
-    return;
-  };
-  let repositories = "ferrite.git.repositories";
-  let changes = "ferrite.git.changes";
-  std::fs::write(repo.join("top.txt"), "top\n").expect("write");
-  git(&repo, &["add", "."]);
-  git(&repo, &["commit", "-q", "-m", "top"]);
-  let sub = repo.join("sub");
-  new_repo(&sub, "a.txt", "one\n");
-  std::fs::write(sub.join("a.txt"), "two\n").expect("write");
-  *s.fake.folder.lock().unwrap_or_else(PoisonError::into_inner) = Some(repo.clone());
-  s.host.load();
-
-  // Both are listed, the top one active, and the view shows itself.
-  wait_for_view(&s, repositories, "both repositories", |ids| ids.len() == 2);
-  assert_eq!(s.host.view_content(repositories).visible, Some(true));
-  let a = sub.join("a.txt").display().to_string();
-  wait_for_marks(&s, |marks| marks.iter().any(|mark| mark.path == a));
-
-  // A nested repository's files have its versions, under its folder.
-  assert_eq!(s.host.original_of(&a).as_deref(), Some("git::sub/a.txt"));
-  assert_eq!(
-    s.host
-      .provide_text("git::sub/a.txt")
-      .expect("provides")
-      .as_deref(),
-    Some("one\n")
-  );
-  assert_eq!(
-    s.host
-      .provide_text("git:HEAD:top.txt")
-      .expect("provides")
-      .as_deref(),
-    Some("top\n")
-  );
-
-  // Choosing it shows its changes.
-  s.host
-    .run_view_command(
-      "ferrite.git.selectRepository",
-      Some(sub.display().to_string()),
-      vec![],
-    )
-    .expect("runs")
-    .wait()
-    .expect("selects");
-  wait_for_view(&s, changes, "the nested repository's change", |ids| {
-    ids.contains(&"changes:a.txt".to_owned())
-  });
-  // Staging there stages in it.
-  s.host
-    .run_view_command("ferrite.git.stage", Some("a.txt".into()), vec![])
-    .expect("runs")
-    .wait()
-    .expect("stages");
-  wait_for_view(&s, changes, "the staged change", |ids| {
-    ids.contains(&"staged:a.txt".to_owned())
-  });
-  assert_eq!(
-    git(&sub, &["diff", "--cached", "--name-only"]).as_deref(),
-    Some("a.txt\n")
-  );
-}
-
-#[test]
-fn the_git_extension_finds_repositories_in_a_folder_that_is_not_one() {
-  let Some((s, repo)) = git_extension() else {
-    return;
-  };
-  let repositories = "ferrite.git.repositories";
-  // The folder isn't a repository; two of its folders are.
-  let folder = repo.parent().expect("parent").join("projects");
-  new_repo(&folder.join("one"), "a.txt", "a\n");
-  new_repo(&folder.join("two"), "b.txt", "b\n");
-  std::fs::create_dir_all(folder.join("plain")).expect("mkdir");
-  std::fs::write(folder.join("plain").join("c.txt"), "c").expect("write");
-  *s.fake.folder.lock().unwrap_or_else(PoisonError::into_inner) = Some(folder.clone());
-  s.host.load();
-  wait_for_view(&s, repositories, "both repositories", |ids| ids.len() == 2);
-  eventually("the first one's branch", || {
-    status_text(&s, "branch").is_some_and(|text| text.starts_with("main"))
-  });
-  // Addresses are relative to the folder.
-  let b = folder.join("two").join("b.txt").display().to_string();
-  assert_eq!(s.host.original_of(&b).as_deref(), Some("git::two/b.txt"));
-}
-
-#[test]
-fn the_git_extension_blames_the_cursor_line() {
-  let Some((s, repo)) = git_extension() else {
-    return;
-  };
-  let file = repo.join("a.txt");
-  std::fs::write(&file, "one\ntwo\n").expect("write");
-  git(&repo, &["add", "."]);
-  git(&repo, &["commit", "-q", "-m", "first commit"]);
-  *s.fake.folder.lock().unwrap_or_else(PoisonError::into_inner) = Some(repo.clone());
-  s.host.load();
-  eventually("the branch", || status_text(&s, "branch").is_some());
-  let id = s.fake.open_file(&s.host, &file);
-
-  // The cursor is on the first line: its commit, by "You", just now.
-  s.host.selection_changed(Some(id));
-  eventually("the blame in the status bar", || {
-    status_text(&s, "blame").as_deref() == Some("You (now)")
-  });
-  let annotations = {
-    let editor = s.fake.editor();
-    let document = editor.document(id).expect("open");
-    s.host
-      .line_annotations(document, 0..document.buffer().len())
-  };
-  assert_eq!(annotations.len(), 1);
-  assert_eq!(annotations[0].offset, 0);
-  assert_eq!(annotations[0].text, "first commit, You (now)");
-  assert!(
-    annotations[0]
-      .tooltip
-      .as_deref()
-      .is_some_and(|tooltip| tooltip.starts_with("Test <test@example.com>"))
-  );
-
-  // A line changed since: not committed yet.
-  s.fake.type_text(&s.host, id, "new ");
-  s.host.selection_changed(Some(id));
-  eventually("the uncommitted line", || {
-    status_text(&s, "blame").as_deref() == Some("You (Uncommitted changes)")
-  });
 }

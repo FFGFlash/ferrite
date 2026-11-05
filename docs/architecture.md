@@ -54,9 +54,12 @@ Tauri, and nothing in Rust depends on the frontend.
 | `ferrite-app`            | Process lifecycle, Tauri commands, dialogs, clipboard, settings, session state, workspace coordination, syntax and language server state per document, backend events, instrumentation, benchmark mode, logging                  | all of the above, Tauri, `toml`, `toml_edit`, `memory-stats`                   |
 | `ferrite-benches`        | Criterion benchmarks and deterministic fixtures (`benches/`), not part of the app                                                                                                                                                | `ferrite-text`, `ferrite-core`, `ferrite-workspace`, `criterion`               |
 
-Extensions themselves (the example and test fixtures) build to WebAssembly in a separate
-workspace, `extensions/`. The design brief's `editor-app` and `src-tauri` are one crate
-([ADR 0001](adr/0001-application-skeleton.md)). Workspace, settings, and command decisions are in
+Extensions themselves (the examples and test fixtures) build to WebAssembly in a separate
+workspace, `extensions/`. The official extensions (`ferrite.*`: Git, Markdown, Images, and the
+languages) have repositories of their own; nothing in this one depends on them
+([ADR 0034](adr/0034-official-extensions-in-their-own-repositories.md)). Tests that need real
+grammars use copies in `extensions/test-fixtures/languages/`. The design brief's `editor-app`
+and `src-tauri` are one crate ([ADR 0001](adr/0001-application-skeleton.md)). Workspace, settings, and command decisions are in
 [ADR 0003](adr/0003-workbench-services.md), and performance decisions in
 [ADR 0004](adr/0004-performance-foundations.md), and syntax and language server decisions in
 [ADR 0005](adr/0005-syntax-and-language-servers.md), and extension decisions in
@@ -728,6 +731,10 @@ connects it to the editor, settings, and frontend. The developer guide is
   `src/dock/activeFile.ts` reports the active editor's cursor line
   (`extension_selection_changed`), which runs `on_selection_changed` commands; a view's content
   carries `visible`, which `useShownSections` follows.
+- **Rendering Markdown** (API 1.14;
+  [ADR 0034](adr/0034-official-extensions-in-their-own-repositories.md)).
+  `workbench::render-markdown` runs the host's renderer (`markdown.rs`, pulldown-cmark), the
+  one READMEs use, and returns preview nodes; it touches no state, so it needs no permission.
 - **Code lenses and merge editors** (API 1.12; [ADR 0032](adr/0032-merge-conflicts.md)).
   The host keeps code lenses with each document like decorations (mapped through edits); views
   carry them (`EditorView.lenses`) and the editor draws them as zones above their lines.
@@ -918,9 +925,11 @@ viewers through the `viewers` interface (API 1.4).
   same height: icon, name, description, author, start time, and state when it needs attention,
   with the rest in the row's tooltip and its actions in a gear menu. Choosing one opens its page
   (`panels/ExtensionPage`, the dock item `page:extension:<id>`): its README, drawn by the
-  preview renderer (`PreviewDocument`) from content the backend made with the Markdown
-  extension's renderer ([ADR 0020](adr/0020-extension-pages.md)), its permissions (checkboxes
-  that grant or deny), commands, contributions, resource use, folder, and errors. The views are the built-in ones followed by those of enabled
+  preview renderer (`PreviewDocument`) from content the backend made with the host's Markdown
+  renderer (`markdown.rs`, which extensions also call as `workbench::render-markdown`;
+  [ADR 0020](adr/0020-extension-pages.md),
+  [ADR 0034](adr/0034-official-extensions-in-their-own-repositories.md)), its permissions
+  (checkboxes that grant or deny), commands, contributions, resource use, folder, and errors. The views are the built-in ones followed by those of enabled
   extensions (`app/views.ts`). Problems and Output are panel views: they open along the bottom
   with the terminals, and show and hide with them (**View: Toggle Panel**). The activity bar
   lists everything in the side bar (the groups along the dock's left edge: views, terminals,

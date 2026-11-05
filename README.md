@@ -45,7 +45,7 @@ or Shift JIS, which it detects and shows in the status bar. Click the encoding t
 file with another one. Files are saved in the encoding they were read in, and line endings and a
 byte order mark are preserved exactly; new lines use the file's existing line ending. A file that
 looks binary opens in a tab that asks first (**Open Anyway** opens it as text), unless an
-extension's viewer shows that kind of file: the [Images](extensions/images/) example shows PNG,
+extension's viewer shows that kind of file: the official Images extension shows PNG,
 JPEG, GIF, WebP, BMP, ICO, and AVIF files as pictures. **View: Reopen Editor With…** switches a
 file between text and the viewers that can show it.
 
@@ -151,21 +151,23 @@ edit. Without any, files are plain text. A file's language comes from its name a
 status bar; click it (or run **View: Change Language Mode**, `Ctrl+K M`) to choose another one,
 plain text, or to go back to detecting it. The choice lasts while the file is open. A language
 extension brings a Tree-sitter grammar compiled to WebAssembly for highlighting, and usually
-declares a language server. These are included, with no code to build:
+declares a language server. The official ones (`ferrite.*`) each have a repository of their own;
+all but Markdown have no code to build:
 
-| Extension                            | Languages                     | Language server                   | Install the server with                                |
-| ------------------------------------ | ----------------------------- | --------------------------------- | ------------------------------------------------------ |
-| [Rust](extensions/rust/)             | Rust                          | `rust-analyzer`                   | `rustup component add rust-analyzer`                   |
-| [TypeScript](extensions/typescript/) | TypeScript, TSX               | `typescript-language-server`      | `npm install -g typescript-language-server typescript` |
-| [JavaScript](extensions/javascript/) | JavaScript, JSX               | `typescript-language-server`      | as above                                               |
-| [JSON](extensions/json/)             | JSON                          | —                                 |                                                        |
-| [TOML](extensions/toml/)             | TOML, `Cargo.lock`            | —                                 |                                                        |
-| [Python](extensions/python/)         | Python                        | `pyright-langserver`              | `npm install -g pyright`                               |
-| [HTML & CSS](extensions/html-css/)   | HTML (with CSS, JS), CSS, SVG | `vscode-html/css-language-server` | `npm install -g vscode-langservers-extracted`          |
-| [Markdown](extensions/markdown/)     | Markdown                      | —                                 |                                                        |
+| Extension  | Languages                     | Language server                   | Install the server with                                |
+| ---------- | ----------------------------- | --------------------------------- | ------------------------------------------------------ |
+| Rust       | Rust                          | `rust-analyzer`                   | `rustup component add rust-analyzer`                   |
+| TypeScript | TypeScript, TSX               | `typescript-language-server`      | `npm install -g typescript-language-server typescript` |
+| JavaScript | JavaScript, JSX               | `typescript-language-server`      | as above                                               |
+| JSON       | JSON                          | —                                 |                                                        |
+| TOML       | TOML, `Cargo.lock`            | —                                 |                                                        |
+| Python     | Python                        | `pyright-langserver`              | `npm install -g pyright`                               |
+| HTML & CSS | HTML (with CSS, JS), CSS, SVG | `vscode-html/css-language-server` | `npm install -g vscode-langservers-extracted`          |
+| XML        | XML                           | —                                 |                                                        |
+| Markdown   | Markdown                      | —                                 |                                                        |
 
-Load one with **Extensions: Load Development Extension…** (choose its folder, such as
-`extensions/rust`), or install it by copying its folder into the `extensions` folder next to
+Load one with **Extensions: Load Development Extension…** (choose its folder, such as a checkout
+of the Rust extension), or install it by copying its folder into the `extensions` folder next to
 `settings.toml`. Ferrite asks before running an extension's language server; highlighting
 works either way. Markdown's highlighting needs no build either; its preview does (see
 [Extensions](#extensions)).
@@ -201,14 +203,20 @@ buttons to restart it, turn it off, or open its settings or log. The gear on eac
 same actions. An extension that crashes, loops, or uses too
 much memory is stopped without affecting the editor.
 
-Besides the [language extensions](#languages), the [Git](extensions/git/) extension and six
-examples are included:
+Besides the [language extensions](#languages), the official extensions, each in a repository of
+its own, are:
 
-- [Git](extensions/git/) adds a Source Control view: stage, unstage, and discard changes, commit
-  them (Ctrl+Enter in the message box), amend or undo the last commit, and browse the current
-  branch's commits and the files each changed. It shows the Git status of files in the explorer,
-  and the branch you're on in the status bar, with `*` when there are changes and how far it is
-  ahead of or behind its upstream. It needs [Git](https://git-scm.com) installed.
+- **Git** adds a Source Control view: stage, unstage, and discard changes, commit them
+  (Ctrl+Enter in the message box), amend or undo the last commit, and browse the current branch's
+  commits and the files each changed. It shows the Git status of files in the explorer, and the
+  branch you're on in the status bar, with `*` when there are changes and how far it is ahead of
+  or behind its upstream. It needs [Git](https://git-scm.com) installed.
+- **Markdown** adds Markdown highlighting, and **Markdown: Open Preview** (`Ctrl+Shift+V`) and
+  **Open Preview to the Side** (`Ctrl+K V`), which show the page rendered and update it as you
+  type.
+- **Images** shows image files as pictures you can zoom, on the background you choose.
+
+Four examples are included here:
 
 - [Tidy](extensions/tidy/) flags trailing whitespace and long lines, and can trim them.
 - [TODOs](extensions/todos/) highlights TODO and FIXME comments and lists them in a side bar
@@ -216,11 +224,6 @@ examples are included:
   **Insert TODO Comment** to the editor's context menu.
 - [Example Themes](extensions/themes/) adds the Midnight and Paper color themes, with no code.
 - [Example File Icons](extensions/icons/) adds the Colorful file icon theme, with no code.
-- [HTML & CSS](extensions/html-css/) adds HTML and CSS highlighting and their language servers,
-  with no code.
-- [Markdown](extensions/markdown/) adds Markdown highlighting, and **Markdown: Open Preview**
-  (`Ctrl+Shift+V`) and **Open Preview to the Side** (`Ctrl+K V`), which show the page rendered and
-  update it as you type.
 
 To try them:
 
@@ -230,7 +233,9 @@ cd extensions && cargo build --release
 ```
 
 Then run **Extensions: Load Development Extension…** and choose an extension's folder, such as
-`extensions/todos`. To install
+`extensions/todos`. The official extensions with code build the same way in their own
+repositories (`cargo build --release`), which expect this one checked out beside them as
+`editor`, for the extension API. To install
 an extension, copy its folder (manifest and `.wasm`) into the `extensions` folder next to
 `settings.toml`. See [`docs/extensions.md`](docs/extensions.md) for writing your own.
 
@@ -290,7 +295,7 @@ Reloading keeps open documents and unsaved changes. See
 Open a folder with **File: Open Folder…** (command palette or the Explorer). The explorer shows
 `.gitignore`d entries dimmed, along with everything inside an ignored folder. Files with errors or
 warnings (those listed in **View: Problems**) are colored and show how many, and so are the
-folders that contain them, with a dot. Extensions can mark files too: the [Git](extensions/git/)
+folders that contain them, with a dot. Extensions can mark files too: the official Git
 extension colors changed files and shows a letter (**M** modified, **U** untracked, and so on).
 It follows the file you're editing: switching tabs, going to a
 definition, or opening a search result expands the file's folders and selects it.

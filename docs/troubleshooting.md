@@ -74,9 +74,9 @@ To start over, delete `settings.toml`. **Preferences: Open Settings (TOML)** cre
 
 ## No syntax colors
 
-Ferrite has no languages built in. Load the extension for the language (for example
-`extensions/rust`, with **Extensions: Load Development Extension…**), and check in the
-Extensions view that it isn't invalid or turned off. The status bar names the active file's
+Ferrite has no languages built in. Load the extension for the language (for example a
+checkout of the official Rust extension, with **Extensions: Load Development Extension…**), and
+check in the Extensions view that it isn't invalid or turned off. The status bar names the active file's
 language once one claims it. If the language is there but the file stays uncolored, the log
 says why under `syntax highlighting is unavailable` (a grammar that didn't load, or a query
 error).

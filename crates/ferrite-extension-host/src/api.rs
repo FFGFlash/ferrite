@@ -1019,6 +1019,16 @@ impl WorkbenchHost for StoreState {
     self.api.shared()?.close_preview(&id);
     Ok(())
   }
+
+  fn render_markdown(&mut self, text: String) -> Result<Vec<PreviewNode>, ApiError> {
+    if text.len() > crate::markdown::MAX_MARKDOWN_BYTES {
+      return Err(ApiError::TooLarge(format!(
+        "Markdown of at most {} MiB can be rendered",
+        crate::markdown::MAX_MARKDOWN_BYTES / 1024 / 1024
+      )));
+    }
+    Ok(crate::markdown::render(&text))
+  }
 }
 
 /// Most bytes one `read-viewed-file` call returns.

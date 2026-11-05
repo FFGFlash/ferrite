@@ -1,0 +1,34 @@
+# A copy of the languages of the official ferrite.javascript extension, for the
+# editor's tests, which need real grammars. Not kept in step with it.
+id = "test.javascript"
+name = "JavaScript"
+version = "0.1.0"
+description = "JavaScript and JSX highlighting, and typescript-language-server."
+author = "Ferrite"
+api_version = "1"
+
+[engines]
+ferrite = ">=0.1.0"
+
+[permissions]
+language_servers = true
+
+[[languages]]
+id = "javascript"
+name = "JavaScript"
+file_extensions = ["js", "mjs", "cjs", "jsx"]
+grammar = "grammars/tree-sitter-javascript.wasm"
+highlights = "queries/highlights.scm"
+folds = "queries/folds.scm"
+line_comment = "//"
+block_comment = ["/*", "*/"]
+
+# `npm install -g typescript-language-server typescript`. The TypeScript
+# extension declares the same server; with both installed, one runs for all
+# their languages.
+[[language_servers]]
+name = "typescript-language-server"
+command = "typescript-language-server"
+args = ["--stdio"]
+languages = ["javascript"]
+root_markers = ["tsconfig.json", "jsconfig.json", "package.json"]

@@ -1,0 +1,22 @@
+# A copy of the languages of the official ferrite.json extension, for the
+# editor's tests, which need real grammars. Not kept in step with it.
+id = "test.json"
+name = "JSON"
+version = "0.1.0"
+description = "JSON highlighting."
+author = "Ferrite"
+api_version = "1"
+
+[engines]
+ferrite = ">=0.1.0"
+
+[[languages]]
+id = "json"
+name = "JSON"
+file_extensions = ["json", "jsonc"]
+grammar = "grammars/tree-sitter-json.wasm"
+highlights = "queries/highlights.scm"
+folds = "queries/folds.scm"
+# Comments are only valid in JSONC, as in VS Code.
+line_comment = "//"
+block_comment = ["/*", "*/"]

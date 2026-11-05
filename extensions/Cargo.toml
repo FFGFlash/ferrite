@@ -1,8 +1,9 @@
-# Extensions build to WebAssembly in their own workspace, separate from the
-# editor (see `.cargo/config.toml` for the target).
+# The example extensions and the test fixtures build to WebAssembly in their
+# own workspace, separate from the editor (see `.cargo/config.toml` for the
+# target). The official `ferrite.*` extensions have repositories of their own.
 [workspace]
 resolver = "3"
-members = ["images", "markdown", "tidy", "todos", "test-fixtures/misbehaving", "test-fixtures/programs", "git"]
+members = ["tidy", "todos", "test-fixtures/misbehaving", "test-fixtures/pages", "test-fixtures/programs"]
 
 [workspace.package]
 version = "0.1.0"

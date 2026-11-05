@@ -45,18 +45,18 @@ This guide uses these examples:
   lists them in a side bar view, counts them in the status bar, and adds a keybinding and a
   context menu item.
 - [Example Themes](../extensions/themes/) contributes two color themes and no code at all.
-- [HTML & CSS](../extensions/html-css/) adds three languages (HTML, CSS and SVG), highlights CSS
-  and JavaScript inside HTML and SVG, and declares language servers for HTML and CSS, also with no
-  code. Ferrite has no languages of its
-  own: [Rust](../extensions/rust/), [TypeScript](../extensions/typescript/),
-  [JavaScript](../extensions/javascript/), [JSON](../extensions/json/),
-  [TOML](../extensions/toml/), and [Python](../extensions/python/) are extensions like it.
-- [Markdown](../extensions/markdown/) is a language too, and has code: a preview that renders
-  the document as you type.
-- [Images](../extensions/images/) shows image files in a webview viewer: a page that draws the
-  picture on a background you choose, fit to the tab or zoomed, with its format and size.
-- [Git](../extensions/git/) runs Git to mark changed files in the explorer, show the branch in
-  the status bar, and fill its Source Control view, where changes are staged and committed:
+
+It also refers to the official extensions (`ferrite.*`), which have repositories of their own:
+
+- **HTML & CSS** adds three languages (HTML, CSS and SVG), highlights CSS and JavaScript inside
+  HTML and SVG, and declares language servers for HTML and CSS, also with no code. Ferrite has
+  no languages of its own: Rust, TypeScript, JavaScript, JSON, TOML, XML, and Python are
+  extensions like it.
+- **Markdown** is a language too, and has code: a preview that renders the document as you type.
+- **Images** shows image files in a webview viewer: a page that draws the picture on a background
+  you choose, fit to the tab or zoomed, with its format and size.
+- **Git** runs Git to mark changed files in the explorer, show the branch in the status bar, and
+  fill its Source Control view, where changes are staged and committed:
   [programs](#programs), [watching files](#watching-files), [explorer marks](#explorer-marks),
   [view containers](#view-containers), [tree items](#tree-items), and [prompts](#prompts).
 
@@ -178,7 +178,7 @@ extension invalid in the Extensions view, with a message:
 Every extension also starts when one of its commands runs, so `on-command` is only
 documentation. Language ids are those extensions add (see [Languages](#languages)), such as
 `rust`, `typescript`, `typescriptreact`, `javascript`, `json`, `toml`, `python`, `html`, `css`,
-and `markdown` in the examples.
+and `markdown` in the official extensions.
 
 **Entry point.** An installed extension's entry point must be inside its folder. A development
 extension may point elsewhere, such as Tidy's
@@ -189,9 +189,10 @@ commands run only from view items or other contributions.
 
 **The Extensions view** shows the `icon` (square works best; it's shown from 36 to 88 pixels),
 `name`, `description` (on one line, cut if long), and `author`. Choosing the extension opens its
-page, which shows the `README.md` in its folder (any case), rendered like the Markdown preview:
+page, which shows the `README.md` in its folder (any case), rendered like a Markdown preview
+(by the same renderer as [`render-markdown`](#previews)):
 relative links open files from the extension's folder, pictures load from it, and HTML is shown
-as its text. A README can be at most 1 MiB. Tidy, TODOs, and Markdown have both.
+as its text. A README can be at most 1 MiB. Tidy and TODOs have both.
 
 **Dependencies** between extensions aren't supported in API version 1.
 
@@ -788,7 +789,7 @@ end at it; others carry on to the bottom lane with the same `id`; and a lane lea
 each parent. Rows of items it doesn't name, such as an opened commit's files, carry the lanes
 straight on. Going down the commits, the extension makes each row's `outputs` from its `inputs`:
 the node's lane goes on to its first parent, and other parents get lanes of their own. Git's
-Commits view does this; see `extensions/git/src/graph.rs`.
+Commits view does this; see `src/graph.rs` in the Git extension.
 
 ### Decorations
 
@@ -850,7 +851,7 @@ it with `on_selection_changed`.
 ### Previews
 
 A preview is a tab of formatted text that the extension fills in, such as a rendered Markdown
-file. [Markdown](../extensions/markdown/) is the example.
+file. The official Markdown extension is the example.
 
 ```toml
 [[previews]]
@@ -869,6 +870,11 @@ uses the document's id).
   without changing anything when the preview isn't open, because the user closed its tab, so
   the extension can stop updating it.
 - **`close-preview(preview, key)`** closes it.
+- **`render-markdown(text)`** (API 1.14) turns Markdown into preview content: CommonMark with
+  GitHub's tables, strikethrough, and task lists, rendered by the editor as it renders
+  extensions' READMEs. HTML is reduced to its text, front matter is left out, and a document too
+  long for a preview is cut with a note. It takes at most 8 MiB (`too-large` otherwise) and needs
+  no permission. The result can go to `set-preview-content` or a viewer's `set-viewer-content`.
 
 Content is a list of nodes, each naming the index of the node it's inside, which must come
 before it (WIT has no recursive types). The workbench draws them itself, so an extension can't
@@ -906,7 +912,7 @@ The top level holds blocks and inline nodes. Anything out of place is rejected w
 A viewer shows a kind of file the extension's way instead of as text, such as a picture of an
 image file. Viewers are API 1.4. This one fills the tab with [preview](#previews) content, here
 a summary of a font file; a viewer can also show a page of its own instead
-([webviews](#webviews)), as [Images](../extensions/images/) does.
+([webviews](#webviews)), as the official Images extension does.
 
 ```toml
 [[commands]]
@@ -946,7 +952,7 @@ priority = "default"              # or "option"
 ### Webviews
 
 A viewer or preview can show a page of the extension's own (HTML, CSS, and JavaScript) instead
-of preview content, for what content can't draw: [Images](../extensions/images/) shows a picture
+of preview content, for what content can't draw: the official Images extension shows a picture
 you can zoom, on a background you choose. Webviews are API 1.5
 ([ADR 0025](adr/0025-webviews.md)).
 
@@ -1290,12 +1296,10 @@ command that isn't the extension's own, or an item whose parent isn't listed bef
 Every language Ferrite knows comes from an extension: which files it is for, syntax
 highlighting from a [Tree-sitter](https://tree-sitter.github.io/) grammar, highlighting of other
 languages embedded in it, and its language server. None of this needs code, so a language-only
-extension has no entrypoint. [HTML & CSS](../extensions/html-css/) is the example used below;
-the [Rust](../extensions/rust/), [TypeScript](../extensions/typescript/) (two languages, TS and
-TSX), [JavaScript](../extensions/javascript/), [JSON](../extensions/json/),
-[TOML](../extensions/toml/), and [Python](../extensions/python/) extensions are simpler ones.
-[Markdown](../extensions/markdown/) uses two grammars, one for blocks and one for the inline text
-it injects into them, with a language for each; the inline one has no files of its own.
+extension has no entrypoint. The official HTML & CSS extension is the example used below; the
+Rust, TypeScript (two languages, TS and TSX), JavaScript, JSON, TOML, XML, and Python extensions
+are simpler ones. Markdown uses two grammars, one for blocks and one for the inline text it
+injects into them, with a language for each; the inline one has no files of its own.
 
 ```text
 html-css/
@@ -1352,7 +1356,7 @@ case-insensitively.
 
 A grammar is a Tree-sitter parser compiled to WebAssembly with `tree-sitter build --wasm`, which
 exports `tree_sitter_<grammar_name>`. Ferrite uses Tree-sitter 0.27, which loads grammars of
-language ABI 13 to 15. Many grammars publish a prebuilt `.wasm`: all the examples' grammars are the
+language ABI 13 to 15. Many grammars publish a prebuilt `.wasm`: all the official extensions' grammars are the
 files from their npm packages (`tree-sitter-html@0.23.2`, `tree-sitter-css@0.25.0`,
 `tree-sitter-rust@0.24.0`, and so on), except XML's, whose npm package has none: it's the
 `tree-sitter-xml.wasm` attached to the
@@ -1468,15 +1472,15 @@ root_markers = ["package.json"]          # optional: files marking a project roo
   program the extension ships, inside its folder. Absolute paths aren't allowed. A server that
   isn't installed shows as failed in the status bar, with a hover explaining why.
 - **Names.** Extensions that declare a server with the same name and command share one
-  server for all their languages: the TypeScript and JavaScript examples both declare
+  server for all their languages: the TypeScript and JavaScript extensions both declare
   `typescript-language-server`. With a different command, the first declaration wins. Users can
   change an extension's server or turn it off by name, for example
   `[lsp.servers.rust-analyzer]` with `enabled = false` or another `command`.
 
 ### Trying it
 
-1. Run **Extensions: Load Development Extension…** and choose `extensions/html-css`. Nothing
-   needs building.
+1. Run **Extensions: Load Development Extension…** and choose a checkout of the HTML & CSS
+   extension. Nothing needs building.
 2. Ferrite asks whether to allow the two language servers. Either answer is fine; to get them,
    run `npm install -g vscode-langservers-extracted`.
 3. Open an `.html` file: tags, attributes, and comments are colored, and so is the CSS in
@@ -1581,7 +1585,7 @@ message saying so. Rust on `wasm32-unknown-unknown` is the supported path for no
 
 ## Versioning
 
-The WIT package is versioned: `ferrite:extension@1.13.0`, `api_version = "1"`.
+The WIT package is versioned: `ferrite:extension@1.14.0`, `api_version = "1"`.
 
 - **Additions.** New host functions arrive as minor versions of the package. Version 1.1 added the
   `workbench` interface, 1.2 added previews to it, 1.3 added the `files` interface, 1.4 the
@@ -1591,8 +1595,9 @@ The WIT package is versioned: `ferrite:extension@1.13.0`, `api_version = "1"`.
   `quick-diff` interface, 1.10 the `timers` interface, 1.11 `views::set-graph`,
   `prompts::pick-folder`, `workspace::open-folder`, and `workbench::active-file`, and 1.12
   `workbench::set-code-lenses` and `documents::open-merge` (with whole-line decorations in the
-  manifest), and 1.13 `workbench::set-line-annotations` and `views::set-visible` (with
-  `on_selection_changed` and hidden views in the manifest).
+  manifest), 1.13 `workbench::set-line-annotations` and `views::set-visible` (with
+  `on_selection_changed` and hidden views in the manifest), and 1.14
+  `workbench::render-markdown`.
   Wasmtime
   links components built against an older minor version: the host's tests load Tidy builds made
   against 1.0 and 1.2 and a TODOs build made against 1.1.

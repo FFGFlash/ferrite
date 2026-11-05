@@ -1,0 +1,32 @@
+# A copy of the languages of the official ferrite.rust extension, for the
+# editor's tests, which need real grammars. Not kept in step with it.
+id = "test.rust"
+name = "Rust"
+version = "0.1.0"
+description = "Rust highlighting, and rust-analyzer for diagnostics, hover, definitions, and completion."
+author = "Ferrite"
+api_version = "1"
+
+[engines]
+ferrite = ">=0.1.0"
+
+[permissions]
+language_servers = true
+
+[[languages]]
+id = "rust"
+name = "Rust"
+file_extensions = ["rs"]
+grammar = "grammars/tree-sitter-rust.wasm"
+highlights = "queries/highlights.scm"
+folds = "queries/folds.scm"
+# For Toggle Line Comment (Ctrl+/).
+line_comment = "//"
+block_comment = ["/*", "*/"]
+
+# `rustup component add rust-analyzer`
+[[language_servers]]
+name = "rust-analyzer"
+command = "rust-analyzer"
+languages = ["rust"]
+root_markers = ["Cargo.toml"]

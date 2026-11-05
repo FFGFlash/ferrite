@@ -1,6 +1,6 @@
 //! Languages from WebAssembly grammars, using the HTML, CSS and SVG grammars
-//! of the example extension in `extensions/html-css`, and the JavaScript one
-//! in `extensions/javascript` for scripts in HTML and SVG.
+//! in `extensions/test-fixtures/languages/html-css`, and the JavaScript one
+//! beside them for scripts in HTML and SVG.
 
 use std::path::{Path, PathBuf};
 
@@ -11,7 +11,7 @@ use ferrite_syntax::{
 use ferrite_text::{ChangeSet, Edit, TextBuffer};
 
 fn extension() -> PathBuf {
-  Path::new(env!("CARGO_MANIFEST_DIR")).join("../../extensions/html-css")
+  Path::new(env!("CARGO_MANIFEST_DIR")).join("../../extensions/test-fixtures/languages/html-css")
 }
 
 fn definition(id: &str, name: &str, injections: bool) -> LanguageDefinition {
@@ -30,7 +30,8 @@ fn definition(id: &str, name: &str, injections: bool) -> LanguageDefinition {
 }
 
 fn javascript() -> LanguageDefinition {
-  let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../extensions/javascript");
+  let dir = Path::new(env!("CARGO_MANIFEST_DIR"))
+    .join("../../extensions/test-fixtures/languages/javascript");
   LanguageDefinition {
     id: "javascript".into(),
     name: "JavaScript".into(),

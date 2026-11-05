@@ -4,13 +4,14 @@
 /// prompts, deleting files, and opening files; 1.8: provided documents
 /// and diffs; 1.9: quick diff; 1.10: timers; 1.11: graphs, folders, and
 /// the active file; 1.12: code lenses and merge editors; 1.13: line
-/// annotations, selection changes, and hiding views).
+/// annotations, selection changes, and hiding views; 1.14: rendering
+/// Markdown).
 ///
 /// An extension is a WebAssembly component targeting the `extension` world.
 /// It can call only the functions it imports here; there is no other
 /// filesystem, network, environment, clock, or process access. See
 /// `docs/extensions.md`.
-package ferrite:extension@1.13.0;
+package ferrite:extension@1.14.0;
 
 /// Types shared by the host functions and the extension's exports.
 interface types {
@@ -399,6 +400,15 @@ interface workbench {
 
   /// Closes a preview, if it's open. (1.2)
   close-preview: func(preview: string, key: string) -> result<_, api-error>;
+
+  /// Markdown as preview nodes, for `set-preview-content` or
+  /// `viewers::set-viewer-content`: the editor's own renderer, which shows
+  /// extensions' READMEs. CommonMark with GitHub's tables, strikethrough,
+  /// and task lists; HTML is reduced to its text and front matter is left
+  /// out, and a document too long for a preview is cut with a note. At
+  /// most 8 MiB of text (`too-large` otherwise). Needs no permission.
+  /// (1.14)
+  render-markdown: func(text: string) -> result<list<preview-node>, api-error>;
 
   /// The file of the editor in use, if it shows one: a document's, a
   /// viewer's, or a diff's modified file. The manifest's

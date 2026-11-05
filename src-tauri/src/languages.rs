@@ -253,12 +253,11 @@ fn server_config(server: LanguageServerContribution) -> ServerConfig {
   }
 }
 
-/// The languages of the example extensions in `extensions/` (e.g. `rust`),
-/// loaded from their manifests, for tests. Parses rather than loads them, so
-/// an extension with code (e.g. `markdown`) needn't have been built.
+/// The languages in `extensions/test-fixtures/languages/` (e.g. `rust`),
+/// loaded from their manifests, for tests.
 #[cfg(test)]
 pub fn examples(folders: &[&str]) -> Registry {
-  let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../extensions");
+  let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../extensions/test-fixtures/languages");
   let definitions = folders.iter().flat_map(|folder| {
     let dir = root.join(folder);
     let text = std::fs::read_to_string(dir.join(ferrite_extension_host::manifest::MANIFEST_FILE))
