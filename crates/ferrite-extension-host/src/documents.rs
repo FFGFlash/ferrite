@@ -10,11 +10,11 @@
 
 use std::path::Path;
 
-use crate::Notification;
-use crate::bindings::ferrite::extension::documents::Host;
+use crate::bindings::ferrite::extension::documents::{Host, MergeOptions, MergeSide};
 use crate::bindings::ferrite::extension::types::ApiError;
 use crate::runtime::StoreState;
 use crate::worker::Payload;
+use crate::{MergeRequest, Notification};
 
 /// Largest text an extension provides.
 pub const MAX_PROVIDED_BYTES: usize = 32 * 1024 * 1024;
@@ -135,6 +135,50 @@ impl Host for StoreState {
       .shared()?
       .embedder
       .notify(Notification::OpenProvided(uri));
+    Ok(())
+  }
+
+  fn open_merge(&mut self, options: MergeOptions) -> Result<(), ApiError> {
+    self.side(&options.base)?;
+    self.side(&options.incoming.uri)?;
+    self.side(&options.current.uri)?;
+    if !Path::new(&options.result_file).is_absolute() {
+      return Err(invalid("a merge's result is an absolute path".into()));
+    }
+    let title = options.title.trim();
+    if title.is_empty() || title.chars().count() > 200 {
+      return Err(invalid("a merge's title is 1 to 200 characters".into()));
+    }
+    self.api.own_command(options.on_complete.as_ref())?;
+    let side = |side: MergeSide| -> Result<crate::MergeSide, ApiError> {
+      let title = side.title.trim();
+      if title.is_empty() || title.chars().count() > 100 {
+        return Err(invalid(
+          "a merge side's title is 1 to 100 characters".into(),
+        ));
+      }
+      Ok(crate::MergeSide {
+        uri: side.uri,
+        title: title.to_owned(),
+        description: side
+          .description
+          .map(|description| description.chars().take(200).collect()),
+      })
+    };
+    let request = MergeRequest {
+      base: options.base,
+      incoming: side(options.incoming)?,
+      current: side(options.current)?,
+      result: options.result_file,
+      title: title.to_owned(),
+      reset_result: options.reset_result,
+      on_complete: options.on_complete,
+    };
+    self
+      .api
+      .shared()?
+      .embedder
+      .notify(Notification::OpenMerge(request));
     Ok(())
   }
 

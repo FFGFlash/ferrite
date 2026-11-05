@@ -8,6 +8,12 @@ import { editorFor } from './activeEditor'
 import { EditorView } from './EditorView'
 import type { EditorTransport } from './session'
 
+const runCodeLens = vi.hoisted(() => vi.fn(() => Promise.resolve()))
+vi.mock('../ipc/extensions', async importOriginal => ({
+  ...(await importOriginal<typeof import('../ipc/extensions')>()),
+  runCodeLens,
+}))
+
 /** A full (non-incremental) view of `lines`. */
 function makeView(lines: string[], overrides: Partial<View> = {}): View {
   return {
@@ -33,6 +39,7 @@ function makeView(lines: string[], overrides: Partial<View> = {}): View {
     language: null,
     decorations: [],
     changes: [],
+    lenses: [],
     ...overrides,
   } as View
 }
@@ -240,5 +247,35 @@ describe('EditorView', () => {
     input.focus()
     await user.paste('pasted\ntext')
     expect(applied[0]).toEqual([{ type: 'paste', text: 'pasted\ntext' }])
+  })
+
+  it("shows extensions' code lenses above their lines, running their commands", async () => {
+    const lenses = [
+      {
+        line: 1,
+        title: 'Accept Current Change',
+        tooltip: null,
+        command: 'x.accept',
+        argument: '1',
+      },
+      {
+        line: 1,
+        title: 'Compare Changes',
+        tooltip: 'Compare',
+        command: 'x.compare',
+        argument: '1',
+      },
+    ]
+    const { transport } = fakeTransport(makeView(['one', '<<<<<<< HEAD', 'two'], { lenses }))
+    await renderEditor(transport)
+    const accept = screen.getByRole('button', { name: 'Accept Current Change' })
+    expect(screen.getByRole('button', { name: 'Compare Changes' })).toHaveAttribute(
+      'title',
+      'Compare',
+    )
+    // A row between the first line and the second.
+    expect(accept.closest('.editor-view__lens-zone')).not.toBeNull()
+    fireEvent.click(accept)
+    expect(runCodeLens).toHaveBeenCalledWith(7, 'x.accept', '1')
   })
 })

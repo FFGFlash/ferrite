@@ -42,6 +42,7 @@ const view = {
   language: null,
   decorations: [],
   changes: [],
+  lenses: [],
 } as WireView
 
 describe('accessibility (axe)', () => {

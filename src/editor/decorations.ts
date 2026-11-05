@@ -39,6 +39,36 @@ export function decorationRectStyle(type: DecorationType, kind: ThemeKind): CSSP
   return style as CSSProperties
 }
 
+/** The background of lines a whole-line decoration type covers, if it has one. */
+export function wholeLineBackground(type: DecorationType, kind: ThemeKind): string | undefined {
+  return type.wholeLine ? color(colorsFor(type, kind).background) : undefined
+}
+
+/**
+ * Backgrounds of whole lines from whole-line decorations, by line: a range
+ * ending at the start of a line doesn't cover it.
+ */
+export function lineBackgrounds(
+  decorations: readonly DecorationView[],
+  types: ReadonlyMap<string, DecorationType>,
+  kind: ThemeKind,
+): Map<number, string> {
+  const byLine = new Map<number, string>()
+  for (const decoration of decorations) {
+    const type = types.get(decoration.key)
+    const background = type && wholeLineBackground(type, kind)
+    if (!background) {
+      continue
+    }
+    const { start, end } = decoration
+    const last = end.line > start.line && end.column === 0 ? end.line - 1 : end.line
+    for (let line = start.line; line <= last; line++) {
+      byLine.set(line, background)
+    }
+  }
+  return byLine
+}
+
 /** Whether a decoration type styles the text itself. */
 function textStyle(type: DecorationType, kind: ThemeKind): CSSProperties | null {
   const style: CSSProperties = {}

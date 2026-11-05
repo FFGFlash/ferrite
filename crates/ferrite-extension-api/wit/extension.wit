@@ -2,13 +2,14 @@
 /// 1.2: previews; 1.3: files; 1.4: viewers; 1.5: webviews and storage;
 /// 1.6: workspace, processes, and explorer marks; 1.7: tree views,
 /// prompts, deleting files, and opening files; 1.8: provided documents
-/// and diffs).
+/// and diffs; 1.9: quick diff; 1.10: timers; 1.11: graphs, folders, and
+/// the active file; 1.12: code lenses and merge editors).
 ///
 /// An extension is a WebAssembly component targeting the `extension` world.
 /// It can call only the functions it imports here; there is no other
 /// filesystem, network, environment, clock, or process access. See
 /// `docs/extensions.md`.
-package ferrite:extension@1.11.0;
+package ferrite:extension@1.12.0;
 
 /// Types shared by the host functions and the extension's exports.
 interface types {
@@ -402,6 +403,23 @@ interface workbench {
   /// viewer's, or a diff's modified file. The manifest's
   /// `on_active_file_changed` command runs when it changes. (1.11)
   active-file: func() -> option<string>;
+
+  /// A link shown above a line of a document, as VS Code's code lenses:
+  /// clicking it runs one of the extension's commands with `argument`
+  /// (`command-argument`), for the document. (1.12)
+  record code-lens {
+    line: u32,
+    /// Plain text, at most 100 characters.
+    title: string,
+    tooltip: option<string>,
+    command: string,
+    argument: option<string>,
+  }
+
+  /// Replaces this extension's code lenses in a document (at most 1,000).
+  /// Lines refer to the text at `version`, as for diagnostics, and follow
+  /// its edits. Needs the `documents-read` permission. (1.12)
+  set-code-lenses: func(id: document-id, version: u64, lenses: list<code-lens>) -> result<_, api-error>;
 }
 
 /// Files in the folder open in the editor, e.g. to format every file in a
@@ -958,6 +976,40 @@ interface documents {
   /// an address a provider declares. When `modified` is a file, it can be
   /// edited in the tab.
   open-diff: func(original: string, modified: string, title: string) -> result<_, api-error>;
+
+  /// One of the versions a merge combines. (1.12)
+  record merge-side {
+    /// An absolute path, or an address an extension provides.
+    uri: string,
+    /// Such as "Incoming" or "Current".
+    title: string,
+    /// Such as the branch or commit it's from.
+    description: option<string>,
+  }
+
+  record merge-options {
+    /// The versions' common ancestor (an absolute path or an address).
+    base: string,
+    /// Shown on the left above the result.
+    incoming: merge-side,
+    /// Shown on the right above the result.
+    current: merge-side,
+    /// The file the merge writes: an absolute path.
+    result-file: string,
+    /// The tab's title.
+    title: string,
+    /// Start the result again from the base with the changes that don't
+    /// conflict made, e.g. when the file holds conflict markers.
+    reset-result: bool,
+    /// Runs when the user completes the merge, after the result is saved,
+    /// with the result's path as the argument (`workbench::command-argument`).
+    on-complete: option<string>,
+  }
+
+  /// Opens a merge editor (VS Code's): the two versions above the result,
+  /// each change from the base marked, conflicting ones with buttons to
+  /// accept either side or both. (1.12)
+  open-merge: func(options: merge-options) -> result<_, api-error>;
 }
 
 /// Comparing files with their originals as they're edited (1.9): the

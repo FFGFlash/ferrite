@@ -7,6 +7,7 @@
  */
 import { setActiveFile } from '../ipc/extensions'
 import { diffsStore, isAddress, parseDiffItem } from '../state/diffs'
+import { parseMergeItem } from '../state/merges'
 import { documentsStore } from '../state/documents'
 import { reportError } from '../state/notifications'
 import { currentGroup, dockStore, parseDocumentItem, parseViewerItem } from './dock'
@@ -34,6 +35,8 @@ function currentFile(): string | null | undefined {
       const modified = parseDiffItem(item)?.modified
       return modified && !isAddress(modified) ? modified : null
     }
+    case 'merge':
+      return parseMergeItem(item)?.result ?? null
     case 'preview':
     case 'page':
       return null

@@ -369,6 +369,7 @@ fn build_view(
   let lines = view.start_line..view.end_line;
   (view.diagnostics, view.language) = lsp.view(app, document, lines.clone());
   view.decorations = extensions.add_to_view(document, lines.clone(), &mut view.diagnostics);
+  view.lenses = extensions.lenses(document);
   view.changes = super::quick_diff::view_changes(app, document, lines);
   view
 }

@@ -81,7 +81,18 @@ export function updateSummary(summary: DocumentSummary): void {
   }
 }
 
+/**
+ * Counts requests to make a document active (opening or choosing one),
+ * so the dock shows its tab then, and not on every change to the list
+ * (a document becoming unsaved while a diff or merge tab shows).
+ */
+let activations = 0
+export const activationCount = (): number => activations
+
 function upsert(summary: DocumentSummary, activate: boolean): void {
+  if (activate) {
+    activations++
+  }
   documentsStore.update(({ documents, activeId }) => {
     const exists = documents.some(d => d.id === summary.id)
     return {
@@ -102,6 +113,7 @@ export async function loadDocuments(activePath: string | null = null): Promise<v
   try {
     const documents = await ipc.listDocuments()
     const active = documents.find(d => d.path === activePath) ?? documents.at(-1)
+    activations++
     documentsStore.set({ documents, activeId: active?.id ?? null })
   } catch (error) {
     reportError('Loading open documents', error)
@@ -109,6 +121,7 @@ export async function loadDocuments(activePath: string | null = null): Promise<v
 }
 
 export function activate(id: number): void {
+  activations++
   documentsStore.update(state => ({ ...state, activeId: id }))
 }
 
@@ -244,9 +257,10 @@ export async function saveWithEncoding(id: number, encoding: string): Promise<vo
   }
 }
 
-export async function save(id = activeId(), as = false): Promise<void> {
+/** Saves a document; resolves to whether it was saved. */
+export async function save(id = activeId(), as = false): Promise<boolean> {
   if (id === null) {
-    return
+    return false
   }
   try {
     await flush(id)
@@ -259,7 +273,9 @@ export async function save(id = activeId(), as = false): Promise<void> {
           editor.refresh()
         }
       }
+      return !summary.dirty
     }
+    return false
   } catch (error) {
     reportError('Saving', error)
     if (error instanceof CommandError && error.code === 'invalidSettings') {
@@ -267,6 +283,7 @@ export async function save(id = activeId(), as = false): Promise<void> {
       refreshSettingsIfLoaded()
       void refreshSettingsProblem()
     }
+    return false
   }
 }
 
@@ -277,11 +294,12 @@ export async function saveAll(): Promise<void> {
   }
 }
 
-/** Whether a document stays open when its last tab closes (a diff tab shows it). */
-let keptOpen: (id: number) => boolean = () => false
+/** Tests whether a document stays open when its last tab closes (a diff or merge tab shows it). */
+const keepers: ((id: number) => boolean)[] = []
+const keptOpen = (id: number) => keepers.some(test => test(id))
 
 export function setKeptOpen(test: (id: number) => boolean): void {
-  keptOpen = test
+  keepers.push(test)
 }
 
 export async function close(id = activeId()): Promise<void> {

@@ -38,6 +38,7 @@ function makeView(lines: string[], overrides: Partial<View> = {}): View {
     language: null,
     decorations: [],
     changes: [],
+    lenses: [],
     ...overrides,
   } as View
 }

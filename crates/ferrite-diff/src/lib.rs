@@ -11,6 +11,7 @@
 //! Lines are split on `\n` (a `\r` before it isn't part of the line), and
 //! columns are UTF-16 code units, as the editor counts them.
 
+pub mod merge;
 mod splice;
 
 pub use splice::{Splice, apply, revert, splices, touching};
@@ -68,7 +69,7 @@ pub enum DiffError {
 }
 
 /// A text's lines, without their line breaks.
-fn lines(text: &str) -> Vec<&str> {
+pub(crate) fn lines(text: &str) -> Vec<&str> {
   text
     .split('\n')
     .map(|line| line.strip_suffix('\r').unwrap_or(line))

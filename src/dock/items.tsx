@@ -27,8 +27,10 @@ import { Icon, isActionIcon, type IconName } from '../components/Icon'
 import { entryIcon } from '../components/fileIcons'
 import { Breadcrumbs } from '../editor/Breadcrumbs'
 import { DiffView } from '../editor/DiffView'
+import { MergeView } from '../editor/MergeView'
 import { EditorView } from '../editor/EditorView'
 import type { DocumentSummary } from '../ipc/editor'
+import type { MergeSpec } from '../ipc/extensions'
 import {
   runExtensionCommand,
   type ExtensionStatus,
@@ -49,6 +51,7 @@ import {
   type DiffState,
 } from '../state/diffs'
 import { documentsStore, openPath, openProvided } from '../state/documents'
+import { loadMerge, mergesStore, parseMergeItem, type MergeState } from '../state/merges'
 import { layoutStore, updateLayout } from '../state/layout'
 import { extensionsStore, usableExtensions } from '../state/extensions'
 import { iconThemeStore } from '../state/iconTheme'
@@ -74,6 +77,8 @@ export type ResolvedItem =
   | { kind: 'viewer'; item: ItemId; viewer: string | null; path: string }
   /** Two documents compared; `state` is undefined until they start opening. */
   | { kind: 'diff'; item: ItemId; spec: DiffSpec; state: DiffState | undefined }
+  /** A merge's versions above its result; `state` is undefined until they start opening. */
+  | { kind: 'merge'; item: ItemId; spec: MergeSpec; state: MergeState | undefined }
 
 const fileName = (path: string) => path.split(/[/\\]/).pop() || path
 
@@ -85,6 +90,7 @@ export function useResolver(): (item: ItemId) => ResolvedItem | null {
   const extensions = useStore(extensionsStore)
   const views = useViews()
   const diffs = useStore(diffsStore)
+  const merges = useStore(mergesStore)
   return (item: ItemId) => {
     const id = itemId(item)
     switch (itemKind(item)) {
@@ -115,6 +121,10 @@ export function useResolver(): (item: ItemId) => ResolvedItem | null {
         const spec = parseDiffItem(item)
         return spec ? { kind: 'diff', item, spec, state: diffs[item] } : null
       }
+      case 'merge': {
+        const spec = parseMergeItem(item)
+        return spec ? { kind: 'merge', item, spec, state: merges[item] } : null
+      }
       default:
         return null
     }
@@ -136,6 +146,7 @@ export function itemTitle(resolved: ResolvedItem): string {
     case 'viewer':
       return fileName(resolved.path)
     case 'diff':
+    case 'merge':
       return resolved.spec.title
   }
 }
@@ -149,6 +160,8 @@ export function itemPath(resolved: ResolvedItem): string | null {
       return resolved.path
     case 'diff':
       return isAddress(resolved.spec.modified) ? null : resolved.spec.modified
+    case 'merge':
+      return resolved.spec.result
     default:
       return null
   }
@@ -158,7 +171,9 @@ export function itemPath(resolved: ResolvedItem): string | null {
 export function itemDirty(resolved: ResolvedItem): boolean {
   return (
     (resolved.kind === 'document' && resolved.document.dirty) ||
-    (resolved.kind === 'diff' && resolved.state?.status === 'ready' && resolved.state.dirty)
+    ((resolved.kind === 'diff' || resolved.kind === 'merge') &&
+      resolved.state?.status === 'ready' &&
+      resolved.state.dirty)
   )
 }
 
@@ -193,6 +208,8 @@ export function itemTooltip(resolved: ResolvedItem): string {
       return resolved.path
     case 'diff':
       return `${resolved.spec.original} ↔ ${resolved.spec.modified}`
+    case 'merge':
+      return resolved.spec.result
   }
 }
 
@@ -254,6 +271,15 @@ export function ItemIcon({ resolved, className = 'dock-tab__icon', size = 16 }: 
           icon={entryIcon(sideName(resolved.spec.modified), null, iconTheme, light)}
         />
       )
+    case 'merge':
+      return (
+        <FileIcon
+          className={className}
+          size={size}
+          kind="file"
+          icon={entryIcon(sideName(resolved.spec.result), null, iconTheme, light)}
+        />
+      )
   }
 }
 
@@ -311,6 +337,17 @@ export function ItemContent({ resolved }: { resolved: ResolvedItem }): ReactNode
       return (
         <ErrorBoundary name={`The diff ${resolved.spec.title}`} resetKey={resolved.item}>
           <DiffPane key={resolved.item} item={resolved.item} state={resolved.state} />
+        </ErrorBoundary>
+      )
+    case 'merge':
+      return (
+        <ErrorBoundary name={`The merge ${resolved.spec.title}`} resetKey={resolved.item}>
+          <MergePane
+            key={resolved.item}
+            item={resolved.item}
+            spec={resolved.spec}
+            state={resolved.state}
+          />
         </ErrorBoundary>
       )
     case 'viewer':
@@ -393,6 +430,20 @@ export function ItemActions({ resolved }: { resolved: ResolvedItem }): ReactNode
   }
   if (resolved.kind === 'diff') {
     return <DiffActions resolved={resolved} />
+  }
+  if (resolved.kind === 'merge') {
+    const { result } = resolved.spec
+    return (
+      <button
+        type="button"
+        className="dock-action"
+        title="Open File"
+        aria-label="Open File"
+        onClick={() => void openPath(result)}
+      >
+        <FileText size={16} strokeWidth={1.5} aria-hidden="true" />
+      </button>
+    )
   }
   if (resolved.kind === 'terminal') {
     const keys = primaryKeybinding(getCommand('terminal.new'))
@@ -500,6 +551,29 @@ function ExtensionTabActions({
       </button>
     )
   })
+}
+
+/** A merge tab: opens its documents, then shows the merge. */
+function MergePane({
+  item,
+  spec,
+  state,
+}: {
+  item: ItemId
+  spec: MergeSpec
+  state: MergeState | undefined
+}) {
+  useEffect(() => {
+    void loadMerge(item)
+  }, [item])
+  if (state?.status === 'ready') {
+    return <MergeView item={item} spec={spec} state={state} />
+  }
+  return (
+    <div className="dock-view diff-view-status" role="status">
+      {state?.status === 'failed' ? `Couldn't open the merge: ${state.message}` : 'Opening…'}
+    </div>
+  )
 }
 
 /** A diff tab: opens its documents, then compares them. */

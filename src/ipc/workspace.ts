@@ -5,7 +5,7 @@
 import { Channel } from '@tauri-apps/api/core'
 import type { DocumentSummary, Position, SearchQuery } from './editor'
 import { call, isDesktop } from './index'
-import type { MessageLevel, Prompt } from './extensions'
+import type { MergeSpec, MessageLevel, Prompt } from './extensions'
 import type { FileDragEvent } from '../components/drag'
 
 /**
@@ -174,6 +174,8 @@ export type AppEvent =
   | { type: 'openProvided'; uri: string }
   /** An extension asked to open a tab comparing two documents (paths or provided addresses). */
   | { type: 'openDiff'; original: string; modified: string; title: string }
+  /** An extension asked to open a merge editor. */
+  | ({ type: 'openMerge' } & MergeSpec)
   | { type: 'indexStatus'; indexing: boolean; files: number; truncated: boolean }
   | { type: 'extensionsChanged' }
   /** `id` is the extension's id, `extension` its name. */

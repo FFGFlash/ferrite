@@ -24,9 +24,9 @@ use crate::bindings::ferrite::extension::types::{
 };
 use crate::bindings::ferrite::extension::viewers::{FileBytes, Host as ViewersHost};
 use crate::bindings::ferrite::extension::webviews::Host as WebviewsHost;
-use crate::bindings::ferrite::extension::workbench::Host as WorkbenchHost;
+use crate::bindings::ferrite::extension::workbench::{CodeLens, Host as WorkbenchHost};
 use crate::config::ConfigValue;
-use crate::host::{Shared, StoredDiagnostic};
+use crate::host::{Shared, StoredDiagnostic, StoredLens};
 use crate::manifest::Manifest;
 use crate::permissions::Permission;
 use crate::preview::{self, MAX_KEY_BYTES, MAX_TITLE_CHARS, PreviewInfo};
@@ -574,6 +574,8 @@ impl Host for StoreState {
 pub const MAX_VIEW_ITEMS: usize = 5_000;
 /// Most decorated ranges per decoration type and document.
 pub const MAX_DECORATIONS: usize = 10_000;
+/// Most code lenses an extension shows in a document.
+pub const MAX_LENSES: usize = 1_000;
 
 impl ApiContext {
   pub(crate) fn own_command(&self, command: Option<&String>) -> Result<(), ApiError> {
@@ -796,6 +798,68 @@ impl WorkbenchHost for StoreState {
       let document = find(editor, id)?;
       shared.store_decorations(document, &extension, &decoration, version, |buffer| {
         ranges.iter().map(|range| to_span(buffer, *range)).collect()
+      })
+    })
+    .ok_or_else(editor_unavailable)??;
+    shared
+      .embedder
+      .notify(Notification::DecorationsChanged(DocumentId::from_raw(id)));
+    Ok(())
+  }
+
+  fn set_code_lenses(
+    &mut self,
+    id: u64,
+    version: u64,
+    lenses: Vec<CodeLens>,
+  ) -> Result<(), ApiError> {
+    let shared = self.api.require(WitPermission::DocumentsRead)?;
+    if lenses.len() > MAX_LENSES {
+      return Err(ApiError::TooLarge(format!(
+        "at most {MAX_LENSES} code lenses in a document"
+      )));
+    }
+    for lens in &lenses {
+      self.api.own_command(Some(&lens.command))?;
+      if lens.title.trim().is_empty() {
+        return Err(ApiError::InvalidArgument(
+          "a code lens needs a title".into(),
+        ));
+      }
+      if lens
+        .argument
+        .as_ref()
+        .is_some_and(|argument| argument.len() > 4_096)
+      {
+        return Err(ApiError::TooLarge(
+          "a code lens's argument is at most 4 KiB".into(),
+        ));
+      }
+    }
+    let extension = self.api.id.clone();
+    with_editor(&shared, |editor| {
+      let document = find(editor, id)?;
+      shared.store_lenses(document, &extension, version, |buffer| {
+        lenses
+          .into_iter()
+          .map(|lens| {
+            let line = lens.line as usize;
+            if line >= buffer.line_count() {
+              return Err(ApiError::InvalidRange(format!(
+                "line {line} is past the end of the document"
+              )));
+            }
+            Ok((
+              buffer.line_start(line),
+              StoredLens {
+                title: cut(lens.title.trim(), 100),
+                tooltip: lens.tooltip.map(|tooltip| cut(&tooltip, 500)),
+                command: lens.command,
+                argument: lens.argument,
+              },
+            ))
+          })
+          .collect()
       })
     })
     .ok_or_else(editor_unavailable)??;

@@ -164,8 +164,10 @@ pub enum Notification {
   ViewChanged(String),
   /// An extension asked to show one of its views.
   ShowView(String),
-  /// A document's extension decorations changed.
+  /// A document's extension decorations or code lenses changed.
   DecorationsChanged(ferrite_core::DocumentId),
+  /// An extension opened a merge editor.
+  OpenMerge(MergeRequest),
   /// An extension asked to select and show a range.
   Reveal {
     document: ferrite_core::DocumentId,
@@ -355,6 +357,40 @@ pub struct ExtensionDecoration {
   pub range: Range<usize>,
   /// The decoration type's key, `<extension id>/<name>`.
   pub key: String,
+}
+
+/// A link an extension shows above a line (a code lens), in the current text.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ExtensionLens {
+  /// The start of its line.
+  pub offset: usize,
+  pub title: String,
+  pub tooltip: Option<String>,
+  pub command: String,
+  pub argument: Option<String>,
+}
+
+/// One of the versions a merge editor combines.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MergeSide {
+  /// An absolute path, or an address an extension provides.
+  pub uri: String,
+  pub title: String,
+  pub description: Option<String>,
+}
+
+/// What a merge editor shows (`documents::open-merge`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MergeRequest {
+  pub base: String,
+  pub incoming: MergeSide,
+  pub current: MergeSide,
+  /// The file written: an absolute path.
+  pub result: String,
+  pub title: String,
+  pub reset_result: bool,
+  /// The extension command run once the merge is completed.
+  pub on_complete: Option<String>,
 }
 
 /// Resource limits for each extension.

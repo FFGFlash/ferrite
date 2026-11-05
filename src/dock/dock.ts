@@ -36,8 +36,16 @@ import {
   documentsStore,
   openPath,
   takeOpenRequest,
+  activationCount,
 } from '../state/documents'
 import { diffsStore, releaseDiff, setDiffTabHandler } from '../state/diffs'
+import {
+  mergesStore,
+  parseMergeItem,
+  releaseMerge,
+  setMergeTabCloser,
+  setMergeTabHandler,
+} from '../state/merges'
 import { layoutStore, updateLayout } from '../state/layout'
 import { notify, reportError } from '../state/notifications'
 import { openFolder } from '../state/workspace'
@@ -308,7 +316,8 @@ function placementFor(layout: DockLayout, item: ItemId): { target: DropTarget; s
     case 'document':
     case 'viewer':
     case 'page':
-    case 'diff': {
+    case 'diff':
+    case 'merge': {
       const group = findGroup(layout, documentGroup) ?? findGroup(layout, layout.main)!
       return { target: appendTo(group, true), size: 0.5 }
     }
@@ -431,6 +440,8 @@ function replaceItem(layout: DockLayout, from: ItemId, to: ItemId): DockLayout {
 // Following the documents, terminals, and previews.
 
 let knownDocuments = new Set<number>()
+/** The active document and the activation (`activationCount`) the dock last showed. */
+let shownActive: { id: number | null; count: number } = { id: null, count: -1 }
 let knownTerminals = new Set<number>()
 let knownPreviews = new Set<string>()
 
@@ -467,7 +478,13 @@ function syncDocuments(): void {
   }
   knownDocuments = ids
   let tab: ItemId | null = null
-  if (activeId !== null && ids.has(activeId)) {
+  // The active document's tab shows when it becomes active (or is opened
+  // or chosen again), or gets its tab, not on other changes to the list.
+  const count = activationCount()
+  const activated =
+    activeId !== shownActive.id || count !== shownActive.count || placed.has(activeId ?? -1)
+  shownActive = { id: activeId, count }
+  if (activated && activeId !== null && ids.has(activeId)) {
     tab = documentTabIn(findGroup(layout, documentGroup), activeId) ?? null
     if (!tab && takeOpenRequest(activeId) && !placed.has(activeId)) {
       // Opened while it shows elsewhere: it opens where documents do, too.
@@ -565,7 +582,9 @@ export function serializeDock(layout: DockLayout = dockStore.get()): DockLayout 
       tabsOfPath.set(path, n + 1)
       saved.set(item, n === 0 ? fileItem(path) : savedCopyItem(n, path))
     } else {
-      saved.set(item, document !== null || itemKind(item) === 'preview' ? null : item)
+      // A merge tab isn't restored: it starts its result again from the file.
+      const unsaved = itemKind(item) === 'preview' || itemKind(item) === 'merge'
+      saved.set(item, document !== null || unsaved ? null : item)
     }
   }
   const save = (item: ItemId) => saved.get(item) ?? null
@@ -676,6 +695,15 @@ export function focusItem(item: ItemId): void {
       )
       return
     }
+    case 'merge':
+      requestAnimationFrame(() => {
+        const group = groupOf(dockStore.get(), item)
+        const content = group && contentElement(group.id)
+        content
+          ?.querySelector<HTMLElement>('[data-pane="result"] [data-editor-input]')
+          ?.focus({ preventScroll: true })
+      })
+      return
     case 'diff':
       // The modified side, which can be edited.
       requestAnimationFrame(() => {
@@ -731,6 +759,27 @@ export function showView(id: string, focus = true): void {
 setViewHandler(showView)
 setPageHandler(id => showItem(pageItem(id)))
 setDiffTabHandler(item => showItem(item))
+setMergeTabHandler(showMerge)
+setMergeTabCloser(item => closeTab(item))
+
+/**
+ * Shows a merge tab, which replaces one for the same file with other
+ * versions (the merge was started again).
+ */
+function showMerge(item: ItemId): void {
+  const result = parseMergeItem(item)?.result
+  const stale = allItems(dockStore.get()).filter(
+    other => other !== item && parseMergeItem(other)?.result === result,
+  )
+  void (async () => {
+    for (const other of stale) {
+      if (!(await closeTab(other))) {
+        return
+      }
+    }
+    showItem(item)
+  })()
+}
 
 /**
  * Shows a preview its extension asked to show. One opened beside its
@@ -1082,6 +1131,13 @@ async function closeTab(item: ItemId): Promise<boolean> {
       }
       setLayout(removeItem(dockStore.get(), item))
       break
+    case 'merge':
+      // Not remembered: a merge ends once completed.
+      if (!(await releaseMerge(item))) {
+        return false
+      }
+      setLayout(removeItem(dockStore.get(), item))
+      break
     default:
       if (place) {
         closedViews.set(item, place)
@@ -1142,12 +1198,18 @@ const isEditorTab = (item: ItemId) => {
     kind === 'viewer' ||
     kind === 'preview' ||
     kind === 'page' ||
-    kind === 'diff'
+    kind === 'diff' ||
+    kind === 'merge'
   )
 }
 
 const isDirty = (item: ItemId) => {
-  const diff = itemKind(item) === 'diff' ? diffsStore.get()[item] : undefined
+  const diff =
+    itemKind(item) === 'diff'
+      ? diffsStore.get()[item]
+      : itemKind(item) === 'merge'
+        ? mergesStore.get()[item]
+        : undefined
   return (
     (diff?.status === 'ready' && diff.dirty) ||
     documentsStore.get().documents.some(d => d.id === documentOf(item) && d.dirty)

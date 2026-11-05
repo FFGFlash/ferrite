@@ -722,6 +722,13 @@ connects it to the editor, settings, and frontend. The developer guide is
   `ProvidedChanged`. `OpenDiff` becomes a `diff:` dock item (`src/state/diffs.ts`), whose sides
   open hidden and show in `DiffView`: editors with zones, line classes, and folds set by the diff
   (`src/editor/diffLayout.ts`), compared by `diff_compute` (`ferrite-diff`).
+- **Code lenses and merge editors** (API 1.12; [ADR 0032](adr/0032-merge-conflicts.md)).
+  The host keeps code lenses with each document like decorations (mapped through edits); views
+  carry them (`EditorView.lenses`) and the editor draws them as zones above their lines.
+  `ferrite_diff::merge` finds the ranges two versions changed from their base and what the
+  result has of each; `src-tauri/src/editor/merge.rs` serves them (`merge_compute`) and edits the
+  result (`merge_set_range`, `merge_reset`), and `src/editor/MergeView.tsx` draws the tab,
+  lined up by `mergeLayout.ts`, with its documents kept by `src/state/merges.ts`.
 - **History graphs and the active file** (API 1.11; [ADR 0031](adr/0031-graph-stashes-and-file-history.md)).
   `views::set-graph` keeps graph rows in a view's content, drawn by `src/panels/viewGraph.tsx`.
   The workbench reports the file of the editor in use (`src/dock/activeFile.ts`,

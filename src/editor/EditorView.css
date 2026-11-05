@@ -406,3 +406,34 @@
       2px 100% / 4px 3px repeat-x,
     var(--decoration-background, transparent);
 }
+
+/* Extensions' code lenses: a row of links above a line. */
+.editor-view__lenses {
+  display: flex;
+  align-items: center;
+  height: 100%;
+  overflow: hidden;
+  color: var(--color-text-muted);
+  font-family: var(--font-ui, inherit);
+  font-size: 0.85em;
+  white-space: nowrap;
+}
+
+.editor-view__lens {
+  padding: 0;
+  border: none;
+  background: none;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.editor-view__lens:hover {
+  color: var(--color-link);
+  text-decoration: underline;
+}
+
+.editor-view__lens-separator {
+  margin: 0 var(--space-2);
+  color: var(--color-text-muted);
+}

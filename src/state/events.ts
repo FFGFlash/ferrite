@@ -12,6 +12,7 @@ import {
   updateSummary,
 } from './documents'
 import { applySelectedRanges, noteReloaded, openDiff } from './diffs'
+import { openMerge } from './merges'
 import {
   refreshExtensions,
   refreshStatusItems,
@@ -128,6 +129,11 @@ export function handleEvent(event: AppEvent): void {
     case 'openDiff':
       openDiff({ original: event.original, modified: event.modified, title: event.title })
       break
+    case 'openMerge': {
+      const { type: _, ...spec } = event
+      openMerge(spec)
+      break
+    }
     case 'indexStatus':
       setIndexing(event.indexing)
       break

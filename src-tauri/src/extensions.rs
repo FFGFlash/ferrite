@@ -24,10 +24,10 @@ use serde::{Serialize, Serializer};
 use tauri::{AppHandle, Manager, State, WebviewWindow};
 
 use crate::editor::EditorState;
-use crate::editor::protocol::DecorationDto;
+use crate::editor::protocol::{CodeLensDto, DecorationDto};
 use crate::editor::syntax::highlight_snippet;
 use crate::error::CommandError;
-use crate::events::{self, AppEvent};
+use crate::events::{self, AppEvent, MergeSideDto};
 use crate::languages::{self, LanguagesState};
 use crate::lsp::{DiagnosticDto, DiagnosticMessageDto};
 use crate::settings::{self, Settings, SettingsState};
@@ -100,6 +100,25 @@ impl ExtensionsState {
         }),
     );
     decorations
+  }
+
+  /// Extensions' code lenses in a document. Call with the editor locked.
+  pub fn lenses(&self, document: &Document) -> Vec<CodeLensDto> {
+    let Some(host) = self.host() else {
+      return Vec::new();
+    };
+    let buffer = document.buffer();
+    host
+      .code_lenses(document)
+      .into_iter()
+      .map(|lens| CodeLensDto {
+        line: buffer.line_of(lens.offset),
+        title: lens.title,
+        tooltip: lens.tooltip,
+        command: lens.command,
+        argument: lens.argument,
+      })
+      .collect()
   }
 
   /// Messages of extension diagnostics covering `offset`, for hover.
@@ -266,6 +285,15 @@ impl Embedder for AppEmbedder {
         modified,
         title,
       },
+      Notification::OpenMerge(request) => AppEvent::OpenMerge {
+        base: request.base,
+        incoming: MergeSideDto::from(request.incoming),
+        current: MergeSideDto::from(request.current),
+        result: request.result,
+        title: request.title,
+        reset_result: request.reset_result,
+        on_complete: request.on_complete,
+      },
     };
     events::emit(&self.app, event);
   }
@@ -421,6 +449,24 @@ pub async fn extension_run_view_command(
     let state = app.state::<ExtensionsState>();
     host(&state)?
       .run_view_command(&command, argument, selection)
+      .map_err(|message| CommandError::new("extension", message))?
+  };
+  wait(ticket).await
+}
+
+/// The user clicked a code lens in document `document`: runs its command
+/// with its argument, and waits.
+#[tauri::command]
+pub async fn extension_run_code_lens(
+  app: AppHandle,
+  document: u64,
+  command: String,
+  argument: Option<String>,
+) -> Result<(), CommandError> {
+  let ticket = {
+    let state = app.state::<ExtensionsState>();
+    host(&state)?
+      .run_command(&command, Some(DocumentId::from_raw(document)), argument)
       .map_err(|message| CommandError::new("extension", message))?
   };
   wait(ticket).await

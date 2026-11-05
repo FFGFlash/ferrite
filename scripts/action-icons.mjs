@@ -64,6 +64,7 @@ const icons = {
   'list-flat': 'list',
   'branch': 'git-branch',
   'commit': 'git-commit-horizontal',
+  'merge': 'git-merge',
 }
 
 const num = value => Number(value)

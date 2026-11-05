@@ -94,6 +94,13 @@
   --color-diff-removed-line: rgb(255 0 0 / 0.12);
   --color-diff-removed-text: rgb(255 0 0 / 0.28);
   --color-diff-filler: rgb(204 204 204 / 0.12);
+  /* Merge tabs and conflicts: each version's changes, their headers, and
+     conflicts not resolved yet. */
+  --color-merge-current: rgb(64 200 174 / 0.2);
+  --color-merge-current-header: rgb(64 200 174 / 0.5);
+  --color-merge-incoming: rgb(64 166 255 / 0.2);
+  --color-merge-incoming-header: rgb(64 166 255 / 0.5);
+  --color-merge-unresolved: rgb(255 166 0 / 0.18);
   /* Lanes of history graphs, by turns. */
   --color-graph-lane-1: #ffb000;
   --color-graph-lane-2: #dc267f;
@@ -223,6 +230,11 @@
   --color-diff-removed-line: rgb(255 0 0 / 0.1);
   --color-diff-removed-text: rgb(255 0 0 / 0.22);
   --color-diff-filler: rgb(34 34 34 / 0.1);
+  --color-merge-current: rgb(64 200 174 / 0.22);
+  --color-merge-current-header: rgb(64 200 174 / 0.5);
+  --color-merge-incoming: rgb(64 166 255 / 0.2);
+  --color-merge-incoming-header: rgb(64 166 255 / 0.45);
+  --color-merge-unresolved: rgb(255 166 0 / 0.2);
   --color-graph-lane-1: #c98a00;
   --color-graph-lane-2: #c2185b;
   --color-graph-lane-3: #8a4500;

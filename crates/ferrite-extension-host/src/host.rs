@@ -44,7 +44,7 @@ use crate::worker::{
 };
 use crate::{
   CommandInfo, ConfiguredSetting, Embedder, ExtensionConfiguration, ExtensionDecoration,
-  ExtensionDiagnostic, ExtensionState, ExtensionStatus, HostOptions, Notification,
+  ExtensionDiagnostic, ExtensionLens, ExtensionState, ExtensionStatus, HostOptions, Notification,
   PermissionStatus, Severity, StatusContent, StatusItem, ViewContent,
 };
 
@@ -99,6 +99,30 @@ impl DecorationSet {
   }
 }
 
+/// An extension's code lenses in a document.
+struct LensSet {
+  version: Version,
+  /// Each lens's line start, as an empty range so it maps like others.
+  anchors: Vec<Range<usize>>,
+  lenses: Vec<StoredLens>,
+}
+
+pub struct StoredLens {
+  pub title: String,
+  pub tooltip: Option<String>,
+  pub command: String,
+  pub argument: Option<String>,
+}
+
+impl LensSet {
+  fn catch_up(&mut self, buffer: &TextBuffer) {
+    if !catch_up(&mut self.version, self.anchors.iter_mut(), buffer) {
+      self.anchors.clear();
+      self.lenses.clear();
+    }
+  }
+}
+
 /// Maps ranges stored at `version` through the edits since, and updates
 /// `version`. Returns `false` if the edits are too old to map.
 fn catch_up<'a>(
@@ -136,6 +160,8 @@ struct DocumentRecord {
   diagnostics: BTreeMap<String, DiagnosticSet>,
   /// Decorations by extension id and decoration type.
   decorations: BTreeMap<(String, String), DecorationSet>,
+  /// Code lenses by extension id.
+  lenses: BTreeMap<String, LensSet>,
 }
 
 impl DocumentRecord {
@@ -448,7 +474,8 @@ impl Shared {
       record
         .decorations
         .retain(|(extension, _), _| extension != id);
-      if record.decorations.len() != before {
+      let lenses = record.lenses.remove(id).is_some();
+      if record.decorations.len() != before || lenses {
         outbox.push(Notification::DecorationsChanged(document));
       }
     }
@@ -1128,6 +1155,7 @@ impl Shared {
               history: VecDeque::from([buffer.snapshot()]),
               diagnostics: BTreeMap::new(),
               decorations: BTreeMap::new(),
+              lenses: BTreeMap::new(),
             },
           );
           for entry in &state.extensions {
@@ -1243,6 +1271,36 @@ impl Shared {
         DecorationSet {
           version: at,
           ranges,
+        },
+      );
+    }
+    Ok(())
+  }
+
+  /// Stores an extension's code lenses, each at the start of a line given
+  /// as an offset into the text at `version`, like [`Self::store_diagnostics`].
+  pub fn store_lenses(
+    &self,
+    document: &Document,
+    extension: &str,
+    version: u64,
+    convert: impl FnOnce(&TextBuffer) -> Result<Vec<(usize, StoredLens)>, ApiError>,
+  ) -> Result<(), ApiError> {
+    let mut state = self.lock();
+    let (lenses, at, record) = Self::convert_at(&mut state, document, extension, version, convert)?;
+    if lenses.is_empty() {
+      record.lenses.remove(extension);
+    } else {
+      let (anchors, lenses) = lenses
+        .into_iter()
+        .map(|(offset, lens)| (offset..offset, lens))
+        .unzip();
+      record.lenses.insert(
+        extension.to_owned(),
+        LensSet {
+          version: at,
+          anchors,
+          lenses,
         },
       );
     }
@@ -2395,6 +2453,33 @@ impl ExtensionHost {
           }),
       );
     }
+    found
+  }
+
+  /// Extensions' code lenses in a document, mapped to the current text, in
+  /// order. Call with the editor locked.
+  pub fn code_lenses(&self, document: &Document) -> Vec<ExtensionLens> {
+    let mut state = self.shared.lock();
+    let Some(record) = state.documents.get_mut(&document.id()) else {
+      return Vec::new();
+    };
+    let buffer = document.buffer();
+    let mut found = Vec::new();
+    for set in record.lenses.values_mut() {
+      set.catch_up(buffer);
+      for (anchor, lens) in set.anchors.iter().zip(&set.lenses) {
+        // Edits may leave an anchor inside a line: it stays with that line.
+        let line = buffer.line_of(anchor.start.min(buffer.len()));
+        found.push(ExtensionLens {
+          offset: buffer.line_start(line),
+          title: lens.title.clone(),
+          tooltip: lens.tooltip.clone(),
+          command: lens.command.clone(),
+          argument: lens.argument.clone(),
+        });
+      }
+    }
+    found.sort_by_key(|lens| lens.offset);
     found
   }
 

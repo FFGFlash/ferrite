@@ -678,6 +678,19 @@ pub struct EditorView {
   /// Changes from the file's original touching the view's lines, for the
   /// gutter (see `quick_diff.rs`).
   pub changes: Vec<GutterChangeDto>,
+  /// Extensions' code lenses in the whole document, in order.
+  pub lenses: Vec<CodeLensDto>,
+}
+
+/// A link an extension shows above a line.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CodeLensDto {
+  pub line: usize,
+  pub title: String,
+  pub tooltip: Option<String>,
+  pub command: String,
+  pub argument: Option<String>,
 }
 
 /// Lines changed from a file's original: `start..end` (empty for lines
@@ -789,6 +802,7 @@ impl EditorView {
       language: None,
       decorations: Vec::new(),
       changes: Vec::new(),
+      lenses: Vec::new(),
     }
   }
 }

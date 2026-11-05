@@ -4,6 +4,7 @@ import { togglePerfOverlay } from '../components/PerfOverlay'
 import { resetPerf } from '../state/perf'
 import { activeEditor, activeOverride } from '../editor/activeEditor'
 import { diffControls, revertSelectedRanges } from '../state/diffs'
+import { mergeControls } from '../state/merges'
 import type { DiffLayout } from '../state/layout'
 import { goToNextReference, peekStore } from '../editor/references'
 import {
@@ -91,6 +92,23 @@ import {
 const hasEditor = () => activeEditor.get() !== null
 const hasPeek = () => peekStore.get() !== null
 const hasDocument = () => documentsStore.get().activeId !== null
+
+/** The current tab, when it's a merge's. */
+function currentMerge(): string | null {
+  const tab = currentTab()
+  return tab && itemKind(tab) === 'merge' ? tab : null
+}
+
+/** Goes to the next change of a diff tab, or the next conflict of a merge tab. */
+function goToChange(backward: boolean): void {
+  const diff = currentDiff()
+  const merge = currentMerge()
+  if (diff) {
+    diffControls(diff)?.goToChange(backward)
+  } else if (merge) {
+    mergeControls(merge)?.goToConflict(backward)
+  }
+}
 
 /** The current tab, when it's a diff's. */
 function currentDiff(): string | null {
@@ -292,7 +310,9 @@ export const builtinCommands: Command[] = [
     keybinding: 'mod+s',
     enabled: () => hasDocument() || activeOverride() !== null,
     // In a diff tab, the side in use.
-    run: () => save(activeOverride()?.documentId),
+    run: async () => {
+      await save(activeOverride()?.documentId)
+    },
   },
   {
     id: 'file.saveAs',
@@ -300,7 +320,9 @@ export const builtinCommands: Command[] = [
     title: 'Save As…',
     keybinding: 'mod+shift+s',
     enabled: hasDocument,
-    run: () => save(undefined, true),
+    run: async () => {
+      await save(undefined, true)
+    },
   },
   {
     id: 'file.changeEncoding',
@@ -413,16 +435,16 @@ export const builtinCommands: Command[] = [
     category: 'Diff',
     title: 'Go to Next Change',
     keybinding: 'f7',
-    enabled: () => currentDiff() !== null,
-    run: () => diffControls(currentDiff()!)?.goToChange(false),
+    enabled: () => currentDiff() !== null || currentMerge() !== null,
+    run: () => goToChange(false),
   },
   {
     id: 'diff.previousChange',
     category: 'Diff',
     title: 'Go to Previous Change',
     keybinding: 'shift+f7',
-    enabled: () => currentDiff() !== null,
-    run: () => diffControls(currentDiff()!)?.goToChange(true),
+    enabled: () => currentDiff() !== null || currentMerge() !== null,
+    run: () => goToChange(true),
   },
   {
     id: 'diff.toggleInline',

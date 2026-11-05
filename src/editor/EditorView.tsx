@@ -16,6 +16,7 @@ import {
   quickDiffApply,
   quickDiffHunk,
   quickDiffRevert,
+  type CodeLens,
   type DisplayLine,
   type EditorOp,
   type EditorView as View,
@@ -96,7 +97,8 @@ import {
   runContributed,
 } from '../state/extensions'
 import { themeKind } from '../themes/theme'
-import { decorationRectStyle, textOverlays } from './decorations'
+import { runCodeLens } from '../ipc/extensions'
+import { decorationRectStyle, lineBackgrounds, textOverlays } from './decorations'
 import { displayRow, lineAtRow, rowOf } from './rows'
 import { highlighted } from './highlighted'
 import { LINK_CLASS, type TextOverlay } from './segments'
@@ -166,6 +168,37 @@ interface Zones {
 }
 
 const NO_ZONES: readonly ViewZone[] = []
+const NO_LENSES: readonly CodeLens[] = []
+const LENS_ZONE = 'editor-view__lens-zone'
+
+/** A line's code lenses: links that run their extension's commands. */
+function CodeLenses({ documentId, lenses }: { documentId: number; lenses: readonly CodeLens[] }) {
+  return (
+    <div className="editor-view__lenses" onMouseDown={event => event.stopPropagation()}>
+      {lenses.map((lens, index) => (
+        <span key={index}>
+          {index > 0 && (
+            <span className="editor-view__lens-separator" aria-hidden="true">
+              |
+            </span>
+          )}
+          <button
+            type="button"
+            className="editor-view__lens"
+            title={lens.tooltip ?? undefined}
+            onClick={() =>
+              runCodeLens(documentId, lens.command, lens.argument).catch((error: unknown) =>
+                reportError(lens.title, error),
+              )
+            }
+          >
+            {lens.title}
+          </button>
+        </span>
+      ))}
+    </div>
+  )
+}
 
 function zonesOf(list: readonly ViewZone[], lineHeight: number): Zones {
   const sorted = list.length > 1 ? [...list].sort((a, b) => a.row - b.row) : list
@@ -399,8 +432,28 @@ export function EditorView({
     const below = end > start ? end - 1 : start - 1
     return below < 0 ? -1 : displayRow(view, below)
   }, [hunk, view])
+  // Extensions' code lenses: a row of links above their lines.
+  const lenses = view?.lenses ?? NO_LENSES
+  const lensKey = lenses.length > 0 ? JSON.stringify(lenses) : ''
+  const lensZones = useMemo((): ViewZone[] => {
+    if (!view || lenses.length === 0) {
+      return []
+    }
+    const byLine = new Map<number, CodeLens[]>()
+    for (const lens of lenses) {
+      byLine.set(lens.line, [...(byLine.get(lens.line) ?? []), lens])
+    }
+    return [...byLine].map(([line, shown]) => ({
+      key: `lens:${line}`,
+      row: displayRow(view, line) - 1,
+      lines: 1,
+      className: LENS_ZONE,
+      content: <CodeLenses documentId={documentId} lenses={shown} />,
+    }))
+    // The lenses' content (`lensKey`), not each view, changes them.
+  }, [lensKey, documentId, view?.foldGeneration])
   const zones = useMemo(() => {
-    const all = [...extraZones]
+    const all = [...extraZones, ...lensZones]
     if (peekRow !== null) {
       all.push({ key: 'peek', row: peekRow, lines: peekLines })
     }
@@ -408,7 +461,7 @@ export function EditorView({
       all.push({ key: 'change', row: hunkRow, lines: changePeekLines(hunk) })
     }
     return zonesOf(all, lineHeight)
-  }, [extraZones, peekRow, peekLines, hunk, hunkRow, lineHeight])
+  }, [extraZones, lensZones, peekRow, peekLines, hunk, hunkRow, lineHeight])
   const zoneRef = useRef(zones)
   zoneRef.current = zones
   const peekShownRef = useRef(false)
@@ -1561,6 +1614,13 @@ export function EditorView({
   const extensions = useStore(extensionsStore)
   const kind = useStore(themeKind)
   const types = useMemo(() => decorationTypes(extensions), [extensions])
+  const backgrounds = useMemo(
+    () =>
+      view && view.decorations.length > 0
+        ? lineBackgrounds(view.decorations, types, kind)
+        : new Map<number, string>(),
+    [view, types, kind],
+  )
   const lineOverlays = useMemo(
     () =>
       view && view.decorations.length > 0
@@ -1755,7 +1815,8 @@ export function EditorView({
                   }
                   const type = types.get(rect.key)
                   return (
-                    type && (
+                    type &&
+                    !type.wholeLine && (
                       <div
                         key={`x${index}`}
                         className="editor-view__decoration"
@@ -1800,6 +1861,7 @@ export function EditorView({
                       folded={foldedLines.has(lineNumber)}
                       spacer={spacerAt(index)}
                       className={classOf(lineNumber)}
+                      background={backgrounds.get(lineNumber)}
                     />
                   )
                 })}
@@ -1854,7 +1916,13 @@ export function EditorView({
               className={
                 shown.className ? `editor-view__zone ${shown.className}` : 'editor-view__zone'
               }
-              style={{ top, height: shown.lines * lineHeight }}
+              style={{
+                top,
+                height: shown.lines * lineHeight,
+                // Code lenses start where the text does.
+                paddingLeft:
+                  shown.className === LENS_ZONE ? (gutterRef.current?.offsetWidth ?? 0) : undefined,
+              }}
             >
               {shown.content}
             </div>
@@ -1975,9 +2043,19 @@ interface LineProps {
   folded: boolean
   /** Room below the line for zones, in pixels. */
   spacer: number
+  /** A whole-line decoration's background. */
+  background?: string
 }
 
-const Line = memo(function Line({ line, className, link, overlays, folded, spacer }: LineProps) {
+const Line = memo(function Line({
+  line,
+  className,
+  link,
+  overlays,
+  folded,
+  spacer,
+  background,
+}: LineProps) {
   const all = link
     ? [...overlays, { from: link.from, to: link.to, className: LINK_CLASS }]
     : overlays
@@ -1990,7 +2068,10 @@ const Line = memo(function Line({ line, className, link, overlays, folded, space
       ⋯
     </span>
   )
-  const style = spacer ? { marginBottom: spacer } : undefined
+  const style =
+    spacer || background
+      ? { marginBottom: spacer || undefined, background: background ?? undefined }
+      : undefined
   const lineClassName = className ? `editor-view__line ${className}` : 'editor-view__line'
   if (line.fullLength === null) {
     return (

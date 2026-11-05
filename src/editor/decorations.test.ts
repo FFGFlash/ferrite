@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { DecorationType } from '../ipc/extensions'
-import { decorationRectStyle, textOverlays } from './decorations'
+import { decorationRectStyle, lineBackgrounds, textOverlays } from './decorations'
 
 const todo: DecorationType = {
   name: 'todo',
@@ -10,6 +10,7 @@ const todo: DecorationType = {
   underline: 'wavy',
   bold: true,
   italic: false,
+  wholeLine: false,
 }
 const box: DecorationType = {
   ...todo,
@@ -49,5 +50,25 @@ describe('decorations', () => {
     const style = { color: '#e5c07b', fontWeight: 'bold' }
     expect(overlays.get(1)).toEqual([{ from: 3, to: 10, style }])
     expect(overlays.get(2)).toEqual([{ from: 0, to: 2, style }])
+  })
+
+  it('colors whole lines for whole-line types, up to the line a range ends at the start of', () => {
+    const conflict: DecorationType = { ...todo, key: 'git/conflict', wholeLine: true }
+    const types = new Map([
+      [todo.key, todo],
+      [conflict.key, conflict],
+    ])
+    const backgrounds = lineBackgrounds(
+      [
+        { start: { line: 1, column: 0 }, end: { line: 3, column: 0 }, key: conflict.key },
+        { start: { line: 5, column: 2 }, end: { line: 5, column: 4 }, key: todo.key },
+      ],
+      types,
+      'dark',
+    )
+    expect([...backgrounds]).toEqual([
+      [1, '#e5c07b33'],
+      [2, '#e5c07b33'],
+    ])
   })
 })

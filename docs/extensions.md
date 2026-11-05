@@ -795,6 +795,7 @@ underline = "wavy"                # solid, wavy, dotted, or dashed
 underline_color = "#e5c07b"
 bold = true
 italic = false
+whole_line = false                # (API 1.12) the background spans each line's width
 
 [decorations.keyword.light]       # optional colors for light themes
 background = "#9868011f"
@@ -812,6 +813,23 @@ with that type in a document (at most 10,000). It works like `publish-diagnostic
 
 `workbench::reveal(document, range)` selects a range and scrolls it into view, making that
 document active. TODOs uses it when a view item is chosen. It also needs `documents_read`.
+
+A **whole-line** type (`whole_line = true`, API 1.12) colors the background of each line a range
+covers, as VS Code's `isWholeLine` does; a range ending at the start of a line doesn't cover that
+line. Git colors the sides of merge conflicts this way.
+
+#### Code lenses
+
+**`workbench::set-code-lenses(document, version, lenses)`** (API 1.12) shows links above lines,
+as VS Code's code lenses: each lens has a `line`, a `title` (plain text, at most 100
+characters), an optional `tooltip`, and one of the extension's `command`s with an optional
+`argument`. A line's lenses show in one row, in order, separated by bars. Clicking one runs its
+command for the document (`command-context.document`) with the argument
+(`workbench::command-argument`). Like decorations, lenses refer to the text at `version`, move
+with later edits (staying on their lines), are replaced as a whole (at most 1,000 per document),
+go when the extension stops, and need `documents_read`. Git shows Accept Current Change, Accept
+Incoming Change, Accept Both Changes, Compare Changes, and Resolve in Merge Editor above each
+merge conflict.
 
 ### Previews
 
@@ -1018,7 +1036,7 @@ and `ferrite-icon`, a 16-pixel icon in the text color.
 `actual-size`, `add`, `branch`, `check`, `chevron-down`, `chevron-left`, `chevron-right`,
 `chevron-up`, `close`, `code`, `commit`, `copy`, `crop`, `download`, `edit`, `error`, `eye`,
 `eye-off`, `file`, `filter`, `fit`, `flip-horizontal`, `flip-vertical`, `grid`, `image`, `info`,
-`layers`, `link`, `list-flat`, `list-tree`, `moon`, `more`, `move`, `open`, `palette`, `pause`,
+`layers`, `link`, `list-flat`, `list-tree`, `merge`, `moon`, `more`, `move`, `open`, `palette`, `pause`,
 `play`, `refresh`, `remove`, `rotate`, `save`, `search`, `settings`, `split`, `stop`, `sun`,
 `undo`, `upload`, `warning`, `zoom-in`, `zoom-out`.
 
@@ -1120,6 +1138,22 @@ empty. A command that doesn't answer fails the request.
   the left (or above, inline) and the modified one on the right. Each is a file's absolute path
   or an address some extension provides. A file can be edited in the tab. The same two sides and
   title show in the same tab.
+
+- **`open-merge(options)`** (API 1.12) opens a merge editor, as VS Code's: two versions above the
+  file being merged. `options` names their common `base`, the `incoming` and `current` versions
+  (each a `uri`, a `title` such as "Incoming", and an optional `description` such as a branch),
+  the `result-file` (an absolute path), the tab's `title`, whether to `reset-result` (start the
+  result again from the base with the changes that don't conflict made, as when the file holds
+  conflict markers), and an `on-complete` command. Versions are paths or provided addresses.
+
+Merge tabs compare each version with the base and the result with the base, so the result can be
+edited freely. Each range one side or both changed has a row of buttons above it in every editor:
+the versions' accept or undo their change (or both, "Accept Combination"), and the result's
+accept either side or both, or reset it to the base. The editors line up and scroll together,
+the header counts conflicts not resolved yet, and F7 and Shift+F7 move between them. **Complete
+Merge** saves the result (asking first if conflicts remain), runs `on-complete` with the
+result's path as its argument (Git stages the file), and closes the tab. A merge tab isn't
+restored at the next start.
 
 Diff tabs line up the sides, mark changed lines and characters, and collapse unchanged lines
 away from changes. Buttons beside the tabs (and the Diff commands) move between changes (F7 and
@@ -1531,15 +1565,17 @@ message saying so. Rust on `wasm32-unknown-unknown` is the supported path for no
 
 ## Versioning
 
-The WIT package is versioned: `ferrite:extension@1.11.0`, `api_version = "1"`.
+The WIT package is versioned: `ferrite:extension@1.12.0`, `api_version = "1"`.
 
 - **Additions.** New host functions arrive as minor versions of the package. Version 1.1 added the
   `workbench` interface, 1.2 added previews to it, 1.3 added the `files` interface, 1.4 the
   `viewers` interface, 1.5 the `webviews` and `storage` interfaces, 1.6 the `workspace`, `processes`, and `explorer`
   interfaces, 1.7 the `views` and `prompts` interfaces, with `files::delete`,
   `workspace::open-file`, and `host::set-configuration`, 1.8 the `documents` interface, and 1.9 the
-  `quick-diff` interface, 1.10 the `timers` interface, and 1.11 `views::set-graph`,
-  `prompts::pick-folder`, `workspace::open-folder`, and `workbench::active-file`.
+  `quick-diff` interface, 1.10 the `timers` interface, 1.11 `views::set-graph`,
+  `prompts::pick-folder`, `workspace::open-folder`, and `workbench::active-file`, and 1.12
+  `workbench::set-code-lenses` and `documents::open-merge` (with whole-line decorations in the
+  manifest).
   Wasmtime
   links components built against an older minor version: the host's tests load Tidy builds made
   against 1.0 and 1.2 and a TODOs build made against 1.1.

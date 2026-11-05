@@ -7,6 +7,7 @@ mod counts;
 mod diff;
 pub(crate) mod fold_memory;
 mod folding;
+mod merge;
 mod minimap;
 mod peek;
 pub(crate) mod protocol;
@@ -33,6 +34,7 @@ use protocol::DocumentSummary;
 
 pub use commands::*;
 pub use diff::*;
+pub use merge::*;
 pub use peek::*;
 pub use provided::*;
 pub use quick_diff::*;

@@ -32,6 +32,7 @@ function wire(
     language: null,
     decorations: [],
     changes: [],
+    lenses: [],
   }
 }
 

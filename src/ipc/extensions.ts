@@ -192,6 +192,8 @@ export interface DecorationType {
   underline: 'solid' | 'wavy' | 'dotted' | 'dashed' | null
   bold: boolean
   italic: boolean
+  /** The background spans each covered line's whole width. */
+  wholeLine: boolean
 }
 
 /** A language an extension adds, highlighted by its own grammar. */
@@ -539,6 +541,9 @@ export const pickFolderDialog = (title: string) =>
 /** Runs a command from a view's menu or button for the selected items' arguments. */
 export const runViewCommand = (command: string, argument: string | null, selection: string[]) =>
   call<void>('extension_run_view_command', { command, argument, selection })
+/** Runs a code lens's command for document `document`. */
+export const runCodeLens = (document: number, command: string, argument: string | null) =>
+  call<void>('extension_run_code_lens', { document, command, argument })
 /** Asks a view's extension for the children of an opened item. */
 export const expandViewItem = (view: string, item: string) =>
   call<void>('extension_view_expand', { view, item })
@@ -611,3 +616,25 @@ export const setExtensionEnabled = (id: string, enabled: boolean) =>
 export const restartExtension = (id: string) => call<void>('extension_restart', { id })
 /** Asks for a folder and loads it as a development extension. */
 export const addDevelopmentExtension = () => call<string | null>('extension_add_development')
+
+/** One of the versions a merge editor combines. */
+export interface MergeSide {
+  /** An absolute path, or an address an extension provides. */
+  uri: string
+  title: string
+  description: string | null
+}
+
+/** What a merge editor shows (`documents::open-merge`). */
+export interface MergeSpec {
+  base: string
+  incoming: MergeSide
+  current: MergeSide
+  /** The file written: an absolute path. */
+  result: string
+  title: string
+  /** Start the result again from the base with the changes that don't conflict made. */
+  resetResult: boolean
+  /** The extension command run once the merge is completed, with the result's path. */
+  onComplete: string | null
+}

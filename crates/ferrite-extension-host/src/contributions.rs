@@ -409,6 +409,9 @@ pub struct DecorationType {
   pub underline: Option<UnderlineStyle>,
   pub bold: bool,
   pub italic: bool,
+  /// The background spans the whole width of each line the range covers,
+  /// as VS Code's `isWholeLine`. (1.12)
+  pub whole_line: bool,
 }
 
 /// A language: which files it is for, and a Tree-sitter grammar compiled to
@@ -753,6 +756,8 @@ pub struct RawDecoration {
   bold: bool,
   #[serde(default)]
   italic: bool,
+  #[serde(default)]
+  whole_line: bool,
   light: Option<RawDecorationColors>,
 }
 
@@ -1257,6 +1262,7 @@ pub fn parse(
       underline,
       bold: decoration.bold,
       italic: decoration.italic,
+      whole_line: decoration.whole_line,
     });
   }
 

@@ -17,6 +17,25 @@ use crate::editor::protocol::{DocumentSummary, Position};
 use crate::file_drop::FileDragPhase;
 use crate::settings::FrontendSettings;
 
+/// One of the versions a merge editor combines.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MergeSideDto {
+  pub uri: String,
+  pub title: String,
+  pub description: Option<String>,
+}
+
+impl From<ferrite_extension_host::MergeSide> for MergeSideDto {
+  fn from(side: ferrite_extension_host::MergeSide) -> Self {
+    Self {
+      uri: side.uri,
+      title: side.title,
+      description: side.description,
+    }
+  }
+}
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(
   tag = "type",
@@ -86,6 +105,16 @@ pub enum AppEvent {
     original: String,
     modified: String,
     title: String,
+  },
+  /// An extension asked to open a merge editor (`documents::open-merge`).
+  OpenMerge {
+    base: String,
+    incoming: MergeSideDto,
+    current: MergeSideDto,
+    result: String,
+    title: String,
+    reset_result: bool,
+    on_complete: Option<String>,
   },
   /// Progress of the Go to File index.
   IndexStatus {

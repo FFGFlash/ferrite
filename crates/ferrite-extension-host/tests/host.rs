@@ -1890,6 +1890,7 @@ fn git_extension() -> Option<(Setup, PathBuf)> {
     "git",
     Some(&[
       Permission::DocumentsRead,
+      Permission::DocumentsWrite,
       Permission::FilesRead,
       Permission::FilesWrite,
       Permission::Processes,
@@ -2530,8 +2531,11 @@ fn the_git_extension_graphs_stashes_and_follows_history() {
   s.host.load();
 
   wait_for_view(&s, commits, "the commits", |ids| ids.len() == 4);
+  // The graph comes right after the items.
+  eventually("a graph row per commit", || {
+    s.host.view_content(commits).graph.len() == 4
+  });
   let content = s.host.view_content(commits);
-  assert_eq!(content.graph.len(), 4, "a graph row per commit");
   let merge = &content.graph[0];
   assert_eq!(merge.parents.len(), 2);
   assert_eq!(merge.outputs.len(), 2, "the merge opens a second lane");
@@ -2745,4 +2749,300 @@ fn the_git_extension_discards_changes_and_initializes_repositories() {
     assert!(Instant::now() < deadline, "not initialized");
     std::thread::sleep(Duration::from_millis(50));
   }
+}
+
+/// Runs git, which may fail (as a merge with conflicts does).
+fn git_may_fail(dir: &Path, args: &[&str]) {
+  let _ = Command::new("git")
+    .args(["-c", "user.name=Test", "-c", "user.email=test@example.com"])
+    .args(args)
+    .current_dir(dir)
+    .output()
+    .expect("git runs");
+}
+
+fn changes_flags(s: &Setup) -> Vec<String> {
+  s.host.view_content("ferrite.git.changes").flags
+}
+
+#[test]
+fn the_git_extension_resolves_merge_conflicts() {
+  let Some((s, repo)) = git_extension() else {
+    return;
+  };
+  let changes = "ferrite.git.changes";
+  let file = repo.join("a.txt");
+  std::fs::write(&file, "one\ntwo\nthree\n").expect("write");
+  git(&repo, &["add", "."]);
+  git(&repo, &["commit", "-q", "-m", "first"]);
+  git(&repo, &["checkout", "-q", "-b", "feature"]);
+  std::fs::write(&file, "one\ntheirs\nthree\n").expect("write");
+  git(&repo, &["commit", "-q", "-am", "theirs"]);
+  git(&repo, &["checkout", "-q", "main"]);
+  std::fs::write(&file, "one\nmine\nthree\n").expect("write");
+  git(&repo, &["commit", "-q", "-am", "mine"]);
+  git_may_fail(&repo, &["merge", "feature"]);
+  *s.fake.folder.lock().unwrap_or_else(PoisonError::into_inner) = Some(repo.clone());
+  s.host.load();
+  wait_for_view(&s, changes, "the conflict", |ids| {
+    ids.contains(&"merge:a.txt".to_owned())
+  });
+  // A merge is in progress: the view says so, with Continue and Abort.
+  eventually("the merge in progress", || {
+    changes_flags(&s).contains(&"operation".to_owned())
+  });
+  assert!(
+    s.host
+      .view_content(changes)
+      .message
+      .is_some_and(|message| message.starts_with("A merge is in progress"))
+  );
+  eventually("the branch saying so", || {
+    status_text(&s, "branch").is_some_and(|text| text.ends_with("(Merging)"))
+  });
+
+  // The file's versions: their base, ours, and theirs.
+  let text = |uri: &str| s.host.provide_text(uri).expect("provides");
+  assert_eq!(text("git:~1:a.txt").as_deref(), Some("one\ntwo\nthree\n"));
+  assert_eq!(text("git:~2:a.txt").as_deref(), Some("one\nmine\nthree\n"));
+  assert_eq!(
+    text("git:~3:a.txt").as_deref(),
+    Some("one\ntheirs\nthree\n")
+  );
+
+  // Opened, its conflict shows in color with links above it.
+  let id = s.fake.open_file(&s.host, &file);
+  eventually("the conflict's links", || {
+    let editor = s.fake.editor();
+    s.host.code_lenses(editor.document(id).expect("open")).len() == 5
+  });
+  {
+    let editor = s.fake.editor();
+    let document = editor.document(id).expect("open");
+    let lenses = s.host.code_lenses(document);
+    let titles: Vec<&str> = lenses.iter().map(|lens| lens.title.as_str()).collect();
+    assert_eq!(
+      titles,
+      [
+        "Accept Current Change",
+        "Accept Incoming Change",
+        "Accept Both Changes",
+        "Compare Changes",
+        "Resolve in Merge Editor"
+      ]
+    );
+    // On the conflict's first line, the `<<<<<<<` one.
+    assert_eq!(lenses[0].offset, document.buffer().line_start(1));
+    assert_eq!(lenses[0].argument.as_deref(), Some("1"));
+    let mut keys: Vec<String> = s
+      .host
+      .decorations(document, 0..document.buffer().len())
+      .into_iter()
+      .map(|decoration| decoration.key)
+      .collect();
+    keys.sort();
+    assert_eq!(
+      keys,
+      [
+        "ferrite.git/conflict-current",
+        "ferrite.git/conflict-current-header",
+        "ferrite.git/conflict-incoming",
+        "ferrite.git/conflict-incoming-header"
+      ]
+    );
+  }
+  // Comparing the sides.
+  assert_eq!(
+    text("git:~current:a.txt").as_deref(),
+    Some("one\nmine\nthree\n")
+  );
+  assert_eq!(
+    text("git:~incoming:a.txt").as_deref(),
+    Some("one\ntheirs\nthree\n")
+  );
+
+  // Staging it with its markers asks first.
+  s.host
+    .run_view_command("ferrite.git.stage", Some("a.txt".into()), vec![])
+    .expect("runs")
+    .wait()
+    .expect("asks");
+  let prompt = answer(&s, ferrite_extension_host::PromptReply::Cancelled);
+  assert!(matches!(
+    prompt.kind,
+    ferrite_extension_host::PromptKind::Confirm { ref message, .. } if message.contains("still has merge conflicts")
+  ));
+
+  // The merge editor shows theirs and ours above the file.
+  s.host
+    .run_view_command("ferrite.git.openMergeEditor", Some("a.txt".into()), vec![])
+    .expect("runs")
+    .wait()
+    .expect("opens");
+  let merge = match s.fake.wait_for("a merge editor", |n| {
+    matches!(n, Notification::OpenMerge(_))
+  }) {
+    Notification::OpenMerge(request) => request,
+    _ => unreachable!(),
+  };
+  assert_eq!(merge.base, "git:~1:a.txt");
+  assert_eq!(merge.incoming.uri, "git:~3:a.txt");
+  assert_eq!(merge.incoming.description.as_deref(), Some("feature"));
+  assert_eq!(merge.current.uri, "git:~2:a.txt");
+  assert_eq!(merge.current.description.as_deref(), Some("main"));
+  assert_eq!(merge.result, file.display().to_string());
+  assert!(merge.reset_result, "the file has conflict markers");
+  assert_eq!(
+    merge.on_complete.as_deref(),
+    Some("ferrite.git.mergeCompleted")
+  );
+
+  // Accepting the incoming change from its link.
+  s.host
+    .run_command("ferrite.git.acceptIncoming", Some(id), Some("1".into()))
+    .expect("runs")
+    .wait()
+    .expect("accepts");
+  // Git may have checked the file out with CRLF line breaks.
+  assert_eq!(
+    s.fake.text(id).replace("\r\n", "\n"),
+    "one\ntheirs\nthree\n"
+  );
+  eventually("the links gone", || {
+    let editor = s.fake.editor();
+    s.host
+      .code_lenses(editor.document(id).expect("open"))
+      .is_empty()
+  });
+
+  // Saved and completed, it's staged; Continue makes the merge commit.
+  s.fake.save(id).expect("saves");
+  s.host
+    .run_view_command(
+      "ferrite.git.mergeCompleted",
+      Some(file.display().to_string()),
+      vec![],
+    )
+    .expect("runs")
+    .wait()
+    .expect("stages");
+  wait_for_view(&s, changes, "the resolved file staged", |ids| {
+    ids.contains(&"staged:a.txt".to_owned())
+  });
+  s.host
+    .run_view_command("ferrite.git.continueOperation", None, vec![])
+    .expect("runs")
+    .wait()
+    .expect("continues");
+  eventually("the merge committed", || {
+    !changes_flags(&s).contains(&"operation".to_owned())
+  });
+  let parents = git(&repo, &["log", "-1", "--format=%P"]).expect("git");
+  assert_eq!(parents.split_whitespace().count(), 2, "a merge commit");
+
+  // Another merge stopped for conflicts can be aborted, after asking.
+  git(&repo, &["checkout", "-q", "-b", "other", "HEAD~1"]);
+  std::fs::write(&file, "one\nother\nthree\n").expect("write");
+  git(&repo, &["commit", "-q", "-am", "other"]);
+  git(&repo, &["checkout", "-q", "main"]);
+  git_may_fail(&repo, &["merge", "other"]);
+  s.host
+    .files_changed(&[repo.join(".git").join("MERGE_HEAD")]);
+  eventually("the second merge", || {
+    changes_flags(&s).contains(&"operation".to_owned())
+  });
+  s.host
+    .run_view_command("ferrite.git.abortOperation", None, vec![])
+    .expect("runs")
+    .wait()
+    .expect("asks");
+  answer(&s, ferrite_extension_host::PromptReply::Button { index: 0 });
+  eventually("the merge aborted", || {
+    !changes_flags(&s).contains(&"operation".to_owned())
+  });
+  assert!(!repo.join(".git").join("MERGE_HEAD").exists());
+  assert_eq!(
+    std::fs::read_to_string(&file)
+      .expect("read")
+      .replace("\r\n", "\n"),
+    "one\ntheirs\nthree\n"
+  );
+}
+
+#[test]
+fn the_git_extension_rebases_and_stops_for_conflicts() {
+  let Some((s, repo)) = git_extension() else {
+    return;
+  };
+  let file = repo.join("a.txt");
+  std::fs::write(&file, "one\ntwo\n").expect("write");
+  git(&repo, &["add", "."]);
+  git(&repo, &["commit", "-q", "-m", "first"]);
+  git(&repo, &["checkout", "-q", "-b", "topic"]);
+  std::fs::write(&file, "one\ntopic\n").expect("write");
+  git(&repo, &["commit", "-q", "-am", "topic"]);
+  git(&repo, &["checkout", "-q", "main"]);
+  std::fs::write(&file, "one\nmain\n").expect("write");
+  git(&repo, &["commit", "-q", "-am", "main"]);
+  git(&repo, &["checkout", "-q", "topic"]);
+  *s.fake.folder.lock().unwrap_or_else(PoisonError::into_inner) = Some(repo.clone());
+  s.host.load();
+  eventually("the branch", || {
+    status_text(&s, "branch").is_some_and(|text| text.starts_with("topic"))
+  });
+
+  // Rebasing onto main stops for the conflict.
+  s.host
+    .run_view_command("ferrite.git.rebaseBranch", None, vec![])
+    .expect("runs")
+    .wait()
+    .expect("asks");
+  let prompt = answer(
+    &s,
+    ferrite_extension_host::PromptReply::Picked {
+      value: "refs/heads/main".into(),
+    },
+  );
+  assert!(matches!(
+    prompt.kind,
+    ferrite_extension_host::PromptKind::Pick { ref title, .. } if title.contains("rebase")
+  ));
+  s.fake
+    .wait_for_message("Rebasing stopped for merge conflicts");
+  eventually("the rebase in progress", || {
+    let flags = changes_flags(&s);
+    flags.contains(&"operation".to_owned()) && flags.contains(&"rebasing".to_owned())
+  });
+  eventually("the branch saying so", || {
+    status_text(&s, "branch").is_some_and(|text| text.ends_with("(Rebasing)"))
+  });
+
+  // Continue waits for the conflicts to be resolved.
+  s.host
+    .run_view_command("ferrite.git.continueOperation", None, vec![])
+    .expect("runs")
+    .wait()
+    .expect("refuses");
+  s.fake.wait_for_message("1 file still has merge conflicts");
+
+  // Resolved and staged, Continue finishes the rebase.
+  std::fs::write(&file, "one\nmain\ntopic\n").expect("write");
+  git(&repo, &["add", "a.txt"]);
+  s.host.files_changed(&[repo.join(".git").join("index")]);
+  wait_for_view(&s, "ferrite.git.changes", "the resolved file", |ids| {
+    ids.contains(&"staged:a.txt".to_owned())
+  });
+  s.host
+    .run_view_command("ferrite.git.continueOperation", None, vec![])
+    .expect("runs")
+    .wait()
+    .expect("continues");
+  eventually("the rebase finished", || {
+    !changes_flags(&s).contains(&"operation".to_owned())
+  });
+  let subjects = git(&repo, &["log", "--format=%s"]).expect("git");
+  assert_eq!(
+    subjects.lines().collect::<Vec<_>>(),
+    ["topic", "main", "first"]
+  );
 }
