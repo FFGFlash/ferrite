@@ -8,6 +8,8 @@ on:
   push:
     branches: [main]
   pull_request:
+  # Run by the release workflow, so only a commit that passes is released.
+  workflow_call:
 
 permissions:
   contents: read

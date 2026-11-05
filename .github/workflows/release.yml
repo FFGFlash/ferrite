@@ -1,0 +1,143 @@
+# Publishes Flareite when a version tag is pushed (git tag v0.2.0 && git push
+# origin v0.2.0). The tag must match the version in Cargo.toml and
+# package.json; tags with a hyphen (v0.3.0-beta.1) are published as
+# prereleases.
+#
+# 1. CI runs on the tagged commit (the whole of ci.yml).
+# 2. A draft release is created, with notes generated from the commits.
+# 3. Each platform builds and uploads its installers to the draft:
+#    Windows (.msi and .exe), macOS (a universal .dmg and .app.tar.gz), and
+#    Linux (.deb, .rpm, and .AppImage).
+# 4. Once all have, the release is published. If any fails, the draft stays,
+#    to look into and delete before tagging again.
+#
+# The builds aren't signed: Windows SmartScreen and macOS Gatekeeper warn
+# before opening them (see the README).
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
+
+jobs:
+  version:
+    name: Check the version
+    runs-on: ubuntu-24.04
+    outputs:
+      prerelease: ${{ steps.check.outputs.prerelease }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: check
+        run: |
+          set -euo pipefail
+          cargo=$(sed -n '/^\[workspace.package\]/,/^\[/s/^version = "\(.*\)"$/\1/p' Cargo.toml)
+          node=$(node -p "require('./package.json').version")
+          if [ "v$cargo" != "$GITHUB_REF_NAME" ] || [ "$node" != "$cargo" ]; then
+            echo "::error::The tag $GITHUB_REF_NAME must match the version in Cargo.toml ($cargo) and package.json ($node)."
+            exit 1
+          fi
+          if [[ "$cargo" == *-* ]]; then
+            echo "prerelease=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "prerelease=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  ci:
+    name: CI
+    needs: version
+    uses: ./.github/workflows/ci.yml
+
+  draft:
+    name: Draft the release
+    needs: [version, ci]
+    runs-on: ubuntu-24.04
+    outputs:
+      id: ${{ steps.draft.outputs.id }}
+    steps:
+      - id: draft
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PRERELEASE: ${{ needs.version.outputs.prerelease }}
+        run: |
+          set -euo pipefail
+          id=$(gh api --method POST "repos/$GITHUB_REPOSITORY/releases" \
+            -f tag_name="$GITHUB_REF_NAME" \
+            -f name="Flareite $GITHUB_REF_NAME" \
+            -F draft=true \
+            -F prerelease="$PRERELEASE" \
+            -F generate_release_notes=true \
+            --jq .id)
+          echo "id=$id" >> "$GITHUB_OUTPUT"
+
+  build:
+    name: Build (${{ matrix.name }})
+    needs: [version, draft]
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Windows
+            os: windows-2025
+            targets: ''
+            # MSI versions must be numbers, so prereleases get only the .exe.
+            args: ${{ needs.version.outputs.prerelease == 'true' && '--bundles nsis' || '' }}
+          - name: macOS
+            os: macos-15
+            targets: aarch64-apple-darwin,x86_64-apple-darwin
+            args: --target universal-apple-darwin
+          # The oldest supported Ubuntu, so the packages run on as many
+          # distributions as they can.
+          - name: Linux
+            os: ubuntu-22.04
+            targets: ''
+            args: ''
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Linux dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev libxdo-dev
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.targets }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: release
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      # Builds the frontend (beforeBuildCommand) and the app, bundles it, and
+      # uploads the installers to the draft.
+      - uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        with:
+          releaseId: ${{ needs.draft.outputs.id }}
+          tauriScript: pnpm tauri
+          args: ${{ matrix.args }}
+
+  publish:
+    name: Publish the release
+    needs: [draft, build]
+    runs-on: ubuntu-24.04
+    steps:
+      - env:
+          GH_TOKEN: ${{ github.token }}
+          ID: ${{ needs.draft.outputs.id }}
+        run: gh api --method PATCH "repos/$GITHUB_REPOSITORY/releases/$ID" -F draft=false

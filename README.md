@@ -10,6 +10,21 @@ WebAssembly extension system.
 > [`docs/performance.md`](docs/performance.md) for measurements, and
 > [`CONTRIBUTING.md`](CONTRIBUTING.md) for how to work on Flareite.
 
+## Downloading
+
+Each [release](https://github.com/FlareiteLabs/flareite/releases) has installers for Windows
+(`.msi`, or the `.exe` setup), macOS (a `.dmg` for both Apple silicon and Intel), and Linux
+(`.deb`, `.rpm`, or an `.AppImage`). They aren't signed yet, so the system warns before the first
+start:
+
+- **Windows.** SmartScreen says it protected your PC: choose **More info**, then **Run anyway**.
+- **macOS.** Gatekeeper refuses to open an app from an unidentified developer, or says it's
+  damaged: after moving Flareite to Applications, run `xattr -cr /Applications/Flareite.app`
+  once, or allow it under **System Settings → Privacy & Security**.
+- **Linux.** Make the AppImage executable (`chmod +x Flareite_*.AppImage`) before running it.
+
+To build it yourself instead, see below.
+
 ## Prerequisites
 
 | Tool                                                | Version used                                 |

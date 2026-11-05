@@ -60,6 +60,23 @@ CI runs the Rust checks on Windows, macOS, and Linux. Files use LF line endings
   users or extension authors see goes into the README, the architecture document, or the
   extension guide in the same change.
 
+## Releasing
+
+Releases are built by `.github/workflows/release.yml` when a version tag is pushed:
+
+1. Set the version in `Cargo.toml` (`[workspace.package]`) and `package.json`, and commit.
+2. Tag the commit and push the tag: `git tag v0.2.0 && git push origin v0.2.0`. A tag with a
+   hyphen (`v0.3.0-beta.1`) makes a prerelease, which has no `.msi` (MSI versions must be
+   numbers).
+3. The workflow checks that the tag matches both versions, runs all of CI on the commit, drafts a
+   release with notes generated from the commits, builds the installers on Windows, macOS
+   (universal), and Linux (on Ubuntu 22.04, for older distributions) and uploads them, and then
+   publishes the release.
+
+If a build fails, the draft is left on the releases page with what was uploaded. Delete it and
+the tag (`git push --delete origin v0.2.0`), fix the problem, and tag again. Builds aren't signed;
+signing needs certificates added as repository secrets, which `tauri-action` reads.
+
 ## Accessibility
 
 Every new piece of UI should work from the keyboard and with a screen reader:
