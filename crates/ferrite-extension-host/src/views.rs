@@ -299,6 +299,12 @@ impl Host for StoreState {
     self.api.change_view(&view, |content| content.graph = graph)
   }
 
+  fn set_visible(&mut self, view: String, visible: bool) -> Result<(), ApiError> {
+    self
+      .api
+      .change_view(&view, |content| content.visible = Some(visible))
+  }
+
   fn set_badge(&mut self, view: String, count: u32) -> Result<(), ApiError> {
     self.api.change_view(&view, |content| content.badge = count)
   }

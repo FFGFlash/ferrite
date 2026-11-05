@@ -722,6 +722,12 @@ connects it to the editor, settings, and frontend. The developer guide is
   `ProvidedChanged`. `OpenDiff` becomes a `diff:` dock item (`src/state/diffs.ts`), whose sides
   open hidden and show in `DiffView`: editors with zones, line classes, and folds set by the diff
   (`src/editor/diffLayout.ts`), compared by `diff_compute` (`ferrite-diff`).
+- **Line annotations, the cursor's line, and hidden views** (API 1.13;
+  [ADR 0033](adr/0033-blame-repositories-and-performance.md)). The host keeps line annotations
+  like code lenses and sends those on a view's lines (`EditorView.annotations`);
+  `src/dock/activeFile.ts` reports the active editor's cursor line
+  (`extension_selection_changed`), which runs `on_selection_changed` commands; a view's content
+  carries `visible`, which `useShownSections` follows.
 - **Code lenses and merge editors** (API 1.12; [ADR 0032](adr/0032-merge-conflicts.md)).
   The host keeps code lenses with each document like decorations (mapped through edits); views
   carry them (`EditorView.lenses`) and the editor draws them as zones above their lines.

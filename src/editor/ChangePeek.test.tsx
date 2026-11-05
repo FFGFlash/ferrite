@@ -39,6 +39,7 @@ function makeView(lines: string[], overrides: Partial<View> = {}): View {
     decorations: [],
     changes: [],
     lenses: [],
+    annotations: [],
     ...overrides,
   } as View
 }

@@ -116,6 +116,8 @@ export interface ViewContribution {
   input: { placeholder: string | null; command: string | null } | null
   /** Run to load an opened item's children. */
   onExpand: string | null
+  /** Hidden until the extension shows it. (1.13) */
+  hidden: boolean
 }
 
 /** An activity bar entry whose views are sections. */
@@ -324,6 +326,8 @@ export interface ViewContent {
   items: ViewEntry[]
   /** A history graph beside the items, by item. (1.11) */
   graph: GraphRow[]
+  /** Shown or hidden by the extension; `null` follows the manifest. (1.13) */
+  visible: boolean | null
 }
 
 /** A lane of a history graph: what it leads to, and its color (0 to 4). */
@@ -535,6 +539,9 @@ export const listStatusItems = () => call<StatusItem[]>('extension_status_items'
 export const listFileMarks = () => call<ExtensionMarks[]>('extension_file_marks')
 /** Tells extensions which file the editor in use shows (`null`: none). */
 export const setActiveFile = (path: string | null) => call<void>('extension_active_file', { path })
+/** The active editor's cursor moved to another line, or another document (or none) is in use. */
+export const setSelectionChanged = (document: number | null) =>
+  call<void>('extension_selection_changed', { document })
 /** Asks for a folder in the system's dialog, without opening it; `null` if cancelled. */
 export const pickFolderDialog = (title: string) =>
   call<string | null>('dialog_pick_folder', { title })

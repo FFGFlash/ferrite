@@ -346,6 +346,10 @@ The `workspace` interface (API 1.6) tells an extension about the open folder:
   viewer's, or a diff's modified file. `on_active_file_changed = "<command>"` in the manifest
   names a command that runs when it changes. Moving to a side bar view keeps it, so a view can
   follow the file being edited, as Git's File History does.
+- `on_selection_changed = "<command>"` (API 1.13) in the manifest names a command that runs when
+  the active editor's cursor moves to another line, or another document is in use, with that
+  document and its primary selection as the command's context (`command-context`). Git shows
+  the cursor line's blame this way.
 
 **Workspace Trust.** Programs that work on a folder may run code from it: a language server
 builds the project, and Git runs hooks and the programs its configuration names. So until the
@@ -708,7 +712,9 @@ on_expand = "ferrite.git.expandCommit"
 ```
 
 A container needs at least one view. A view in a container has no activity bar entry of its
-own; showing it (`show-view`) shows its container. Users collapse sections and resize them by dragging the
+own; showing it (`show-view`) shows its container. A section with `hidden = true` (API 1.13)
+doesn't show until the extension calls **`views::set-visible(view, true)`**, which also hides
+one again; Git shows its Repositories section only when there's more than one repository. Users collapse sections and resize them by dragging the
 boundary between two; Ferrite remembers both for the next session.
 
 #### Tree items
@@ -830,6 +836,16 @@ with later edits (staying on their lines), are replaced as a whole (at most 1,00
 go when the extension stops, and need `documents_read`. Git shows Accept Current Change, Accept
 Incoming Change, Accept Both Changes, Compare Changes, and Resolve in Merge Editor above each
 merge conflict.
+
+#### Line annotations
+
+**`workbench::set-line-annotations(document, version, annotations)`** (API 1.13) shows faint
+text after the end of lines, such as who last changed them: each annotation has a `line`, its
+`text` (plain, at most 200 characters), and an optional `tooltip` shown on hover (plain, at most
+2,000 characters). A line shows one. Like code lenses, they refer to the text at `version`, follow
+later edits, are replaced as a whole (at most 100,000 per document), go when the extension
+stops, and need `documents_read`. Git annotates the cursor's line with its blame, following
+it with `on_selection_changed`.
 
 ### Previews
 
@@ -1565,7 +1581,7 @@ message saying so. Rust on `wasm32-unknown-unknown` is the supported path for no
 
 ## Versioning
 
-The WIT package is versioned: `ferrite:extension@1.12.0`, `api_version = "1"`.
+The WIT package is versioned: `ferrite:extension@1.13.0`, `api_version = "1"`.
 
 - **Additions.** New host functions arrive as minor versions of the package. Version 1.1 added the
   `workbench` interface, 1.2 added previews to it, 1.3 added the `files` interface, 1.4 the
@@ -1575,7 +1591,8 @@ The WIT package is versioned: `ferrite:extension@1.12.0`, `api_version = "1"`.
   `quick-diff` interface, 1.10 the `timers` interface, 1.11 `views::set-graph`,
   `prompts::pick-folder`, `workspace::open-folder`, and `workbench::active-file`, and 1.12
   `workbench::set-code-lenses` and `documents::open-merge` (with whole-line decorations in the
-  manifest).
+  manifest), and 1.13 `workbench::set-line-annotations` and `views::set-visible` (with
+  `on_selection_changed` and hidden views in the manifest).
   Wasmtime
   links components built against an older minor version: the host's tests load Tidy builds made
   against 1.0 and 1.2 and a TODOs build made against 1.1.

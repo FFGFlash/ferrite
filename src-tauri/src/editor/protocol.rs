@@ -680,6 +680,17 @@ pub struct EditorView {
   pub changes: Vec<GutterChangeDto>,
   /// Extensions' code lenses in the whole document, in order.
   pub lenses: Vec<CodeLensDto>,
+  /// Extensions' line annotations on the view's lines.
+  pub annotations: Vec<LineAnnotationDto>,
+}
+
+/// Faint text an extension shows after a line.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LineAnnotationDto {
+  pub line: usize,
+  pub text: String,
+  pub tooltip: Option<String>,
 }
 
 /// A link an extension shows above a line.
@@ -803,6 +814,7 @@ impl EditorView {
       decorations: Vec::new(),
       changes: Vec::new(),
       lenses: Vec::new(),
+      annotations: Vec::new(),
     }
   }
 }

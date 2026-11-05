@@ -253,6 +253,15 @@ interface ViewFields {
   changes: GutterChange[]
   /** Extensions' code lenses in the whole document, in order. */
   lenses: CodeLens[]
+  /** Extensions' faint text after the view's lines. */
+  annotations: LineAnnotation[]
+}
+
+/** Faint text an extension shows after a line, such as who last changed it. */
+export interface LineAnnotation {
+  line: number
+  text: string
+  tooltip: string | null
 }
 
 /** A link an extension shows above a line; clicking it runs `command`. */

@@ -96,6 +96,9 @@ pub struct Manifest {
   pub on_folder_changed: Option<String>,
   /// Run when the file of the editor in use changes (1.11).
   pub on_active_file_changed: Option<String>,
+  /// Run when the cursor moves to another line, or another document is
+  /// in use (1.13).
+  pub on_selection_changed: Option<String>,
 }
 
 impl Manifest {
@@ -177,6 +180,7 @@ struct RawManifest {
   quick_diff: Option<contributions::RawQuickDiff>,
   on_folder_changed: Option<String>,
   on_active_file_changed: Option<String>,
+  on_selection_changed: Option<String>,
 }
 
 #[derive(Deserialize, Default)]
@@ -447,6 +451,7 @@ pub fn parse(
   for (field, command) in [
     ("on_folder_changed", &raw.on_folder_changed),
     ("on_active_file_changed", &raw.on_active_file_changed),
+    ("on_selection_changed", &raw.on_selection_changed),
   ] {
     if let Some(command) = command
       && !commands.iter().any(|c| &c.id == command)
@@ -533,6 +538,7 @@ pub fn parse(
     contributions,
     on_folder_changed: raw.on_folder_changed,
     on_active_file_changed: raw.on_active_file_changed,
+    on_selection_changed: raw.on_selection_changed,
   })
 }
 

@@ -40,6 +40,7 @@ function makeView(lines: string[], overrides: Partial<View> = {}): View {
     decorations: [],
     changes: [],
     lenses: [],
+    annotations: [],
     ...overrides,
   } as View
 }
@@ -277,5 +278,15 @@ describe('EditorView', () => {
     expect(accept.closest('.editor-view__lens-zone')).not.toBeNull()
     fireEvent.click(accept)
     expect(runCodeLens).toHaveBeenCalledWith(7, 'x.accept', '1')
+  })
+
+  it("shows an extension's faint text after its line, with a tooltip", async () => {
+    const annotations = [{ line: 1, text: 'first, You (now)', tooltip: 'Commit 0123' }]
+    const { transport } = fakeTransport(makeView(['one', 'two'], { annotations }))
+    await renderEditor(transport)
+    const annotation = screen.getByText('first, You (now)')
+    expect(annotation).toHaveClass('editor-view__annotation')
+    expect(annotation).toHaveAttribute('title', 'Commit 0123')
+    expect(annotation.closest('.editor-view__line')).toHaveTextContent('two')
   })
 })

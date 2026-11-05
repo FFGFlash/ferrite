@@ -44,16 +44,62 @@ export function refreshViewBadges(): Promise<void> {
 /** Content fetched for each view, by version, shared by its header and its items. */
 const fetched = new Map<string, { version: number; content: Promise<ViewContent> }>()
 
+/** A view's content at `version`, fetched once. */
+function contentAt(view: string, version: number): Promise<ViewContent> {
+  let cached = fetched.get(view)
+  if (!cached || cached.version !== version) {
+    cached = { version, content: getViewContent(view) }
+    fetched.set(view, cached)
+  }
+  return cached.content
+}
+
+/**
+ * The sections of a container that show: those the extension hasn't
+ * hidden (`views::set-visible`), or, until it says, those its manifest
+ * doesn't hide.
+ */
+export function useShownSections(
+  sections: readonly string[],
+  views: ReadonlyMap<string, ViewContribution>,
+): string[] {
+  const versions = useStore(viewVersions)
+  const key = sections.map(section => `${section}@${versions[section] ?? 0}`).join(' ')
+  const [visible, setVisible] = useState<ReadonlyMap<string, boolean>>(new Map())
+  useEffect(() => {
+    let cancelled = false
+    Promise.all(
+      sections.map(section =>
+        contentAt(section, versions[section] ?? 0)
+          .then(content => [section, content.visible] as const)
+          .catch(() => [section, null] as const),
+      ),
+    )
+      .then(entries => {
+        if (!cancelled) {
+          const known = entries.flatMap(([section, shown]) =>
+            shown === null ? [] : [[section, shown] as const],
+          )
+          setVisible(new Map(known))
+        }
+      })
+      .catch(() => {
+        // Each fetch reports its own failure.
+      })
+    return () => {
+      cancelled = true
+    }
+    // `key` names the sections and their versions.
+  }, [key])
+  return sections.filter(section => visible.get(section) ?? !views.get(section)?.hidden)
+}
+
 /** A view's content, fetched again when the extension changes it. */
 export function useViewContent(view: string): ViewContent | null {
   const version = useStore(viewVersions)[view] ?? 0
   const [content, setContent] = useState<ViewContent | null>(null)
   useEffect(() => {
-    let cached = fetched.get(view)
-    if (!cached || cached.version !== version) {
-      cached = { version, content: getViewContent(view) }
-      fetched.set(view, cached)
-    }
+    const cached = { content: contentAt(view, version) }
     let cancelled = false
     cached.content
       .then(next => {

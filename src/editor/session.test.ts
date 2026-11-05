@@ -28,6 +28,7 @@ function view(version: number, viewport: Viewport): WireView {
     decorations: [],
     changes: [],
     lenses: [],
+    annotations: [],
   }
 }
 

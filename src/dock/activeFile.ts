@@ -3,9 +3,12 @@
  * views that follow it (Git's File History). It's the current group's tab:
  * a document's file, a viewer's, or a diff's modified file. A tab that
  * isn't an editor's (a view, a terminal) leaves it as it was, so moving to
- * the side bar keeps the file, as in VS Code.
+ * the side bar keeps the file, as in VS Code. It also tells them when the
+ * active editor's cursor moves to another line (for Git's blame).
  */
-import { setActiveFile } from '../ipc/extensions'
+import { activeEditor } from '../editor/activeEditor'
+import { setActiveFile, setSelectionChanged } from '../ipc/extensions'
+import { editorStatus } from '../state/editorStatus'
 import { diffsStore, isAddress, parseDiffItem } from '../state/diffs'
 import { parseMergeItem } from '../state/merges'
 import { documentsStore } from '../state/documents'
@@ -60,6 +63,30 @@ function check(): void {
   }, SETTLE_MS)
 }
 
+/** The document and line of the active editor's cursor, as last sent. */
+let sentLine: string | null = null
+let lineTimer: ReturnType<typeof setTimeout> | undefined
+
+/**
+ * Tells extensions when the active editor's cursor moves to another line,
+ * or another document is in use, for what follows the line (Git's blame).
+ */
+function checkLine(): void {
+  clearTimeout(lineTimer)
+  lineTimer = setTimeout(() => {
+    const editor = activeEditor.get()
+    const line = editor?.cursor()?.line
+    const key = editor ? `${editor.documentId}:${line ?? -1}` : 'none'
+    if (key === sentLine) {
+      return
+    }
+    sentLine = key
+    setSelectionChanged(editor?.documentId ?? null).catch((error: unknown) =>
+      reportError('Following the cursor', error),
+    )
+  }, SETTLE_MS)
+}
+
 /** Starts telling extensions; returns a function that stops. */
 export function followActiveFile(): () => void {
   const stops = [
@@ -67,10 +94,14 @@ export function followActiveFile(): () => void {
     currentGroup.subscribe(check),
     documentsStore.subscribe(check),
     diffsStore.subscribe(check),
+    activeEditor.subscribe(checkLine),
+    editorStatus.subscribe(checkLine),
   ]
   check()
+  checkLine()
   return () => {
     clearTimeout(timer)
+    clearTimeout(lineTimer)
     for (const stop of stops) {
       stop()
     }

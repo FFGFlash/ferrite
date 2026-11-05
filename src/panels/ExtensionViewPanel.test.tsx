@@ -53,6 +53,7 @@ const content = (overrides: Partial<ViewContent>): ViewContent => ({
   message: null,
   items: [],
   graph: [],
+  visible: null,
   ...overrides,
 })
 
@@ -64,6 +65,7 @@ const view = (id: string, overrides: Partial<ViewContribution> = {}): ViewContri
   container: null,
   input: null,
   onExpand: null,
+  hidden: false,
   ...overrides,
 })
 
@@ -380,6 +382,28 @@ describe('ExtensionViewPanel', () => {
       measured.mockRestore()
       layoutStore.set(DEFAULT_LAYOUT)
     }
+  })
+
+  it('hides a section its manifest hides until the extension shows it', async () => {
+    const repositories = view('repos', {
+      title: 'Repositories',
+      container: 'example.git.scm',
+      hidden: true,
+    })
+    const changes = view('sectionA', { title: 'Changes', container: 'example.git.scm' })
+    contribute([repositories, changes])
+    let shown: boolean | null = null
+    vi.mocked(ipc.getViewContent).mockImplementation(async id =>
+      content(id === repositories.fullId ? { visible: shown } : {}),
+    )
+    layoutStore.set(DEFAULT_LAYOUT)
+    render(<ExtensionContainerPanel container="example.git.scm" />)
+    expect(await screen.findByRole('button', { name: 'Changes' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Repositories' })).toBeNull()
+
+    shown = true
+    act(() => viewChanged(repositories.fullId))
+    expect(await screen.findByRole('button', { name: 'Repositories' })).toBeInTheDocument()
   })
 
   it('resizes only the two sections either side of a boundary', async () => {

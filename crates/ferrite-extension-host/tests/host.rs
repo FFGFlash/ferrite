@@ -3046,3 +3046,147 @@ fn the_git_extension_rebases_and_stops_for_conflicts() {
     ["topic", "main", "first"]
   );
 }
+
+/// A repository at `dir` with one committed file.
+fn new_repo(dir: &Path, file: &str, text: &str) {
+  std::fs::create_dir_all(dir).expect("mkdir");
+  git(dir, &["init", "-q", "-b", "main"]);
+  git(dir, &["config", "user.name", "Test"]);
+  git(dir, &["config", "user.email", "test@example.com"]);
+  std::fs::write(dir.join(file), text).expect("write");
+  git(dir, &["add", "."]);
+  git(dir, &["commit", "-q", "-m", "first"]);
+}
+
+#[test]
+fn the_git_extension_finds_nested_repositories() {
+  let Some((s, repo)) = git_extension() else {
+    return;
+  };
+  let repositories = "ferrite.git.repositories";
+  let changes = "ferrite.git.changes";
+  std::fs::write(repo.join("top.txt"), "top\n").expect("write");
+  git(&repo, &["add", "."]);
+  git(&repo, &["commit", "-q", "-m", "top"]);
+  let sub = repo.join("sub");
+  new_repo(&sub, "a.txt", "one\n");
+  std::fs::write(sub.join("a.txt"), "two\n").expect("write");
+  *s.fake.folder.lock().unwrap_or_else(PoisonError::into_inner) = Some(repo.clone());
+  s.host.load();
+
+  // Both are listed, the top one active, and the view shows itself.
+  wait_for_view(&s, repositories, "both repositories", |ids| ids.len() == 2);
+  assert_eq!(s.host.view_content(repositories).visible, Some(true));
+  let a = sub.join("a.txt").display().to_string();
+  wait_for_marks(&s, |marks| marks.iter().any(|mark| mark.path == a));
+
+  // A nested repository's files have its versions, under its folder.
+  assert_eq!(s.host.original_of(&a).as_deref(), Some("git::sub/a.txt"));
+  assert_eq!(
+    s.host
+      .provide_text("git::sub/a.txt")
+      .expect("provides")
+      .as_deref(),
+    Some("one\n")
+  );
+  assert_eq!(
+    s.host
+      .provide_text("git:HEAD:top.txt")
+      .expect("provides")
+      .as_deref(),
+    Some("top\n")
+  );
+
+  // Choosing it shows its changes.
+  s.host
+    .run_view_command(
+      "ferrite.git.selectRepository",
+      Some(sub.display().to_string()),
+      vec![],
+    )
+    .expect("runs")
+    .wait()
+    .expect("selects");
+  wait_for_view(&s, changes, "the nested repository's change", |ids| {
+    ids.contains(&"changes:a.txt".to_owned())
+  });
+  // Staging there stages in it.
+  s.host
+    .run_view_command("ferrite.git.stage", Some("a.txt".into()), vec![])
+    .expect("runs")
+    .wait()
+    .expect("stages");
+  wait_for_view(&s, changes, "the staged change", |ids| {
+    ids.contains(&"staged:a.txt".to_owned())
+  });
+  assert_eq!(
+    git(&sub, &["diff", "--cached", "--name-only"]).as_deref(),
+    Some("a.txt\n")
+  );
+}
+
+#[test]
+fn the_git_extension_finds_repositories_in_a_folder_that_is_not_one() {
+  let Some((s, repo)) = git_extension() else {
+    return;
+  };
+  let repositories = "ferrite.git.repositories";
+  // The folder isn't a repository; two of its folders are.
+  let folder = repo.parent().expect("parent").join("projects");
+  new_repo(&folder.join("one"), "a.txt", "a\n");
+  new_repo(&folder.join("two"), "b.txt", "b\n");
+  std::fs::create_dir_all(folder.join("plain")).expect("mkdir");
+  std::fs::write(folder.join("plain").join("c.txt"), "c").expect("write");
+  *s.fake.folder.lock().unwrap_or_else(PoisonError::into_inner) = Some(folder.clone());
+  s.host.load();
+  wait_for_view(&s, repositories, "both repositories", |ids| ids.len() == 2);
+  eventually("the first one's branch", || {
+    status_text(&s, "branch").is_some_and(|text| text.starts_with("main"))
+  });
+  // Addresses are relative to the folder.
+  let b = folder.join("two").join("b.txt").display().to_string();
+  assert_eq!(s.host.original_of(&b).as_deref(), Some("git::two/b.txt"));
+}
+
+#[test]
+fn the_git_extension_blames_the_cursor_line() {
+  let Some((s, repo)) = git_extension() else {
+    return;
+  };
+  let file = repo.join("a.txt");
+  std::fs::write(&file, "one\ntwo\n").expect("write");
+  git(&repo, &["add", "."]);
+  git(&repo, &["commit", "-q", "-m", "first commit"]);
+  *s.fake.folder.lock().unwrap_or_else(PoisonError::into_inner) = Some(repo.clone());
+  s.host.load();
+  eventually("the branch", || status_text(&s, "branch").is_some());
+  let id = s.fake.open_file(&s.host, &file);
+
+  // The cursor is on the first line: its commit, by "You", just now.
+  s.host.selection_changed(Some(id));
+  eventually("the blame in the status bar", || {
+    status_text(&s, "blame").as_deref() == Some("You (now)")
+  });
+  let annotations = {
+    let editor = s.fake.editor();
+    let document = editor.document(id).expect("open");
+    s.host
+      .line_annotations(document, 0..document.buffer().len())
+  };
+  assert_eq!(annotations.len(), 1);
+  assert_eq!(annotations[0].offset, 0);
+  assert_eq!(annotations[0].text, "first commit, You (now)");
+  assert!(
+    annotations[0]
+      .tooltip
+      .as_deref()
+      .is_some_and(|tooltip| tooltip.starts_with("Test <test@example.com>"))
+  );
+
+  // A line changed since: not committed yet.
+  s.fake.type_text(&s.host, id, "new ");
+  s.host.selection_changed(Some(id));
+  eventually("the uncommitted line", || {
+    status_text(&s, "blame").as_deref() == Some("You (Uncommitted changes)")
+  });
+}

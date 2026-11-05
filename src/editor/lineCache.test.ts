@@ -33,6 +33,7 @@ function wire(
     decorations: [],
     changes: [],
     lenses: [],
+    annotations: [],
   }
 }
 

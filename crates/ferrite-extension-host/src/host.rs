@@ -43,9 +43,9 @@ use crate::worker::{
   ProvideRequest, Queue, Setup, Worker,
 };
 use crate::{
-  CommandInfo, ConfiguredSetting, Embedder, ExtensionConfiguration, ExtensionDecoration,
-  ExtensionDiagnostic, ExtensionLens, ExtensionState, ExtensionStatus, HostOptions, Notification,
-  PermissionStatus, Severity, StatusContent, StatusItem, ViewContent,
+  CommandInfo, ConfiguredSetting, Embedder, ExtensionAnnotation, ExtensionConfiguration,
+  ExtensionDecoration, ExtensionDiagnostic, ExtensionLens, ExtensionState, ExtensionStatus,
+  HostOptions, Notification, PermissionStatus, Severity, StatusContent, StatusItem, ViewContent,
 };
 
 /// Synced versions kept per document, to interpret diagnostics published
@@ -107,6 +107,22 @@ struct LensSet {
   lenses: Vec<StoredLens>,
 }
 
+/// An extension's line annotations in a document.
+struct AnnotationSet {
+  version: Version,
+  anchors: Vec<Range<usize>>,
+  annotations: Vec<(String, Option<String>)>,
+}
+
+impl AnnotationSet {
+  fn catch_up(&mut self, buffer: &TextBuffer) {
+    if !catch_up(&mut self.version, self.anchors.iter_mut(), buffer) {
+      self.anchors.clear();
+      self.annotations.clear();
+    }
+  }
+}
+
 pub struct StoredLens {
   pub title: String,
   pub tooltip: Option<String>,
@@ -162,6 +178,8 @@ struct DocumentRecord {
   decorations: BTreeMap<(String, String), DecorationSet>,
   /// Code lenses by extension id.
   lenses: BTreeMap<String, LensSet>,
+  /// Line annotations by extension id.
+  annotations: BTreeMap<String, AnnotationSet>,
 }
 
 impl DocumentRecord {
@@ -475,7 +493,8 @@ impl Shared {
         .decorations
         .retain(|(extension, _), _| extension != id);
       let lenses = record.lenses.remove(id).is_some();
-      if record.decorations.len() != before || lenses {
+      let annotations = record.annotations.remove(id).is_some();
+      if record.decorations.len() != before || lenses || annotations {
         outbox.push(Notification::DecorationsChanged(document));
       }
     }
@@ -1156,6 +1175,7 @@ impl Shared {
               diagnostics: BTreeMap::new(),
               decorations: BTreeMap::new(),
               lenses: BTreeMap::new(),
+              annotations: BTreeMap::new(),
             },
           );
           for entry in &state.extensions {
@@ -1301,6 +1321,36 @@ impl Shared {
           version: at,
           anchors,
           lenses,
+        },
+      );
+    }
+    Ok(())
+  }
+
+  /// Stores an extension's line annotations, each at the start of a line
+  /// given as an offset into the text at `version`.
+  pub fn store_annotations(
+    &self,
+    document: &Document,
+    extension: &str,
+    version: u64,
+    convert: impl FnOnce(&TextBuffer) -> Result<Vec<(usize, String, Option<String>)>, ApiError>,
+  ) -> Result<(), ApiError> {
+    let mut state = self.lock();
+    let (found, at, record) = Self::convert_at(&mut state, document, extension, version, convert)?;
+    if found.is_empty() {
+      record.annotations.remove(extension);
+    } else {
+      let (anchors, annotations) = found
+        .into_iter()
+        .map(|(offset, text, tooltip)| (offset..offset, (text, tooltip)))
+        .unzip();
+      record.annotations.insert(
+        extension.to_owned(),
+        AnnotationSet {
+          version: at,
+          anchors,
+          annotations,
         },
       );
     }
@@ -2481,6 +2531,76 @@ impl ExtensionHost {
     }
     found.sort_by_key(|lens| lens.offset);
     found
+  }
+
+  /// Extensions' line annotations on lines starting in `bytes`, mapped to
+  /// the current text. Call with the editor locked.
+  pub fn line_annotations(
+    &self,
+    document: &Document,
+    bytes: Range<usize>,
+  ) -> Vec<ExtensionAnnotation> {
+    let mut state = self.shared.lock();
+    let Some(record) = state.documents.get_mut(&document.id()) else {
+      return Vec::new();
+    };
+    let buffer = document.buffer();
+    let mut found: Vec<ExtensionAnnotation> = Vec::new();
+    for set in record.annotations.values_mut() {
+      set.catch_up(buffer);
+      for (anchor, (text, tooltip)) in set.anchors.iter().zip(&set.annotations) {
+        let offset = buffer.line_start(buffer.line_of(anchor.start.min(buffer.len())));
+        if bytes.contains(&offset) || offset == bytes.end {
+          found.push(ExtensionAnnotation {
+            offset,
+            text: text.clone(),
+            tooltip: tooltip.clone(),
+          });
+        }
+      }
+    }
+    found.sort_by_key(|annotation| annotation.offset);
+    found.dedup_by_key(|annotation| annotation.offset);
+    found
+  }
+
+  /// The cursor moved to another line, or another document is in use:
+  /// runs running extensions' `on_selection_changed` commands with it as
+  /// their context. Call without holding the editor lock.
+  pub fn selection_changed(&self, document: Option<DocumentId>) {
+    let selections = document
+      .and_then(|id| {
+        api::with_editor(&self.shared, |editor| {
+          editor.document(id).ok().map(|document| {
+            let buffer = document.buffer();
+            let primary = document.selections().primary().range();
+            vec![WitRange {
+              start: to_position(buffer, primary.start),
+              end: to_position(buffer, primary.end),
+            }]
+          })
+        })
+        .flatten()
+      })
+      .unwrap_or_default();
+    let state = self.shared.lock();
+    for entry in &state.extensions {
+      if let (Some(command), Run::Running { worker, .. }) =
+        (&entry.manifest.on_selection_changed, &entry.run)
+      {
+        let (reply, _) = mpsc::channel();
+        worker.queue.push_background(Event::Command {
+          command: command.clone(),
+          context: CommandContext {
+            document: document.map(DocumentId::get),
+            selections: selections.clone(),
+          },
+          argument: None,
+          payload: Payload::None,
+          reply,
+        });
+      }
+    }
   }
 
   /// Runs a command from a view's menu or button, for the items selected

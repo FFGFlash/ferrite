@@ -24,7 +24,7 @@ use serde::{Serialize, Serializer};
 use tauri::{AppHandle, Manager, State, WebviewWindow};
 
 use crate::editor::EditorState;
-use crate::editor::protocol::{CodeLensDto, DecorationDto};
+use crate::editor::protocol::{CodeLensDto, DecorationDto, LineAnnotationDto};
 use crate::editor::syntax::highlight_snippet;
 use crate::error::CommandError;
 use crate::events::{self, AppEvent, MergeSideDto};
@@ -100,6 +100,31 @@ impl ExtensionsState {
         }),
     );
     decorations
+  }
+
+  /// Extensions' line annotations on `lines`. Call with the editor locked.
+  pub fn annotations(
+    &self,
+    document: &Document,
+    lines: std::ops::Range<usize>,
+  ) -> Vec<LineAnnotationDto> {
+    let Some(host) = self.host() else {
+      return Vec::new();
+    };
+    let buffer = document.buffer();
+    if lines.is_empty() {
+      return Vec::new();
+    }
+    let bytes = buffer.line_start(lines.start)..buffer.line_start(lines.end - 1);
+    host
+      .line_annotations(document, bytes)
+      .into_iter()
+      .map(|annotation| LineAnnotationDto {
+        line: buffer.line_of(annotation.offset),
+        text: annotation.text,
+        tooltip: annotation.tooltip,
+      })
+      .collect()
   }
 
   /// Extensions' code lenses in a document. Call with the editor locked.
@@ -525,6 +550,15 @@ pub fn extension_prompt_answer(state: State<'_, ExtensionsState>, id: u64, reply
 pub fn extension_active_file(state: State<'_, ExtensionsState>, path: Option<String>) {
   if let Some(host) = state.host() {
     host.active_file_changed(path.map(|path| crate::paths::normalize(Path::new(&path))));
+  }
+}
+
+/// The active editor's cursor moved to another line, or another document
+/// (or none) is in use.
+#[tauri::command]
+pub fn extension_selection_changed(state: State<'_, ExtensionsState>, document: Option<u64>) {
+  if let Some(host) = state.host() {
+    host.selection_changed(document.map(DocumentId::from_raw));
   }
 }
 

@@ -217,6 +217,8 @@ pub struct ViewContribution {
   pub input: Option<ViewInput>,
   /// Run to load the children of an item opened without any. (1.7)
   pub on_expand: Option<String>,
+  /// Hidden until the extension shows it (`views::set-visible`). (1.13)
+  pub hidden: bool,
 }
 
 /// A view's text box, such as a commit message. (1.7)
@@ -658,6 +660,8 @@ pub struct RawView {
   container: Option<String>,
   input: Option<RawViewInput>,
   on_expand: Option<String>,
+  #[serde(default)]
+  hidden: bool,
 }
 
 #[derive(Deserialize)]
@@ -1203,6 +1207,7 @@ pub fn parse(
         .on_expand
         .map(|command| declared(&section, &command))
         .transpose()?,
+      hidden: view.hidden,
     });
   }
   for container in &contributions.view_containers {

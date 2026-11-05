@@ -330,6 +330,8 @@ pub struct ViewContent {
   pub items: Vec<ViewEntry>,
   /// A history graph beside its items, by item. (1.11)
   pub graph: Vec<GraphRow>,
+  /// Shown or hidden by the extension; `None` follows the manifest. (1.13)
+  pub visible: Option<bool>,
 }
 
 /// A row of a view's history graph. (1.11)
@@ -368,6 +370,15 @@ pub struct ExtensionLens {
   pub tooltip: Option<String>,
   pub command: String,
   pub argument: Option<String>,
+}
+
+/// Faint text an extension shows after a line, in the current text.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ExtensionAnnotation {
+  /// The start of its line.
+  pub offset: usize,
+  pub text: String,
+  pub tooltip: Option<String>,
 }
 
 /// One of the versions a merge editor combines.

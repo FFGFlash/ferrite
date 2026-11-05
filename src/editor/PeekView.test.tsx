@@ -49,6 +49,7 @@ function makeView(): View {
     decorations: [],
     changes: [],
     lenses: [],
+    annotations: [],
   } as View
 }
 

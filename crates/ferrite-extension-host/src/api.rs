@@ -24,7 +24,9 @@ use crate::bindings::ferrite::extension::types::{
 };
 use crate::bindings::ferrite::extension::viewers::{FileBytes, Host as ViewersHost};
 use crate::bindings::ferrite::extension::webviews::Host as WebviewsHost;
-use crate::bindings::ferrite::extension::workbench::{CodeLens, Host as WorkbenchHost};
+use crate::bindings::ferrite::extension::workbench::{
+  CodeLens, Host as WorkbenchHost, LineAnnotation,
+};
 use crate::config::ConfigValue;
 use crate::host::{Shared, StoredDiagnostic, StoredLens};
 use crate::manifest::Manifest;
@@ -576,6 +578,8 @@ pub const MAX_VIEW_ITEMS: usize = 5_000;
 pub const MAX_DECORATIONS: usize = 10_000;
 /// Most code lenses an extension shows in a document.
 pub const MAX_LENSES: usize = 1_000;
+/// Most line annotations an extension shows in a document.
+pub const MAX_ANNOTATIONS: usize = 100_000;
 
 impl ApiContext {
   pub(crate) fn own_command(&self, command: Option<&String>) -> Result<(), ApiError> {
@@ -857,6 +861,47 @@ impl WorkbenchHost for StoreState {
                 command: lens.command,
                 argument: lens.argument,
               },
+            ))
+          })
+          .collect()
+      })
+    })
+    .ok_or_else(editor_unavailable)??;
+    shared
+      .embedder
+      .notify(Notification::DecorationsChanged(DocumentId::from_raw(id)));
+    Ok(())
+  }
+
+  fn set_line_annotations(
+    &mut self,
+    id: u64,
+    version: u64,
+    annotations: Vec<LineAnnotation>,
+  ) -> Result<(), ApiError> {
+    let shared = self.api.require(WitPermission::DocumentsRead)?;
+    if annotations.len() > MAX_ANNOTATIONS {
+      return Err(ApiError::TooLarge(format!(
+        "at most {MAX_ANNOTATIONS} line annotations in a document"
+      )));
+    }
+    let extension = self.api.id.clone();
+    with_editor(&shared, |editor| {
+      let document = find(editor, id)?;
+      shared.store_annotations(document, &extension, version, |buffer| {
+        annotations
+          .into_iter()
+          .map(|annotation| {
+            let line = annotation.line as usize;
+            if line >= buffer.line_count() {
+              return Err(ApiError::InvalidRange(format!(
+                "line {line} is past the end of the document"
+              )));
+            }
+            Ok((
+              buffer.line_start(line),
+              cut(annotation.text.trim(), 200),
+              annotation.tooltip.map(|tooltip| cut(&tooltip, 2_000)),
             ))
           })
           .collect()

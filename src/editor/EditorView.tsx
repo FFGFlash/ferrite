@@ -18,6 +18,7 @@ import {
   quickDiffRevert,
   type CodeLens,
   type DisplayLine,
+  type LineAnnotation,
   type EditorOp,
   type EditorView as View,
   type GutterChange,
@@ -1614,6 +1615,10 @@ export function EditorView({
   const extensions = useStore(extensionsStore)
   const kind = useStore(themeKind)
   const types = useMemo(() => decorationTypes(extensions), [extensions])
+  const annotations = useMemo(
+    () => new Map((view?.annotations ?? []).map(annotation => [annotation.line, annotation])),
+    [view],
+  )
   const backgrounds = useMemo(
     () =>
       view && view.decorations.length > 0
@@ -1862,6 +1867,7 @@ export function EditorView({
                       spacer={spacerAt(index)}
                       className={classOf(lineNumber)}
                       background={backgrounds.get(lineNumber)}
+                      annotation={annotations.get(lineNumber)}
                     />
                   )
                 })}
@@ -2045,6 +2051,8 @@ interface LineProps {
   spacer: number
   /** A whole-line decoration's background. */
   background?: string
+  /** An extension's faint text after the line. */
+  annotation?: LineAnnotation
 }
 
 const Line = memo(function Line({
@@ -2055,6 +2063,7 @@ const Line = memo(function Line({
   folded,
   spacer,
   background,
+  annotation,
 }: LineProps) {
   const all = link
     ? [...overlays, { from: link.from, to: link.to, className: LINK_CLASS }]
@@ -2063,10 +2072,19 @@ const Line = memo(function Line({
     line.spans.length === 0 && all.length === 0
       ? line.text
       : highlighted(line.text, line.spans, all)
-  const marker = folded && (
-    <span className="editor-view__folded" title="Unfold">
-      ⋯
-    </span>
+  const marker = (
+    <>
+      {folded && (
+        <span className="editor-view__folded" title="Unfold">
+          ⋯
+        </span>
+      )}
+      {annotation && (
+        <span className="editor-view__annotation" title={annotation.tooltip ?? undefined}>
+          {annotation.text}
+        </span>
+      )}
+    </>
   )
   const style =
     spacer || background

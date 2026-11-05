@@ -35,6 +35,7 @@ import {
   forContext,
   sectionsOf,
   useContributedViews,
+  useShownSections,
   useViewContent,
   viewMenus,
   whenHolds,
@@ -178,7 +179,8 @@ function grouped(
 export function ExtensionContainerPanel({ container }: { container: string }) {
   const extensions = useStore(extensionsStore)
   const views = useContributedViews()
-  const sections = useMemo(() => sectionsOf(container, extensions), [container, extensions])
+  const all = useMemo(() => sectionsOf(container, extensions), [container, extensions])
+  const sections = useShownSections(all, views)
   const saved = useStore(layoutStore).sections[container]
   const collapsed = useMemo(() => new Set(saved?.collapsed ?? []), [saved])
   const open = sections.filter(section => !collapsed.has(section))
