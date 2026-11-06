@@ -68,6 +68,25 @@ pub struct CommandContribution {
   pub hidden: bool,
 }
 
+/// How a development extension is built (`[build]`): a program run in its
+/// folder, again whenever a file there changes. Installed extensions may
+/// declare one, but it is never run for them.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Build {
+  /// A program on the `PATH`, or a path relative to the extension's folder
+  /// (with a `/` or `\`).
+  pub command: String,
+  pub args: Vec<String>,
+  /// Which changes start a build: exclude-style patterns relative to the
+  /// folder (a name at any depth without a `/`, a path with one). Empty:
+  /// any file the folder's `.gitignore` doesn't ignore.
+  pub watch: Vec<String>,
+}
+
+const MAX_BUILD_ARGS: usize = 64;
+const MAX_BUILD_WATCH: usize = 64;
+const MAX_BUILD_STRING: usize = 1000;
+
 #[derive(Debug, Clone)]
 pub struct Manifest {
   pub id: String,
@@ -99,6 +118,8 @@ pub struct Manifest {
   /// Run when the cursor moves to another line, or another document is
   /// in use (1.13).
   pub on_selection_changed: Option<String>,
+  /// How it's built while in development.
+  pub build: Option<Build>,
 }
 
 impl Manifest {
@@ -181,6 +202,17 @@ struct RawManifest {
   on_folder_changed: Option<String>,
   on_active_file_changed: Option<String>,
   on_selection_changed: Option<String>,
+  build: Option<RawBuild>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawBuild {
+  command: String,
+  #[serde(default)]
+  args: Vec<String>,
+  #[serde(default)]
+  watch: Vec<String>,
 }
 
 #[derive(Deserialize, Default)]
@@ -347,6 +379,7 @@ pub fn parse(
     .as_deref()
     .map(|entrypoint| resolve_entrypoint(dir, entrypoint, development))
     .transpose()?;
+  let build = raw.build.map(parse_build).transpose()?;
 
   let mut commands: Vec<CommandContribution> = Vec::new();
   for command in raw.commands {
@@ -539,7 +572,88 @@ pub fn parse(
     on_folder_changed: raw.on_folder_changed,
     on_active_file_changed: raw.on_active_file_changed,
     on_selection_changed: raw.on_selection_changed,
+    build,
   })
+}
+
+fn parse_build(raw: RawBuild) -> Result<Build, ManifestError> {
+  let bad = |s: &str| s.is_empty() || s.chars().count() > MAX_BUILD_STRING || s.contains('\0');
+  if bad(raw.command.trim()) {
+    return Err(invalid(format!(
+      "build: command must be 1 to {MAX_BUILD_STRING} characters"
+    )));
+  }
+  if raw.args.len() > MAX_BUILD_ARGS
+    || raw
+      .args
+      .iter()
+      .any(|arg| arg.chars().count() > MAX_BUILD_STRING || arg.contains('\0'))
+  {
+    return Err(invalid(format!(
+      "build: at most {MAX_BUILD_ARGS} args, each at most {MAX_BUILD_STRING} characters"
+    )));
+  }
+  if raw.watch.len() > MAX_BUILD_WATCH || raw.watch.iter().any(|pattern| bad(pattern)) {
+    return Err(invalid(format!(
+      "build: at most {MAX_BUILD_WATCH} watch patterns, each 1 to {MAX_BUILD_STRING} characters"
+    )));
+  }
+  flareite_workspace::ExcludeFilter::new(&raw.watch)
+    .map_err(|error| invalid(format!("build: watch: {error}")))?;
+  Ok(Build {
+    command: raw.command.trim().to_owned(),
+    args: raw.args,
+    watch: raw.watch,
+  })
+}
+
+/// What a development extension's folder says about building it, read
+/// even when the rest of its manifest is invalid (it may only lack the
+/// entry point the build makes).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BuildPlan {
+  /// The folder: the build runs there.
+  pub dir: PathBuf,
+  /// The manifest's `id`, if it has a string one: the build's log goes to
+  /// its channel.
+  pub id: Option<String>,
+  /// The manifest's `name`, if it has a string one.
+  pub name: Option<String>,
+  /// The entry point, if the manifest names one: changes to it don't
+  /// start a build.
+  pub entrypoint: Option<PathBuf>,
+  pub build: Build,
+}
+
+/// Reads the `[build]` table of `dir/extension.toml`. `Ok(None)` if it has
+/// none; an error if the file can't be read or parsed as TOML, or the table
+/// is invalid.
+pub fn read_build_plan(dir: &Path) -> Result<Option<BuildPlan>, ManifestError> {
+  let path = dir.join(MANIFEST_FILE);
+  let read = |source| ManifestError::Read {
+    path: path.clone(),
+    source,
+  };
+  if std::fs::metadata(&path).map_err(read)?.len() > MAX_MANIFEST_BYTES {
+    return Err(invalid(format!("{MANIFEST_FILE} is too large")));
+  }
+  let text = std::fs::read_to_string(&path).map_err(read)?;
+  let mut table: toml::Table = text.parse().map_err(|error| invalid(format!("{error}")))?;
+  let Some(raw) = table.remove("build") else {
+    return Ok(None);
+  };
+  let raw: RawBuild = raw
+    .try_into()
+    .map_err(|error| invalid(format!("build: {error}")))?;
+  let string = |key: &str| table.get(key).and_then(toml::Value::as_str);
+  Ok(Some(BuildPlan {
+    dir: dir.to_path_buf(),
+    id: string("id").map(str::to_owned),
+    name: string("name").map(|name| name.trim().to_owned()),
+    entrypoint: string("entrypoint")
+      .and_then(|entrypoint| resolve_entrypoint(dir, entrypoint, true).ok()),
+    build: parse_build(raw)?,
+  }))
 }
 
 /// Largest icon file.
@@ -1039,6 +1153,55 @@ webview = "page.html"
     assert!(error_of(&undeclared).contains("not declared"));
     let event = VALID.replace("on-startup", "on-boot");
     assert!(error_of(&event).contains("unknown activation"));
+  }
+
+  const BUILD: &str = r#"
+[build]
+command = "cargo"
+args = ["build", "--release"]
+watch = ["src", "Cargo.toml"]
+"#;
+
+  #[test]
+  fn reads_and_checks_the_build() {
+    assert_eq!(parse_text(VALID).expect("valid").build, None);
+    let manifest = parse_text(&format!("{VALID}{BUILD}")).expect("valid");
+    assert_eq!(
+      manifest.build,
+      Some(Build {
+        command: "cargo".into(),
+        args: vec!["build".into(), "--release".into()],
+        watch: vec!["src".into(), "Cargo.toml".into()],
+      })
+    );
+    let bad = |from: &str, to: &str| error_of(&format!("{VALID}{}", BUILD.replacen(from, to, 1)));
+    assert!(bad("\"cargo\"", "\" \"").contains("build: command"));
+    assert!(bad("\"Cargo.toml\"", "\"src/[\"").contains("build: watch"));
+    assert!(bad("\"Cargo.toml\"", "\"\"").contains("watch patterns"));
+    assert!(bad("watch", "shell").contains("unknown field"));
+  }
+
+  #[test]
+  fn the_build_is_read_when_the_rest_is_invalid() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    std::fs::write(dir.path().join(MANIFEST_FILE), format!("{VALID}{BUILD}")).expect("write");
+    // The entry point is what the build makes.
+    assert!(load(dir.path(), &editor(), true).is_err());
+    let plan = read_build_plan(dir.path())
+      .expect("readable")
+      .expect("a build");
+    assert_eq!(plan.id.as_deref(), Some("example.tidy"));
+    assert_eq!(plan.name.as_deref(), Some("Tidy"));
+    assert_eq!(plan.entrypoint, Some(dir.path().join("tidy.wasm")));
+    assert_eq!(plan.build.command, "cargo");
+
+    std::fs::write(dir.path().join(MANIFEST_FILE), VALID).expect("write");
+    assert_eq!(read_build_plan(dir.path()).expect("readable"), None);
+    std::fs::write(dir.path().join(MANIFEST_FILE), "[build]\nargs = []\n").expect("write");
+    let error = read_build_plan(dir.path()).expect_err("no command");
+    assert!(error.to_string().contains("build:"), "{error}");
+    std::fs::write(dir.path().join(MANIFEST_FILE), "id = ").expect("write");
+    assert!(read_build_plan(dir.path()).is_err(), "not TOML");
   }
 
   #[test]

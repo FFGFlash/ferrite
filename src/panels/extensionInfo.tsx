@@ -5,6 +5,7 @@
 import { Blocks } from 'lucide-react'
 import type { MenuEntry } from '../components/contextMenuState'
 import {
+  buildExtension,
   restartExtension,
   setExtensionEnabled,
   type ExtensionState,
@@ -123,6 +124,35 @@ export function restart(extension: ExtensionStatus): void {
   act('Restarting the extension', () => restartExtension(extension.id))
 }
 
+/** Builds a development extension that has a `[build]`, and loads it after. */
+export function build(extension: ExtensionStatus): void {
+  act('Building the extension', () => buildExtension(extension.path))
+}
+
+/** The build's state in a few words, or `null` when there's nothing to say. */
+export function buildLabel(extension: ExtensionStatus): string | null {
+  switch (extension.build?.state) {
+    case 'building':
+      return 'Building…'
+    case 'failed':
+      return 'Build failed'
+    default:
+      return null
+  }
+}
+
+/** Builds it, and shows the build's output: for development extensions with a `[build]`. */
+function buildEntries(extension: ExtensionStatus): MenuEntry[] {
+  const status = extension.build
+  if (!status) {
+    return []
+  }
+  return [
+    { label: 'Build', run: () => build(extension) },
+    { label: 'Show Build Log', run: () => showOutput(extensionChannel(status.log)) },
+  ]
+}
+
 /** Updating, choosing another release, and uninstalling: for installed extensions. */
 function installEntries(extension: ExtensionStatus): MenuEntry[] {
   if (extension.development) {
@@ -153,6 +183,7 @@ export function manageEntries(extension: ExtensionStatus, onPage = false): MenuE
   if (extension.state === 'invalid') {
     return [
       ...(onPage ? [] : [{ label: 'Show Details', run: () => openExtension(extension.id) }]),
+      ...buildEntries(extension),
       { label: 'Copy Folder Path', run: () => copy(extension.path) },
       ...installEntries(extension),
     ]
@@ -162,6 +193,7 @@ export function manageEntries(extension: ExtensionStatus, onPage = false): MenuE
     ...(onPage ? [] : [{ label: 'Show Details', run: () => openExtension(extension.id) }, null]),
     { label: disabled ? 'Enable' : 'Disable', run: () => toggleEnabled(extension) },
     ...(canRestart(extension) ? [{ label: 'Restart', run: () => restart(extension) }] : []),
+    ...(extension.build ? [{ label: 'Build', run: () => build(extension) }] : []),
     null,
     ...(extension.hasSettings
       ? [{ label: 'Settings', run: () => openSettings(extensionQuery(extension.id)) }]

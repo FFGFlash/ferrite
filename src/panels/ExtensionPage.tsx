@@ -26,6 +26,7 @@ import { extensionQuery, openSettings } from '../state/settings'
 import { useStore } from '../state/store'
 import {
   ExtensionIcon,
+  build,
   canRestart,
   contributionList,
   duration,
@@ -73,6 +74,51 @@ function useReadme(extension: ExtensionStatus | undefined): Readme {
     }
   }, [id, has, key])
   return readme
+}
+
+/** A development extension's build: how it went, building again, and its output. */
+function BuildSection({ extension }: { extension: ExtensionStatus }) {
+  const status = extension.build
+  if (!status) {
+    return null
+  }
+  const took = status.durationMs === null ? '' : ` in ${duration(status.durationMs)}`
+  const summary =
+    status.state === 'building'
+      ? 'Building…'
+      : status.state === 'failed'
+        ? `Build failed${took}: ${status.error ?? 'see its log'}`
+        : `Built${took}`
+  return (
+    <div className="extension-page__build">
+      <p
+        className="extension-page__state"
+        data-state={status.state === 'failed' ? 'failed' : undefined}
+        role={status.state === 'failed' ? 'alert' : 'status'}
+      >
+        {status.state === 'failed' && (
+          <CircleAlert size={14} strokeWidth={1.75} aria-hidden="true" />
+        )}
+        {summary}
+        <span className="extension-page__muted">
+          {' '}
+          · rebuilt and reloaded when a file in its folder changes
+        </span>
+      </p>
+      <div className="extension-page__actions">
+        <button type="button" className="extension-page__button" onClick={() => build(extension)}>
+          Build
+        </button>
+        <button
+          type="button"
+          className="extension-page__button"
+          onClick={() => showOutput(extensionChannel(status.log))}
+        >
+          Show Build Log
+        </button>
+      </div>
+    </div>
+  )
 }
 
 export function ExtensionPage({ id }: { id: string }) {
@@ -191,6 +237,7 @@ export function ExtensionPage({ id }: { id: string }) {
               </button>
             </div>
           )}
+          {extension.build && <BuildSection extension={extension} />}
           {extension.error && (
             <p className="extension-page__error" role="alert">
               {extension.error}

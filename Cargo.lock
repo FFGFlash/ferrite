@@ -1387,6 +1387,7 @@ dependencies = [
  "flareite-text",
  "flareite-workspace",
  "getrandom 0.4.3",
+ "ignore",
  "pulldown-cmark",
  "semver",
  "serde",

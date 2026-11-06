@@ -11,6 +11,12 @@ api_version = "1"
 entrypoint = "../target/wasm32-unknown-unknown/release/tidy.wasm"
 activation = ["on-startup"]
 
+# Built in place while it's a development extension: when it's loaded, and
+# again whenever a file in this folder changes (see docs/extensions.md).
+[build]
+command = "cargo"
+args = ["build", "--release", "--package", "tidy"]
+
 [engines]
 flareite = ">=0.1.0"
 

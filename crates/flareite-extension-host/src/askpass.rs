@@ -243,6 +243,7 @@ mod tests {
         editor_version: semver::Version::new(0, 1, 0),
         extensions_dir: None,
         development: Vec::new(),
+        builds: false,
         permissions_file: None,
         settings: BTreeMap::new(),
         programs: BTreeMap::new(),

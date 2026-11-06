@@ -127,7 +127,8 @@ Responsiveness is a requirement, so changes on hot paths need numbers.
 - **Your files.** The app reads and writes your real settings and session state (see
   [Settings](README.md#settings)). Back them up before testing changes that write them.
 - **Development extensions.** `extensions.development` in `settings.toml` loads extensions from
-  their folders.
+  their folders. Those with a `[build]` in their manifest (Tidy and TODOs) are rebuilt and
+  reloaded when a file in their folder changes.
 - **Remote debugging.** To drive the WebView from scripts on Windows, set
   `WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS=--remote-debugging-port=9333` before launching. Then
   connect with the Chrome DevTools Protocol, for example to read the accessibility tree or

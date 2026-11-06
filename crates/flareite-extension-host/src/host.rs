@@ -315,6 +315,8 @@ pub struct Shared {
   pub storage: Storage,
   /// The workbench's theme, for webview pages.
   webview_theme: RwLock<WebviewTheme>,
+  /// Development extensions' builds.
+  builders: crate::development::Builders,
   state: Mutex<State>,
 }
 
@@ -1477,6 +1479,7 @@ impl ExtensionHost {
       memory,
       storage: Storage::new(options.storage_dir.clone()),
       webview_theme: RwLock::new(WebviewTheme::default()),
+      builders: crate::development::Builders::default(),
       state: Mutex::new(State {
         options,
         decisions,
@@ -1588,6 +1591,122 @@ impl ExtensionHost {
       outbox.push(Notification::ExtensionsChanged);
     }
     outbox.send(self.shared.embedder.as_ref());
+    self.sync_builders();
+  }
+
+  pub(crate) fn from_shared(shared: Arc<Shared>) -> Self {
+    Self { shared }
+  }
+
+  /// Starts, replaces, and stops development extensions' builders to match
+  /// their manifests' `[build]`s. Reads the disk.
+  fn sync_builders(&self) {
+    let dirs = {
+      let state = self.shared.lock();
+      if state.shutting_down {
+        return;
+      }
+      if state.options.builds {
+        state.options.development.clone()
+      } else {
+        Vec::new()
+      }
+    };
+    let folders = dirs
+      .into_iter()
+      .map(|dir| {
+        let planned = match manifest::read_build_plan(&dir) {
+          Ok(Some(plan)) => crate::development::Planned::Plan(plan),
+          Ok(None) => crate::development::Planned::None,
+          Err(error) => {
+            tracing::debug!(dir = %dir.display(), %error, "can't read the build");
+            crate::development::Planned::Unreadable
+          }
+        };
+        (dir, planned)
+      })
+      .collect();
+    self.shared.builders.sync(&self.shared.me, folders);
+  }
+
+  /// Builds a development extension (its manifest's `[build]`) and loads
+  /// it again after, as when a file in its folder changes. If it's
+  /// building, it builds again after. Returns whether it has a build.
+  pub fn build_development(&self, dir: &Path) -> bool {
+    self.shared.builders.build(dir)
+  }
+
+  /// Loads a development extension's folder again after it was built:
+  /// reads its manifest and restarts it if it was running. Unless
+  /// `changed`, only if it isn't loaded (it may have lacked the entry point
+  /// the build made). Other extensions are left alone, unless the folder
+  /// becomes valid or invalid or changes its id: then all are rediscovered.
+  pub(crate) fn reload_development(&self, dir: &Path, changed: bool) {
+    let editor_version = {
+      let state = self.shared.lock();
+      if state.shutting_down || !state.options.development.iter().any(|d| d == dir) {
+        return;
+      }
+      let loaded = state
+        .extensions
+        .iter()
+        .any(|entry| entry.development && entry.manifest.dir == dir);
+      if loaded && !changed {
+        return;
+      }
+      state.options.editor_version.clone()
+    };
+    let loaded = manifest::load(dir, &editor_version, true);
+    let mut outbox = Outbox::default();
+    {
+      let mut state = self.shared.lock();
+      if state.shutting_down {
+        return;
+      }
+      let index = state
+        .extensions
+        .iter()
+        .position(|entry| entry.development && entry.manifest.dir == dir);
+      match (index, loaded) {
+        (Some(index), Ok(manifest)) if manifest.id == state.extensions[index].manifest.id => {
+          tracing::info!(extension = %manifest.id, version = %manifest.version, "loading the new build");
+          let restart = !matches!(state.extensions[index].run, Run::Idle);
+          Shared::stop(&mut state, index, &mut outbox);
+          let (values, config_errors) = config::resolve(
+            &manifest.configuration,
+            state.options.settings.get(&manifest.id),
+          );
+          let entry = &mut state.extensions[index];
+          entry.manifest = Arc::new(manifest);
+          entry.config = Arc::new(RwLock::new(values));
+          entry.config_errors = config_errors;
+          if restart {
+            self.shared.start(&mut state, index, &mut outbox);
+          }
+          self.start_wanted(&mut state, &mut outbox);
+          state
+            .extensions
+            .sort_by_key(|entry| entry.manifest.name.to_lowercase());
+        }
+        (None, Err(error)) if state.invalid.iter().any(|invalid| invalid.dir == dir) => {
+          tracing::warn!(dir = %dir.display(), %error, "invalid extension");
+          for invalid in &mut state.invalid {
+            if invalid.dir == dir {
+              invalid.error = error.to_string();
+            }
+          }
+        }
+        _ => {
+          drop(state);
+          self.load();
+          return;
+        }
+      }
+      outbox.push(Notification::ExtensionsChanged);
+    }
+    outbox.send(self.shared.embedder.as_ref());
+    // Its `[build]` may have changed.
+    self.sync_builders();
   }
 
   /// Starts idle extensions that activate on startup or for the language
@@ -1617,7 +1736,8 @@ impl ExtensionHost {
       let mut guard = self.shared.lock();
       let state = &mut *guard;
       let reload = state.options.extensions_dir != options.extensions_dir
-        || state.options.development != options.development;
+        || state.options.development != options.development
+        || state.options.builds != options.builds;
       state.options = options;
       for entry in &mut state.extensions {
         let (values, errors) = config::resolve(
@@ -1637,6 +1757,7 @@ impl ExtensionHost {
   }
 
   pub fn statuses(&self) -> Vec<ExtensionStatus> {
+    let builds = self.shared.builders.statuses();
     let state = self.shared.lock();
     let mut statuses: Vec<ExtensionStatus> = state
       .extensions
@@ -1699,6 +1820,10 @@ impl ExtensionHost {
             usage
           },
           stored_bytes: self.shared.storage.usage(&manifest.id),
+          build: builds
+            .get(&manifest.dir)
+            .filter(|_| entry.development)
+            .cloned(),
         }
       })
       .collect();
@@ -1726,6 +1851,10 @@ impl ExtensionHost {
         contributions: crate::Contributions::default(),
         usage: ResourceUsage::default(),
         stored_bytes: 0,
+        build: builds
+          .get(&invalid.dir)
+          .filter(|_| invalid.development)
+          .cloned(),
       }
     }));
     statuses
@@ -2992,6 +3121,7 @@ impl ExtensionHost {
         })
         .collect()
     };
+    self.shared.builders.stop_all();
     for worker in &workers {
       worker.stop(false);
     }

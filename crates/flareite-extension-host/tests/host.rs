@@ -15,8 +15,8 @@ use std::time::{Duration, Instant};
 use flareite_core::{DocumentId, Editor, EditorOp, LanguageChoice};
 use flareite_extension_host::preview::{ImageSource, LinkTarget, PreviewElement};
 use flareite_extension_host::{
-  ConfigValue, Embedder, ExtensionHost, ExtensionState, HostOptions, Limits, Notification,
-  OpenFolder, Permission, PreviewInfo, Severity,
+  BuildState, ConfigValue, Embedder, ExtensionHost, ExtensionState, ExtensionStatus, HostOptions,
+  Limits, Notification, OpenFolder, Permission, PreviewInfo, Severity,
 };
 
 /// Builds the extensions workspace once and returns its output folder.
@@ -295,6 +295,7 @@ fn setup(
       editor_version: semver::Version::new(0, 1, 0),
       extensions_dir: None,
       development: vec![extension],
+      builds: false,
       permissions_file: Some(permissions_file),
       settings,
       programs: BTreeMap::new(),
@@ -1077,6 +1078,7 @@ fn theme_only_extensions_need_no_code() {
     editor_version: semver::Version::new(0, 1, 0),
     extensions_dir: Some(dir.path().to_path_buf()),
     development: Vec::new(),
+    builds: false,
     permissions_file: None,
     settings: BTreeMap::new(),
     programs: BTreeMap::new(),
@@ -1103,6 +1105,150 @@ fn theme_only_extensions_need_no_code() {
   );
 }
 
+/// Polls the host's statuses until one matches `wanted`.
+fn wait_for_status(
+  host: &ExtensionHost,
+  what: &str,
+  wanted: impl Fn(&ExtensionStatus) -> bool,
+) -> ExtensionStatus {
+  let deadline = Instant::now() + Duration::from_secs(30);
+  loop {
+    let statuses = host.statuses();
+    if let Some(status) = statuses.iter().find(|status| wanted(status)) {
+      return status.clone();
+    }
+    assert!(
+      Instant::now() < deadline,
+      "timed out waiting for {what}; got {statuses:#?}"
+    );
+    std::thread::sleep(Duration::from_millis(50));
+  }
+}
+
+#[test]
+fn development_builds_run_when_files_change_and_load_the_result() {
+  let temp = tempfile::tempdir().expect("temp dir");
+  let ext = temp.path().join("ext");
+  std::fs::create_dir(&ext).expect("mkdir");
+  // `rustc` stands in for a build: it's on the PATH wherever this runs.
+  let manifest = |name: &str, args: &str| {
+    format!(
+      "id = \"test.built\"\nname = \"{name}\"\nversion = \"1.0.0\"\napi_version = \"1\"\n\
+       icon = \"icon.svg\"\n\n[build]\ncommand = \"rustc\"\nargs = [{args}]\n"
+    )
+  };
+  std::fs::write(
+    ext.join("extension.toml"),
+    manifest("Built", "\"--version\""),
+  )
+  .expect("write");
+  let built = |status: &ExtensionStatus| {
+    status
+      .build
+      .as_ref()
+      .is_some_and(|build| build.state == BuildState::Succeeded)
+  };
+
+  let fake = Arc::new(Fake::default());
+  let host = ExtensionHost::new(
+    fake.clone(),
+    HostOptions {
+      editor_version: semver::Version::new(0, 1, 0),
+      extensions_dir: None,
+      development: vec![ext.clone()],
+      builds: true,
+      permissions_file: None,
+      settings: BTreeMap::new(),
+      programs: BTreeMap::new(),
+      limits: limits(),
+      storage_dir: None,
+    },
+  );
+  host.load();
+  // Invalid (its icon is missing), but built straight away all the same.
+  let status = wait_for_status(&host, "the first build", built);
+  assert_eq!(status.state, ExtensionState::Invalid);
+  assert_eq!(
+    status.build.as_ref().map(|b| b.log.as_str()),
+    Some("test.built")
+  );
+  assert!(
+    status
+      .build
+      .as_ref()
+      .is_some_and(|b| b.duration_ms.is_some())
+  );
+
+  // A change builds it again, and loads it: it's valid now.
+  std::fs::write(ext.join("icon.svg"), "<svg/>").expect("write");
+  wait_for_status(&host, "the valid extension", |status| {
+    status.state == ExtensionState::Ready && built(status)
+  });
+
+  // Loaded again in place after the manifest changes.
+  std::fs::write(
+    ext.join("extension.toml"),
+    manifest("Renamed", "\"--version\""),
+  )
+  .expect("write");
+  wait_for_status(&host, "the new name", |status| {
+    status.name == "Renamed" && built(status)
+  });
+
+  // A new [build] is used for the next build; its failure is told once.
+  std::fs::write(
+    ext.join("extension.toml"),
+    manifest("Renamed", "\"--no-such-flag\""),
+  )
+  .expect("write");
+  let message = fake.wait_for_message("The build failed");
+  assert!(message.contains("rustc exited with code"), "{message}");
+  let status = wait_for_status(&host, "the failed build", |status| {
+    status
+      .build
+      .as_ref()
+      .is_some_and(|build| build.state == BuildState::Failed)
+  });
+  assert_eq!(
+    status.state,
+    ExtensionState::Ready,
+    "the last good load stays"
+  );
+
+  assert!(host.build_development(&ext));
+  assert!(!host.build_development(temp.path()));
+  host.shutdown();
+}
+
+#[test]
+fn development_builds_only_run_when_asked_for() {
+  let temp = tempfile::tempdir().expect("temp dir");
+  std::fs::write(
+    temp.path().join("extension.toml"),
+    "id = \"test.built\"\nname = \"Built\"\nversion = \"1.0.0\"\napi_version = \"1\"\n\n\
+     [build]\ncommand = \"rustc\"\nargs = [\"--version\"]\n",
+  )
+  .expect("write");
+  let host = ExtensionHost::new(
+    Arc::new(Fake::default()),
+    HostOptions {
+      editor_version: semver::Version::new(0, 1, 0),
+      extensions_dir: None,
+      development: vec![temp.path().to_path_buf()],
+      builds: false,
+      permissions_file: None,
+      settings: BTreeMap::new(),
+      programs: BTreeMap::new(),
+      limits: limits(),
+      storage_dir: None,
+    },
+  );
+  host.load();
+  assert_eq!(host.statuses()[0].state, ExtensionState::Ready);
+  assert_eq!(host.statuses()[0].build, None);
+  assert!(!host.build_development(temp.path()));
+}
+
 #[test]
 fn the_icons_example_contributes_an_icon_theme() {
   let example = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../extensions/icons");
@@ -1111,6 +1257,7 @@ fn the_icons_example_contributes_an_icon_theme() {
     editor_version: semver::Version::new(0, 1, 0),
     extensions_dir: None,
     development: vec![example],
+    builds: false,
     permissions_file: None,
     settings: BTreeMap::new(),
     programs: BTreeMap::new(),
@@ -1156,6 +1303,7 @@ fn language_extensions_load_and_declare_their_languages_and_servers() {
     editor_version: semver::Version::new(0, 1, 0),
     extensions_dir: None,
     development: folders.iter().map(|folder| examples.join(folder)).collect(),
+    builds: false,
     permissions_file: None,
     settings: BTreeMap::new(),
     programs: BTreeMap::new(),
@@ -1230,6 +1378,7 @@ fn a_language_extension_contributes_languages_and_servers_once_allowed() {
     editor_version: semver::Version::new(0, 1, 0),
     extensions_dir: None,
     development: vec![example.clone()],
+    builds: false,
     permissions_file: Some(dir.path().join("permissions.json")),
     settings: BTreeMap::new(),
     programs: BTreeMap::new(),

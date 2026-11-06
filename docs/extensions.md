@@ -78,9 +78,11 @@ To load the result in Flareite:
 4. Open a file with trailing spaces: they are underlined, and **Tidy: Trim Trailing Whitespace**
    removes them.
 
-After rebuilding an extension, click **Restart** in the Extensions view (`Ctrl+Shift+X`) to load
-the new build. To pick up new or removed extensions, use **Extensions: Reload Extensions**.
-There's no need to rebuild or restart Flareite.
+Tidy's manifest has a [`[build]`](#building-as-you-edit), so from then on Flareite rebuilds it
+whenever a file in its folder changes, and loads the new build: edit `src/lib.rs`, save, and the
+change is running a moment later. An extension without one is rebuilt by hand; click **Restart**
+in the Extensions view (`Ctrl+Shift+X`) to load the new build. To pick up new or removed
+extensions, use **Extensions: Reload Extensions**. There's no need to restart Flareite.
 
 ## Anatomy of an extension
 
@@ -183,6 +185,41 @@ and `markdown` in the official extensions.
 **Entry point.** An installed extension's entry point must be inside its folder. A development
 extension may point elsewhere, such as Tidy's
 `../target/wasm32-unknown-unknown/release/tidy.wasm`. The file can be at most 32 MiB.
+
+### Building as you edit
+
+A development extension can say how it's built, and Flareite builds it in place: when it's loaded
+(at startup, or when you add its folder), and again whenever a file in its folder changes. After a
+build succeeds, the extension is loaded again with its manifest read anew, and restarted if it was
+running. Other extensions are left as they are.
+
+```toml
+[build]
+command = "cargo"                 # a program on the PATH, or a path relative to this folder
+args = ["build", "--release", "--package", "tidy"]
+watch = ["src", "Cargo.toml"]     # optional: which changes start a build
+```
+
+- **Only for development extensions.** An installed extension may keep its `[build]` (it's the
+  same manifest), but it never runs. Builds run with your environment and without a console
+  window, in the extension's folder, and must exit: a watch mode (`cargo watch`, `tsc --watch`)
+  never finishes. Versions of Flareite from before `[build]` existed reject it as an unknown
+  field, so a published extension that keeps it can't be installed in them.
+- **What starts a build.** Any file in the folder, except in `.git`, ignored by a `.gitignore`
+  (the folder's own, and its parents' up to the repository's root), or the entry point itself,
+  so the build's own output doesn't start another. `watch` narrows that to the files it matches:
+  a pattern without a `/` matches a file or folder name at any depth, one with a `/` the path
+  from the extension's folder, like `files.exclude`. Editing the `[build]` itself is used by
+  the next build. `.gitignore` files are read when the folder starts being watched.
+- **One at a time.** Changes made while it builds start one more build after it, not one each,
+  and don't stop it. Builds aren't timed out.
+- **Even when invalid.** The `[build]` is read even when the rest of the manifest is invalid, so
+  a fresh checkout without its `.wasm` builds, then loads. The first build after starting only
+  loads the extension again if it changed the entry point, or the extension wasn't loaded.
+- **Seeing it.** The build's output goes to the extension's log (**Show Build Log**). The
+  Extensions view shows a build that's running or failed, and the extension's page how the last
+  one went, with **Build** to run one now. A failure is announced once, until a build succeeds;
+  the last good build stays loaded.
 
 **Hidden commands.** A command with `hidden = true` is left out of the command palette, for
 commands run only from view items or other contributions.

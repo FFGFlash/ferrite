@@ -270,6 +270,7 @@ pub fn run() {
       extensions::extension_set_permissions,
       extensions::extension_set_enabled,
       extensions::extension_restart,
+      extensions::extension_build,
       extensions::extension_add_development,
       extension_install::extension_releases,
       extension_install::extension_install,

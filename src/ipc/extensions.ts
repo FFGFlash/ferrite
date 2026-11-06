@@ -480,6 +480,21 @@ export interface ExtensionStatus {
   usage: ResourceUsage
   /** Bytes it stores (`clearExtensionStorage`). */
   storedBytes: number
+  /** Its most recent build, if it's a development extension with a `[build]`. */
+  build: BuildStatus | null
+}
+
+export type BuildState = 'building' | 'succeeded' | 'failed'
+
+/** A development extension's build (`buildExtension`). */
+export interface BuildStatus {
+  state: BuildState
+  /** Why it failed. */
+  error: string | null
+  /** How long the last finished build took. */
+  durationMs: number | null
+  /** The extension id whose log has the build's output. */
+  log: string
 }
 
 /** What an extension has used during this session. */
@@ -621,6 +636,9 @@ export const setExtensionPermissions = (id: string, granted: Permission[]) =>
 export const setExtensionEnabled = (id: string, enabled: boolean) =>
   call<void>('extension_set_enabled', { id, enabled })
 export const restartExtension = (id: string) => call<void>('extension_restart', { id })
+/** Builds a development extension (by its folder) and loads the result. */
+export const buildExtension = (path: string) => call<void>('extension_build', { path })
+
 /** Asks for a folder and loads it as a development extension. */
 export const addDevelopmentExtension = () => call<string | null>('extension_add_development')
 

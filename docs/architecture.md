@@ -678,6 +678,13 @@ connects it to the editor, settings, and frontend. The developer guide is
   `extensions.development`, loaded in place. Discovery and manifest validation happen on a
   background thread at startup and on **Reload Extensions**. Invalid manifests are listed with
   their error.
+- **Development builds.** A development extension whose manifest has a `[build]` gets a builder
+  (`development.rs`): a watcher on its folder (skipping `.git`, `.gitignore`d files, and the entry
+  point) and a thread that runs the build once when watching starts and again after changes,
+  coalescing changes made during a build into one more. Output goes to the extension's log. A
+  successful build reloads just that extension (`reload_development`), or rediscovers all of
+  them when it becomes valid or invalid
+  ([ADR 0037](adr/0037-building-development-extensions.md)).
 - **Permissions.** An extension that requests permissions the user hasn't decided about isn't
   started; the frontend asks with a notification. Effective permissions (requested ∩ granted)
   are passed to `activate` and checked on every host call.

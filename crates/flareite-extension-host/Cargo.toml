@@ -13,6 +13,7 @@ flareite-process = { workspace = true }
 flareite-text = { workspace = true }
 flareite-workspace = { workspace = true }
 getrandom = { workspace = true }
+ignore = { workspace = true }
 pulldown-cmark = { workspace = true }
 semver = { workspace = true }
 serde = { workspace = true }

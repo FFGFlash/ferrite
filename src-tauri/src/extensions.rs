@@ -238,6 +238,9 @@ impl Embedder for AppEmbedder {
         crate::editor::quick_diff::track_open(&self.app, &[]);
         AppEvent::ExtensionsChanged
       }
+      // Only the Extensions view shows it; the new build's load says
+      // ExtensionsChanged itself.
+      Notification::BuildChanged => AppEvent::ExtensionsChanged,
       Notification::ExtensionFailed { id, name, reason } => {
         AppEvent::ExtensionFailed { id, name, reason }
       }
@@ -349,6 +352,7 @@ fn options(app: &AppHandle, settings: &Settings) -> HostOptions {
     } else {
       Vec::new()
     },
+    builds: true,
     permissions_file: dir.map(|dir| dir.join(PERMISSIONS_FILE)),
     settings: settings.extensions.settings.clone(),
     programs: settings.extensions.programs.clone(),
@@ -371,6 +375,7 @@ pub fn init(app: &AppHandle, load: bool) {
     options.extensions_dir = None;
     options.permissions_file = None;
     options.development = bench.languages().to_vec();
+    options.builds = false;
     options.settings.clear();
     options.storage_dir = None;
   }
@@ -954,6 +959,23 @@ pub async fn extensions_reload(app: AppHandle) -> Result<(), CommandError> {
   })
   .await
   .map_err(CommandError::internal)?
+}
+
+/// Builds a development extension (`path`: its folder) with its manifest's
+/// `[build]`, and loads the result. Its status shows how it went.
+#[tauri::command]
+pub fn extension_build(
+  state: State<'_, ExtensionsState>,
+  path: String,
+) -> Result<(), CommandError> {
+  if host(&state)?.build_development(Path::new(&path)) {
+    Ok(())
+  } else {
+    Err(CommandError::new(
+      "extensionBuild",
+      "This extension has no [build] in its manifest, or isn't a development extension.",
+    ))
+  }
 }
 
 /// Asks for an extension folder and adds it to `extensions.development`

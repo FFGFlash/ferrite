@@ -13,7 +13,14 @@ import {
 } from '../state/extensionInstall'
 import { extensionsStore, openExtension } from '../state/extensions'
 import { useStore } from '../state/store'
-import { ExtensionIcon, duration, manageEntries, stateLabels, troubled } from './extensionInfo'
+import {
+  ExtensionIcon,
+  buildLabel,
+  duration,
+  manageEntries,
+  stateLabels,
+  troubled,
+} from './extensionInfo'
 import './ExtensionsPanel.css'
 
 /**
@@ -172,12 +179,16 @@ export function rowTooltip(extension: ExtensionStatus): string {
     extension.usage.activationMs === null
       ? ''
       : ` · started in ${duration(extension.usage.activationMs)}`
+  const build = extension.build
   return [
     title,
     by,
     extension.description,
     `${stateLabels[extension.state]}${started}`,
     extension.error ?? '',
+    build?.state === 'failed'
+      ? `Build failed: ${build.error ?? ''}`
+      : (buildLabel(extension) ?? ''),
   ]
     .filter(Boolean)
     .join('\n')
@@ -191,12 +202,18 @@ function ExtensionRow({ extension }: { extension: ExtensionStatus }) {
     event.preventDefault()
     showMenu(event.clientX, event.clientY)
   }
-  const stateText =
+  const shownState =
     extension.state === 'active' || extension.state === 'ready'
       ? null
       : stateLabels[extension.state]
+  const stateText = [buildLabel(extension), shownState].filter(Boolean).join(' · ') || null
+  const buildFailed = extension.build?.state === 'failed'
   return (
-    <li className="extension-row" data-state={extension.state} onContextMenu={onContextMenu}>
+    <li
+      className="extension-row"
+      data-state={buildFailed && !troubled(extension.state) ? 'failed' : extension.state}
+      onContextMenu={onContextMenu}
+    >
       <button
         type="button"
         className="extension-row__open"
@@ -228,7 +245,7 @@ function ExtensionRow({ extension }: { extension: ExtensionStatus }) {
             <span className="extension-row__author">{extension.author ?? extension.id}</span>
             {stateText && (
               <span className="extension-row__state">
-                {troubled(extension.state) && (
+                {(troubled(extension.state) || buildFailed) && (
                   <CircleAlert size={12} strokeWidth={1.75} aria-hidden="true" />
                 )}
                 {stateText}

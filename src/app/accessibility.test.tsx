@@ -102,6 +102,7 @@ describe('accessibility (axe)', () => {
           quickDiff: null,
         },
         storedBytes: 0,
+        build: null,
         usage: {
           busyMs: 12,
           calls: 3,

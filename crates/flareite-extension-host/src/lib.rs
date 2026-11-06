@@ -27,6 +27,7 @@ mod api;
 pub mod askpass;
 mod config;
 pub mod contributions;
+mod development;
 pub mod documents;
 mod files;
 mod host;
@@ -71,7 +72,7 @@ pub use config::{ConfigProperty, ConfigType, ConfigValue};
 pub use contributions::Contributions;
 pub use files::{MAX_FILE_BYTES, MAX_LISTED_FILES};
 pub use host::{CommandTicket, ExtensionHost, MAX_WATCHES, viewer_id};
-pub use manifest::{MANIFEST_FILE, Manifest, ManifestError};
+pub use manifest::{Build, BuildPlan, MANIFEST_FILE, Manifest, ManifestError};
 pub use marks::{ExtensionMarks, FileMark};
 pub use permissions::{Decision, Permission};
 pub use preview::{PreviewContent, PreviewInfo};
@@ -153,6 +154,9 @@ pub enum Notification {
   DiagnosticsChanged(flareite_core::DocumentId),
   /// Extensions were loaded, started, stopped, or changed state.
   ExtensionsChanged,
+  /// A development extension's build started or finished
+  /// ([`ExtensionStatus::build`]).
+  BuildChanged,
   /// An extension failed and was stopped.
   ExtensionFailed {
     id: String,
@@ -443,6 +447,9 @@ pub struct HostOptions {
   pub extensions_dir: Option<PathBuf>,
   /// Development extensions: folders with a manifest, loaded in place.
   pub development: Vec<PathBuf>,
+  /// Whether development extensions' `[build]`s run: when they're loaded,
+  /// and whenever a file in their folders changes.
+  pub builds: bool,
   /// Where the user's permission decisions are kept.
   pub permissions_file: Option<PathBuf>,
   /// User configuration, by extension id.
@@ -505,6 +512,30 @@ pub enum ExtensionState {
   Invalid,
   /// Contributes only data (themes, languages); there is no code to run.
   Ready,
+}
+
+/// Where a development extension's build is.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum BuildState {
+  Building,
+  Succeeded,
+  Failed,
+}
+
+/// A development extension's build (its manifest's `[build]`), most
+/// recently.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BuildStatus {
+  pub state: BuildState,
+  /// Why it failed.
+  pub error: Option<String>,
+  /// How long the last finished build took.
+  pub duration_ms: Option<u64>,
+  /// The extension id whose log has the build's output: the manifest's id,
+  /// or the folder's path when it has none.
+  pub log: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -574,4 +605,7 @@ pub struct ExtensionStatus {
   pub usage: ResourceUsage,
   /// Bytes it stores ([`ExtensionHost::clear_storage`]).
   pub stored_bytes: u64,
+  /// Its build, if it's a development extension with one
+  /// ([`ExtensionHost::build_development`]).
+  pub build: Option<BuildStatus>,
 }

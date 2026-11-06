@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ExtensionStatus } from '../ipc/extensions'
 
 vi.mock('../ipc/extensions', () => ({
+  buildExtension: vi.fn(() => Promise.resolve()),
   restartExtension: vi.fn(() => Promise.resolve()),
   setExtensionEnabled: vi.fn(() => Promise.resolve()),
   setExtensionPermissions: vi.fn(() => Promise.resolve()),
@@ -78,6 +79,7 @@ const tidy: ExtensionStatus = {
     quickDiff: null,
   },
   storedBytes: 0,
+  build: null,
   usage: {
     busyMs: 3.42,
     calls: 12,
@@ -265,6 +267,29 @@ describe('ExtensionsPanel', () => {
     expect(contextMenuStore.get()?.entries[0]?.label).toBe('Show Details')
   })
 
+  it("shows a development extension's failed build, and offers building it", async () => {
+    const user = userEvent.setup()
+    const failed: ExtensionStatus = {
+      ...tidy,
+      build: {
+        state: 'failed',
+        error: 'cargo exited with code 101',
+        durationMs: 900,
+        log: 'example.tidy',
+      },
+    }
+    extensionsStore.set([failed])
+    render(<ExtensionsPanel />)
+    const row = screen.getByRole('button', { name: 'Tidy, Build failed' })
+    expect(row).toHaveTextContent('Build failed')
+    expect(rowTooltip(failed)).toContain('Build failed: cargo exited with code 101')
+    await user.click(screen.getByRole('button', { name: 'Manage Tidy' }))
+    const entries = contextMenuStore.get()?.entries ?? []
+    expect(entries.map(entry => entry?.label ?? null)).toContain('Build')
+    await act(async () => entries.find(entry => entry?.label === 'Build')?.run())
+    expect(ipc.buildExtension).toHaveBeenCalledWith('/ext/tidy')
+  })
+
   it('says in the tooltip why an extension stopped', () => {
     expect(rowTooltip({ ...tidy, state: 'failed', error: 'trap: unreachable' })).toContain(
       'Stopped · started in 42 ms\ntrap: unreachable',
@@ -318,6 +343,39 @@ describe('ExtensionPage', () => {
     expect(ipc.setExtensionEnabled).toHaveBeenCalledWith('example.tidy', false)
     await user.click(screen.getByRole('button', { name: 'Restart' }))
     expect(ipc.restartExtension).toHaveBeenCalledWith('example.tidy')
+  })
+
+  it("shows a development extension's build, builds it, and shows its log", async () => {
+    const user = userEvent.setup()
+    extensionsStore.set([
+      {
+        ...tidy,
+        build: { state: 'succeeded', error: null, durationMs: 1400, log: 'example.tidy' },
+      },
+    ])
+    render(<ExtensionPage id="example.tidy" />)
+    expect(screen.getByRole('status')).toHaveTextContent('Built in 1.4 s')
+    await user.click(screen.getByRole('button', { name: 'Build' }))
+    expect(ipc.buildExtension).toHaveBeenCalledWith('/ext/tidy')
+    expect(screen.getByRole('button', { name: 'Show Build Log' })).toBeEnabled()
+  })
+
+  it('offers building an invalid development extension, which may lack its build output', async () => {
+    const user = userEvent.setup()
+    extensionsStore.set([
+      {
+        ...broken,
+        development: true,
+        path: '/ext/broken',
+        error: 'could not read /ext/broken/broken.wasm',
+        build: { state: 'building', error: null, durationMs: null, log: 'example.broken' },
+      },
+    ])
+    render(<ExtensionPage id="/ext/broken" />)
+    expect(screen.getByRole('status')).toHaveTextContent('Building…')
+    expect(screen.queryByRole('button', { name: 'Disable' })).not.toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Build' }))
+    expect(ipc.buildExtension).toHaveBeenCalledWith('/ext/broken')
   })
 
   it("shows a broken extension's problem, and that it has no README", () => {

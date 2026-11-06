@@ -11,6 +11,12 @@ api_version = "1"
 entrypoint = "../target/wasm32-unknown-unknown/release/todos.wasm"
 activation = ["on-startup"]
 
+# Built in place while it's a development extension: when it's loaded, and
+# again whenever a file in this folder changes (see docs/extensions.md).
+[build]
+command = "cargo"
+args = ["build", "--release", "--package", "todos"]
+
 [permissions]
 documents_read = true
 documents_write = true
